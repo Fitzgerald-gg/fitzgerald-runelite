@@ -1,0 +1,145 @@
+/*
+ * Copyright (c) 2026, Fitzgerald.gg
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the conditions of the BSD 2-Clause
+ * License (see LICENSE) are met.
+ */
+package gg.fitzgerald.plugin;
+
+import com.google.gson.JsonObject;
+import javax.inject.Inject;
+import javax.inject.Singleton;
+import net.runelite.api.Client;
+import net.runelite.api.Quest;
+import net.runelite.api.gameval.VarbitID;
+
+/**
+ * Point-in-time snapshot of the account's achievement state — every quest's
+ * progress, each achievement-diary tier's completion, and combat-achievement
+ * points and per-tier status — pushed whole on the counter loop whenever it
+ * differs from the last server-acknowledged copy. Nothing is diffed or
+ * interpreted here: raw enum names and varbit values travel as-is and the
+ * server derives what it wants (thin client, fat server), so a change in how
+ * CA tiers are graded needs no plugin release.
+ *
+ * <p>All reads happen on the client thread via {@link #snapshot()}; the
+ * change gate compares canonical JSON, so an untouched account costs one
+ * string comparison per push interval.
+ */
+@Singleton
+public class AchievementSync
+{
+	private static final String[] DIARY_TIERS = {"easy", "medium", "hard", "elite"};
+
+	// Every diary whose four tiers all have completion varbits, easy→elite per
+	// row. Karamja is the game's oldest diary and predates the varbit system —
+	// its easy/medium/hard claim state lives in undocumented varps — so only
+	// its elite tier is snapshotted (appended explicitly in snapshot()); the
+	// DIARY chat capture still records those completions the moment they happen.
+	private static final String[] DIARY_REGIONS = {
+		"ardougne", "desert", "falador", "fremennik", "kandarin",
+		"kourend", "lumbridge", "morytania", "varrock", "western", "wilderness",
+	};
+	private static final int[][] DIARY_VARBITS = {
+		{VarbitID.ARDOUGNE_DIARY_EASY_COMPLETE, VarbitID.ARDOUGNE_DIARY_MEDIUM_COMPLETE,
+			VarbitID.ARDOUGNE_DIARY_HARD_COMPLETE, VarbitID.ARDOUGNE_DIARY_ELITE_COMPLETE},
+		{VarbitID.DESERT_DIARY_EASY_COMPLETE, VarbitID.DESERT_DIARY_MEDIUM_COMPLETE,
+			VarbitID.DESERT_DIARY_HARD_COMPLETE, VarbitID.DESERT_DIARY_ELITE_COMPLETE},
+		{VarbitID.FALADOR_DIARY_EASY_COMPLETE, VarbitID.FALADOR_DIARY_MEDIUM_COMPLETE,
+			VarbitID.FALADOR_DIARY_HARD_COMPLETE, VarbitID.FALADOR_DIARY_ELITE_COMPLETE},
+		{VarbitID.FREMENNIK_DIARY_EASY_COMPLETE, VarbitID.FREMENNIK_DIARY_MEDIUM_COMPLETE,
+			VarbitID.FREMENNIK_DIARY_HARD_COMPLETE, VarbitID.FREMENNIK_DIARY_ELITE_COMPLETE},
+		{VarbitID.KANDARIN_DIARY_EASY_COMPLETE, VarbitID.KANDARIN_DIARY_MEDIUM_COMPLETE,
+			VarbitID.KANDARIN_DIARY_HARD_COMPLETE, VarbitID.KANDARIN_DIARY_ELITE_COMPLETE},
+		{VarbitID.KOUREND_DIARY_EASY_COMPLETE, VarbitID.KOUREND_DIARY_MEDIUM_COMPLETE,
+			VarbitID.KOUREND_DIARY_HARD_COMPLETE, VarbitID.KOUREND_DIARY_ELITE_COMPLETE},
+		{VarbitID.LUMBRIDGE_DIARY_EASY_COMPLETE, VarbitID.LUMBRIDGE_DIARY_MEDIUM_COMPLETE,
+			VarbitID.LUMBRIDGE_DIARY_HARD_COMPLETE, VarbitID.LUMBRIDGE_DIARY_ELITE_COMPLETE},
+		{VarbitID.MORYTANIA_DIARY_EASY_COMPLETE, VarbitID.MORYTANIA_DIARY_MEDIUM_COMPLETE,
+			VarbitID.MORYTANIA_DIARY_HARD_COMPLETE, VarbitID.MORYTANIA_DIARY_ELITE_COMPLETE},
+		{VarbitID.VARROCK_DIARY_EASY_COMPLETE, VarbitID.VARROCK_DIARY_MEDIUM_COMPLETE,
+			VarbitID.VARROCK_DIARY_HARD_COMPLETE, VarbitID.VARROCK_DIARY_ELITE_COMPLETE},
+		{VarbitID.WESTERN_DIARY_EASY_COMPLETE, VarbitID.WESTERN_DIARY_MEDIUM_COMPLETE,
+			VarbitID.WESTERN_DIARY_HARD_COMPLETE, VarbitID.WESTERN_DIARY_ELITE_COMPLETE},
+		{VarbitID.WILDERNESS_DIARY_EASY_COMPLETE, VarbitID.WILDERNESS_DIARY_MEDIUM_COMPLETE,
+			VarbitID.WILDERNESS_DIARY_HARD_COMPLETE, VarbitID.WILDERNESS_DIARY_ELITE_COMPLETE},
+	};
+
+	private static final String[] CA_TIERS = {
+		"easy", "medium", "hard", "elite", "master", "grandmaster",
+	};
+	private static final int[] CA_TIER_STATUS = {
+		VarbitID.CA_TIER_STATUS_EASY, VarbitID.CA_TIER_STATUS_MEDIUM,
+		VarbitID.CA_TIER_STATUS_HARD, VarbitID.CA_TIER_STATUS_ELITE,
+		VarbitID.CA_TIER_STATUS_MASTER, VarbitID.CA_TIER_STATUS_GRANDMASTER,
+	};
+
+	private final Client client;
+
+	// Canonical JSON of the last snapshot the server acknowledged; the fields
+	// are built in a fixed order, so string equality is a reliable change gate.
+	private String lastSynced;
+
+	@Inject
+	public AchievementSync(Client client)
+	{
+		this.client = client;
+	}
+
+	/** Build the full state snapshot. Client thread only (scripts + varbits). */
+	JsonObject snapshot()
+	{
+		JsonObject quests = new JsonObject();
+		for (Quest quest : Quest.values())
+		{
+			quests.addProperty(quest.getName(), quest.getState(client).name());
+		}
+		JsonObject diaries = new JsonObject();
+		for (int r = 0; r < DIARY_REGIONS.length; r++)
+		{
+			JsonObject region = new JsonObject();
+			for (int t = 0; t < DIARY_TIERS.length; t++)
+			{
+				region.addProperty(DIARY_TIERS[t], client.getVarbitValue(DIARY_VARBITS[r][t]) != 0);
+			}
+			diaries.add(DIARY_REGIONS[r], region);
+		}
+		JsonObject karamja = new JsonObject();
+		karamja.addProperty("elite", client.getVarbitValue(VarbitID.KARAMJA_DIARY_ELITE_COMPLETE) != 0);
+		diaries.add("karamja", karamja);
+
+		JsonObject combat = new JsonObject();
+		combat.addProperty("points", client.getVarbitValue(VarbitID.CA_POINTS));
+		JsonObject tiers = new JsonObject();
+		for (int i = 0; i < CA_TIERS.length; i++)
+		{
+			tiers.addProperty(CA_TIERS[i], client.getVarbitValue(CA_TIER_STATUS[i]));
+		}
+		combat.add("tiers", tiers);
+
+		JsonObject root = new JsonObject();
+		root.add("quests", quests);
+		root.add("diaries", diaries);
+		root.add("combat", combat);
+		return root;
+	}
+
+	boolean changedSince(JsonObject snap)
+	{
+		return !snap.toString().equals(lastSynced);
+	}
+
+	/** Record the server's ack, so identical state is not re-sent. */
+	void markSynced(JsonObject snap)
+	{
+		lastSynced = snap.toString();
+	}
+
+	/** Account boundary: the next login must sync afresh under its own name. */
+	void reset()
+	{
+		lastSynced = null;
+	}
+}
