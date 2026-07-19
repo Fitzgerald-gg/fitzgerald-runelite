@@ -1,0 +1,90 @@
+/*
+ * Fitzgerald.gg RuneLite companion plugin — build script.
+ * Modelled on runelite/example-plugin (BSD 2-Clause).
+ */
+plugins {
+	id 'java'
+}
+
+repositories {
+	mavenLocal()
+	maven {
+		url = 'https://repo.runelite.net'
+		content {
+			includeGroupByRegex("net\\.runelite.*")
+		}
+	}
+	mavenCentral()
+}
+
+// `runeLiteVersion` is read from gradle.properties. It defaults to
+// 'latest.release'; the Plugin Hub CI builds against a pinned client, and you
+// can pin it locally by editing gradle.properties if a fresh API breaks you.
+def pluginMainClass = 'gg.fitzgerald.plugin.FitzgeraldPluginTest'
+
+dependencies {
+	compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
+
+	compileOnly 'org.projectlombok:lombok:1.18.30'
+	annotationProcessor 'org.projectlombok:lombok:1.18.30'
+
+	testImplementation 'junit:junit:4.12'
+	testImplementation group: 'net.runelite', name: 'client', version: runeLiteVersion
+	testImplementation group: 'net.runelite', name: 'jshell', version: runeLiteVersion
+}
+
+group = 'gg.fitzgerald'
+
+// Bundle the plugin descriptor into the jar so a dev-mode client can load it
+// from ~/.runelite/sideloaded-plugins (the Plugin Hub reads the repo-root copy
+// separately; `gradle run` uses loadBuiltin and needs neither). Without this
+// the sideloaded jar is discovered but exposes no plugin.
+jar {
+	from('.') {
+		include 'runelite-plugin.properties'
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	options.encoding = 'UTF-8'
+	options.release.set(11)
+}
+
+// `gradle run` launches a dev-mode RuneLite with this plugin side-loaded.
+tasks.register('run', JavaExec) {
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = pluginMainClass
+
+	// macOS + JDK 17: RuneLite's OSXFullScreenAdapter uses the legacy
+	// com.apple.eawt API, which the module system no longer exports to the
+	// unnamed module by default → IllegalAccessError at UI init. Re-export it.
+	jvmArgs "-ea", "--add-exports", "java.desktop/com.apple.eawt=ALL-UNNAMED"
+	args "--developer-mode", "--debug"
+}
+
+// `gradle shadowJar` produces the fat jar you side-load for manual testing.
+tasks.register('shadowJar', Jar) {
+	dependsOn configurations.testRuntimeClasspath
+	manifest {
+		attributes('Main-Class': pluginMainClass, 'Multi-Release': true)
+	}
+
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+	from sourceSets.main.output
+	from sourceSets.test.output
+	from {
+		configurations.testRuntimeClasspath.collect { file ->
+			file.isDirectory() ? file : zipTree(file)
+		}
+	}
+
+	exclude 'META-INF/INDEX.LIST'
+	exclude 'META-INF/*.SF'
+	exclude 'META-INF/*.DSA'
+	exclude 'META-INF/*.RSA'
+	exclude '**/module-info.class'
+
+	group = BasePlugin.BUILD_GROUP
+	archiveClassifier.set('shadow')
+	archiveFileName.set("${rootProject.name}-${project.version}-all.jar")
+}
