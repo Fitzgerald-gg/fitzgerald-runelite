@@ -32,6 +32,7 @@ import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.Player;
+import net.runelite.api.Skill;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
@@ -341,6 +342,12 @@ public class FitzgeraldPlugin extends Plugin
 			{
 				pendingEnrolCheck = true;
 			}
+			// Reflect the switch immediately: clear the "off" prompt when turned on,
+			// restore it when turned off.
+			if ("enabled".equals(key))
+			{
+				refreshPanel();
+			}
 		}
 	}
 
@@ -502,7 +509,8 @@ public class FitzgeraldPlugin extends Plugin
 		enrolledRsn = name;
 
 		log.debug("pushing {} counters for {}", snapshot.size(), name);
-		api.pushStats(config.serverBaseUrl(), token, name, snapshot, cachedAccountType, this::onPushResult);
+		api.pushStats(config.serverBaseUrl(), token, name, snapshot, cachedAccountType,
+			harvestSkills(), this::onPushResult);
 	}
 
 	/**
@@ -630,7 +638,8 @@ public class FitzgeraldPlugin extends Plugin
 		{
 			return;
 		}
-		api.pushStats(config.serverBaseUrl(), cachedToken, cachedName, cachedSnapshot, cachedAccountType, this::onPushResult);
+		api.pushStats(config.serverBaseUrl(), cachedToken, cachedName, cachedSnapshot, cachedAccountType,
+			null, this::onPushResult);   // logout flush: client unreadable, skip skills
 	}
 
 	/**
@@ -700,6 +709,33 @@ public class FitzgeraldPlugin extends Plugin
 		return statStore.pushable();
 	}
 
+	/**
+	 * Per-skill level + XP for the live push, so the site profile reflects current
+	 * stats between daily hiscores snapshots. Keyed by the lowercase skill name to
+	 * match the server's snapshot shape, plus an "overall" total. Client thread only
+	 * (called from pushCurrent) — the skill accessors require it.
+	 */
+	private JsonObject harvestSkills()
+	{
+		JsonObject skills = new JsonObject();
+		for (Skill s : Skill.values())
+		{
+			if (s == Skill.OVERALL)
+			{
+				continue;
+			}
+			JsonObject o = new JsonObject();
+			o.addProperty("level", client.getRealSkillLevel(s));
+			o.addProperty("xp", client.getSkillExperience(s));
+			skills.add(s.name().toLowerCase(), o);
+		}
+		JsonObject overall = new JsonObject();
+		overall.addProperty("level", client.getTotalLevel());
+		overall.addProperty("xp", client.getOverallExperience());
+		skills.add("overall", overall);
+		return skills;
+	}
+
 	// ------------------------------------------------------------------
 	// Panel-invoked actions (may be called off the client thread)
 	// ------------------------------------------------------------------
@@ -751,6 +787,12 @@ public class FitzgeraldPlugin extends Plugin
 	String enrolledRsn()
 	{
 		return enrolledRsn;
+	}
+
+	/** Whether the master "Enabled" switch is on — nothing enrols or pushes until it is. */
+	boolean syncEnabled()
+	{
+		return config.enabled();
 	}
 
 	String statusLine()

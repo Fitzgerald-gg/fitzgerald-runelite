@@ -202,7 +202,8 @@ public class FitzgeraldApiClient
 	}
 
 	public void pushStats(String baseUrl, String token, String name,
-		Map<String, Integer> stats, @Nullable String accountType, @Nullable Consumer<PushResult> onDone)
+		Map<String, Integer> stats, @Nullable String accountType,
+		@Nullable JsonObject skills, @Nullable Consumer<PushResult> onDone)
 	{
 		HttpUrl url = resolve(baseUrl, "api/counters/" + token);
 		if (url == null)
@@ -232,6 +233,13 @@ public class FitzgeraldApiClient
 			}
 		}
 		payload.add("stats", statsObj);
+		// Per-skill level + XP snapshot, so the profile updates live rather than
+		// waiting for the daily hiscores pull. Live-push only (null on the logout
+		// flush, where the client can't be read).
+		if (skills != null && skills.size() > 0)
+		{
+			payload.add("skills", skills);
+		}
 
 		Request request = new Request.Builder()
 			.url(url)

@@ -185,6 +185,20 @@ class FitzgeraldPanel extends PluginPanel
 	{
 		SwingUtilities.invokeLater(() ->
 		{
+			// Off-by-default gate: until the master switch is on, nothing enrols or
+			// pushes, so point the user straight at it instead of a bare "Not enrolled".
+			if (!plugin.syncEnabled())
+			{
+				rsnLabel.setText("Fitzgerald.gg is off");
+				statusLabel.setText("<html>Turn on the <b>Enabled</b> switch in this plugin's "
+					+ "settings to start syncing your stats to your fitzgerald.gg profile.</html>");
+				privacyState.setText("<html>Enable it to enrol and manage privacy.</html>");
+				openPageButton.setEnabled(false);
+				lockButton.setEnabled(false);
+				listButton.setEnabled(false);
+				deleteButton.setEnabled(false);
+				return;
+			}
 			String rsn = plugin.enrolledRsn();
 			boolean enrolled = rsn != null && !rsn.isEmpty();
 			rsnLabel.setText(enrolled
