@@ -1,8 +1,12 @@
 # Fitzgerald.gg — RuneLite companion plugin
 
-A RuneLite plugin that wires your account into **[Fitzgerald.gg](https://fitzgerald.gg)**, a
-personal OSRS profile site. It captures your gameplay natively and syncs it to *your* profile — you
-do **not** need any other plugin installed for it to work.
+A RuneLite plugin that captures your Old School RuneScape gameplay natively — you do **not** need any
+other plugin installed for it to work. It runs in one of two modes:
+
+- **Cloud** (the default) syncs everything to *your* profile on **[Fitzgerald.gg](https://fitzgerald.gg)**,
+  a personal OSRS profile site, so it's viewable and shareable online.
+- **Local** keeps everything on your own computer — nothing is ever sent to any server — and builds a
+  self-contained page you open straight from the side panel. See [Cloud vs Local](#cloud-vs-local).
 
 It records two kinds of thing:
 
@@ -24,16 +28,32 @@ totals rather than resetting.
 
 ## Turning it on
 
-Sync is **off** when you install it. Nothing is enrolled, captured or transmitted
-until you tick **Enabled** in the plugin's settings, and screenshot upload is a
-second, separate opt-in. Until then the plugin sits inert in the sidebar.
+The plugin is **off** when you install it. Nothing is enrolled, captured, transmitted or written
+until you tick **Enabled** in the plugin's settings; screenshot upload is a second, separate opt-in.
+Until then the plugin sits inert in the sidebar. When you enable it, pick a **Mode** — Cloud or
+Local — from the dropdown right below the switch. Cloud is the default.
+
+## Cloud vs Local
+
+| | **Cloud** (default) | **Local** |
+|---|---|---|
+| Where your data goes | Your online profile at `fitzgerald.gg` | Stays on your own computer; nothing is sent |
+| Viewing it | `https://fitzgerald.gg/osrs/<your-rsn>` | A self-contained page under `.runelite/fitzgerald/`, opened with **Open my page** |
+| Enrolment / token | Yes (trust-on-first-use) | None — no account, no token, no network |
+| Item names & prices | Enriched server-side (Grand Exchange + drop rarity) | Priced locally on your client; no rarity/dryness |
+| Screenshots | Optional opt-in, uploaded with events | Not used |
+| History before you enabled | Backfilled from the hiscores server-side | Builds from when you switch Local on |
+
+Switching mode is a dropdown; you can move between them at any time. The rest of this document
+describes **Cloud** mode. In **Local** mode nothing leaves your computer, so the enrolment, privacy
+and "what gets sent" sections below don't apply — the side panel simply offers **Open my page**.
 
 ## What gets sent, and to whom
 
-> **This plugin transmits your player data and screenshots, along with your IP address, to
-> `fitzgerald.gg` — a server operated by the plugin author, not controlled or verified by the
+> **In Cloud mode this plugin transmits your player data and screenshots, along with your IP address,
+> to `fitzgerald.gg` — a server operated by the plugin author, not controlled or verified by the
 > RuneLite developers.** This is disclosed on the Plugin Hub install prompt and here. Nothing is sent
-> anywhere else.
+> anywhere else, and in **Local** mode nothing is sent at all.
 
 - **Destination:** the **Server base URL** (default `https://fitzgerald.gg`, hard-coded; editable
   under *Advanced* only if you self-host). Every request is a plain `POST` to a fixed
@@ -72,14 +92,19 @@ panel to jump there. It works as soon as your first data arrives, and the link i
 
 ## The side panel
 
-Open the Fitzgerald.gg icon in the RuneLite sidebar:
+Open the Fitzgerald.gg icon in the RuneLite sidebar. Its contents depend on the mode.
 
-- shows the **enrolled RSN** and the **last-push status**,
+**Cloud mode** shows:
+
+- the **enrolled RSN** and the **last-push status**,
 - **Push stats now** — force an immediate counter push,
 - **Re-enrol this account** — retry enrolment if it hadn't succeeded yet,
 - **Open my page** — opens `https://fitzgerald.gg/osrs/<your-rsn>`.
 
-### Privacy & data (self-service)
+**Local mode** hides the server-only controls (enrol, push, and the privacy section below), leaving
+just **Open my page**, which writes the latest copy of your local page and opens it in your browser.
+
+### Privacy & data (self-service) — Cloud mode
 
 All authenticated by your account's token — no website account required:
 
@@ -96,10 +121,12 @@ All authenticated by your account's token — no website account required:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| Enabled | **off** | Master switch. Off means no enrol / capture / push — you turn it on. |
-| Capture screenshots | **off** | Attach a screenshot to notable events. Separate opt-in. |
-| Push interval | 5 min | How often lifetime counters are pushed. |
-| Server base URL (Advanced) | `https://fitzgerald.gg` | Only change if self-hosting. |
+| Enabled | **off** | Master switch. Off means no enrol / capture / push / write — you turn it on. |
+| Mode | **Cloud** | Cloud syncs to your fitzgerald.gg profile; Local keeps everything on this computer. |
+| Capture screenshots | **off** | Attach a screenshot to notable events (Cloud mode). Separate opt-in. |
+| Push interval | 5 min | Cloud: how often counters are pushed. Local: how often the on-disk page refreshes. |
+| Cloud base URL (Advanced) | `https://fitzgerald.gg` | Cloud mode only; change only if self-hosting. |
+| Cloud token override (Advanced) | — | Cloud mode only; paste an existing token instead of self-enrolling. |
 
 ## Dependencies
 

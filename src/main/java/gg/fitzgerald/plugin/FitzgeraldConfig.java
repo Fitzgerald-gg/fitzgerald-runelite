@@ -38,12 +38,14 @@ public interface FitzgeraldConfig extends Config
 	@ConfigItem(
 		keyName = "enabled",
 		name = "Enabled",
-		description = "Master switch. When on, this plugin sends your in-game activity "
+		description = "Master switch. When on, this plugin captures your in-game activity "
 			+ "(loot, levels, kill counts, collection log, clues, quests, achievement "
 			+ "diaries, combat achievements, slayer tasks, pets, deaths, group-storage "
-			+ "movements, and — for notable moments — a screenshot) to the Fitzgerald.gg server "
-			+ "(fitzgerald.gg), a third-party server not operated by RuneLite, so it can "
-			+ "appear on your profile. When off, nothing is enrolled, harvested, or pushed.",
+			+ "movements, and — for notable moments — a screenshot). In Cloud mode (the default) "
+			+ "it sends this to the Fitzgerald.gg server (fitzgerald.gg), a third-party server not "
+			+ "operated by RuneLite, so it can appear on your profile; in Local mode it keeps "
+			+ "everything on your own computer and sends nothing. When off, nothing is enrolled, "
+			+ "captured, pushed, or written.",
 		warning = "This feature submits your IP address to a 3rd-party server not controlled or verified by the RuneLite developers",
 		position = 0,
 		section = generalSection
@@ -51,6 +53,21 @@ public interface FitzgeraldConfig extends Config
 	default boolean enabled()
 	{
 		return false;
+	}
+
+	@ConfigItem(
+		keyName = "syncMode",
+		name = "Mode",
+		description = "Cloud sends your captured activity to your fitzgerald.gg profile so it "
+			+ "appears online. Local keeps everything on this computer only — nothing is sent "
+			+ "to the server — and builds a self-contained page you open from the side panel "
+			+ "(\"Open my page\").",
+		position = 1,
+		section = generalSection
+	)
+	default SyncMode syncMode()
+	{
+		return SyncMode.CLOUD;
 	}
 
 	@ConfigItem(
@@ -72,8 +89,9 @@ public interface FitzgeraldConfig extends Config
 	@ConfigItem(
 		keyName = "pushIntervalMinutes",
 		name = "Push interval",
-		description = "How often your lifetime stat counters are pushed to Fitzgerald.gg.",
-		position = 1,
+		description = "Cloud mode: how often your lifetime stat counters are pushed to Fitzgerald.gg. "
+			+ "Local mode: how often the on-disk page is refreshed.",
+		position = 2,
 		section = generalSection
 	)
 	@Range(min = 1, max = 60)
@@ -85,8 +103,9 @@ public interface FitzgeraldConfig extends Config
 
 	@ConfigItem(
 		keyName = "serverBaseUrl",
-		name = "Server base URL",
-		description = "Base URL of the Fitzgerald.gg server. Leave as the default unless you self-host.",
+		name = "Cloud base URL",
+		description = "Cloud mode only: base URL of the Fitzgerald.gg server. Leave as the default "
+			+ "unless you self-host. Has no effect in Local mode.",
 		position = 10,
 		section = advancedSection
 	)
@@ -97,9 +116,10 @@ public interface FitzgeraldConfig extends Config
 
 	@ConfigItem(
 		keyName = "manualToken",
-		name = "Token override",
-		description = "Paste an existing Fitzgerald token to use this account without self-enrolling "
-			+ "(for the site owner, a re-install, or a second device). Leave blank to enrol normally.",
+		name = "Cloud token override",
+		description = "Cloud mode only: paste an existing Fitzgerald token to use this account without "
+			+ "self-enrolling (for the site owner, a re-install, or a second device). Leave blank to "
+			+ "enrol normally. Has no effect in Local mode.",
 		position = 11,
 		section = advancedSection
 	)

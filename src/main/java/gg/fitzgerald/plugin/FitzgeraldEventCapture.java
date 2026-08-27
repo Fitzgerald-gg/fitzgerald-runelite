@@ -177,6 +177,7 @@ public class FitzgeraldEventCapture
 	private final FitzgeraldConfig config;
 	private final FitzgeraldApiClient api;
 	private final DrawManager drawManager;
+	private final LocalStore localStore;
 
 	// Optional: provided by RuneLite's core Slayer plugin. Absent in a dev-mode
 	// client (or if the user disables Slayer) — stays null and we skip the stamp.
@@ -320,7 +321,7 @@ public class FitzgeraldEventCapture
 
 	@Inject
 	FitzgeraldEventCapture(Client client, ClientThread clientThread, ConfigManager configManager,
-		FitzgeraldConfig config, FitzgeraldApiClient api, DrawManager drawManager)
+		FitzgeraldConfig config, FitzgeraldApiClient api, DrawManager drawManager, LocalStore localStore)
 	{
 		this.client = client;
 		this.clientThread = clientThread;
@@ -328,6 +329,7 @@ public class FitzgeraldEventCapture
 		this.config = config;
 		this.api = api;
 		this.drawManager = drawManager;
+		this.localStore = localStore;
 	}
 
 	/** True once the core Slayer plugin's service is wired (via @PluginDependency).
@@ -1244,6 +1246,14 @@ public class FitzgeraldEventCapture
 		String name = lp != null ? lp.getName() : null;
 		if (name == null || name.isEmpty())
 		{
+			return;
+		}
+		// Local mode: fold the same captured event into the on-disk record and stop.
+		// Nothing reaches the network — and gating on the MODE (not just token
+		// presence) means a leftover token from a prior cloud enrolment can't leak.
+		if (config.syncMode() == SyncMode.LOCAL)
+		{
+			localStore.record(type, data, name);
 			return;
 		}
 		String tokenRaw = configManager.getRSProfileConfiguration(GROUP, KEY_TOKEN);

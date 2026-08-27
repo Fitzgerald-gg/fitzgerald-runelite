@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fitzgerald · Local Ledger</title>
+<style>
+  :root{
+    --ink:#12100c; --ink-2:#191510; --ink-3:#211b13;
+    --parchment:#e9e1d1; --muted:#9a917c; --faint:#6f6857;
+    --gold:#c9a54e; --gold-dim:#8c7436;
+    --line:rgba(201,165,78,0.16); --line-2:rgba(201,165,78,0.09);
+    --green:#8aa757; --red:#bd5b42; --blue:#7d94b0;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--ink); color:var(--parchment);
+    font-family:var(--serif); font-size:17px; line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(1200px 500px at 50% -8%,rgba(201,165,78,0.05),transparent 70%);
+  }
+  .wrap{max-width:1080px; margin:0 auto; padding:44px 26px 90px}
+  .tnum{font-variant-numeric:tabular-nums}
+  a{color:var(--gold)}
+
+  /* Masthead */
+  .mast{border-bottom:1px solid var(--line); padding-bottom:22px; margin-bottom:8px}
+  .kicker{font-family:var(--sans); font-size:11px; letter-spacing:.28em; text-transform:uppercase;
+    color:var(--gold); margin:0 0 10px}
+  .rsn{font-size:clamp(38px,7vw,64px); line-height:1; margin:0; font-weight:600; letter-spacing:-.01em;
+    text-wrap:balance}
+  .mast-meta{font-family:var(--sans); font-size:13px; color:var(--muted); margin-top:14px;
+    display:flex; flex-wrap:wrap; gap:8px 18px; align-items:baseline}
+  .mast-meta b{color:var(--parchment); font-weight:600}
+  .badge{font-family:var(--sans); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase;
+    border:1px solid var(--gold-dim); color:var(--gold); padding:3px 8px; border-radius:2px}
+  .privacy{font-family:var(--sans); font-size:12px; color:var(--faint); margin-top:16px; max-width:66ch}
+  .privacy b{color:var(--muted); font-weight:600}
+
+  /* Sections */
+  section{margin-top:52px}
+  .eyebrow{font-family:var(--sans); font-size:11px; letter-spacing:.24em; text-transform:uppercase;
+    color:var(--gold); display:flex; align-items:center; gap:14px; margin:0 0 4px}
+  .eyebrow::after{content:""; flex:1; height:1px; background:var(--line)}
+  .eyebrow .count{color:var(--faint); letter-spacing:.14em}
+  .lead{color:var(--muted); font-size:15px; margin:2px 0 22px; max-width:70ch}
+
+  /* Character sheet */
+  .totals{display:flex; flex-wrap:wrap; gap:26px 40px; margin-bottom:26px}
+  .stat .k{font-family:var(--sans); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted)}
+  .stat .v{font-size:34px; line-height:1.1; font-weight:600}
+  .stat .v small{font-size:15px; color:var(--muted); font-weight:400}
+  .skills{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:1px;
+    background:var(--line-2); border:1px solid var(--line-2)}
+  .skill{background:var(--ink-2); padding:11px 13px; display:flex; align-items:baseline; justify-content:space-between; gap:8px}
+  .skill .n{font-family:var(--sans); font-size:12px; letter-spacing:.02em; color:var(--muted)}
+  .skill .l{font-size:20px; font-weight:600}
+  .skill.max .l{color:var(--gold)}
+  .skill .xp{display:block; font-family:var(--sans); font-size:10.5px; color:var(--faint); letter-spacing:.03em; margin-top:2px}
+
+  /* Ledger */
+  table{width:100%; border-collapse:collapse}
+  .ledger{font-size:15px}
+  .ledger th{font-family:var(--sans); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--muted); text-align:left; font-weight:600; padding:0 12px 10px; border-bottom:1px solid var(--line)}
+  .ledger th.r,.ledger td.r{text-align:right}
+  .ledger td{padding:11px 12px; border-bottom:1px solid var(--line-2); vertical-align:top}
+  .ledger tr:last-child td{border-bottom:none}
+  .src{font-weight:600}
+  .src .items{font-family:var(--sans); font-size:11.5px; color:var(--faint); margin-top:3px; letter-spacing:.01em}
+  .val{color:var(--gold); font-weight:600}
+  details.more summary{cursor:pointer; font-family:var(--sans); font-size:11px; color:var(--muted);
+    letter-spacing:.1em; text-transform:uppercase; list-style:none; margin-top:22px; text-align:center}
+  details.more summary::-webkit-details-marker{display:none}
+  details.more[open] summary{color:var(--faint)}
+
+  /* Achievements cards */
+  .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:16px}
+  .card{background:var(--ink-2); border:1px solid var(--line-2); border-radius:3px; padding:18px 20px}
+  .card .k{font-family:var(--sans); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted)}
+  .card .v{font-size:30px; font-weight:600; margin-top:4px}
+  .card .v small{font-size:14px; color:var(--muted); font-weight:400}
+  .card .sub{font-family:var(--sans); font-size:12px; color:var(--faint); margin-top:8px; line-height:1.5}
+
+  /* Feed */
+  .feed{border-left:1px solid var(--line); margin-left:6px; padding-left:0}
+  .fitem{position:relative; padding:0 0 20px 26px; margin-left:6px}
+  .fitem::before{content:""; position:absolute; left:-4px; top:8px; width:7px; height:7px; border-radius:50%;
+    background:var(--ink); border:1px solid var(--gold-dim)}
+  .fitem.hi::before{background:var(--gold); border-color:var(--gold)}
+  .fitem .when{font-family:var(--sans); font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint)}
+  .fitem .what{margin-top:2px}
+  .fitem .what b{color:var(--parchment)}
+  .glyph{color:var(--gold); font-family:var(--sans)}
+
+  /* Trackers */
+  .track-lead{display:flex; flex-wrap:wrap; gap:20px 40px; align-items:baseline; margin-bottom:26px}
+  .tracks{columns:2; column-gap:46px}
+  @media (max-width:560px){ .tracks{columns:1} }
+  .tgroup{break-inside:avoid; -webkit-column-break-inside:avoid; margin:0 0 24px}
+  .tgroup h3{font-family:var(--sans); font-size:10.5px; letter-spacing:.18em; text-transform:uppercase;
+    color:var(--gold); margin:0 0 6px; font-weight:600}
+  .trow{display:flex; justify-content:space-between; gap:12px; padding:6px 0; border-bottom:1px solid var(--line-2)}
+  .trow:last-child{border-bottom:none}
+  .trow .tk{color:var(--muted); font-size:14.5px}
+  .trow .tv{font-weight:600}
+  .trow .tv.gpv{color:var(--gold)}
+  .tsub{font-family:var(--sans); font-size:11.5px; color:var(--faint); margin-top:6px; line-height:1.6}
+
+  .empty{color:var(--faint); font-style:italic; padding:8px 0}
+  footer{margin-top:70px; border-top:1px solid var(--line); padding-top:20px;
+    font-family:var(--sans); font-size:11.5px; color:var(--faint); letter-spacing:.03em;
+    display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px}
+  footer .seal{color:var(--gold); letter-spacing:.22em; text-transform:uppercase}
+  @media (max-width:560px){ body{font-size:16px} .wrap{padding:30px 18px 70px} }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+const DATA = __FITZ_DATA__;
+
+// ---- helpers ---------------------------------------------------------------
+const $ = (h) => { const t=document.createElement('template'); t.innerHTML=h.trim(); return t.content.firstChild; };
+const esc = (s)=> String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const commas = (n)=> (n==null?0:Math.round(n)).toLocaleString('en-GB');
+function gp(n){ n=Number(n)||0; const a=Math.abs(n);
+  if(a>=1e9) return (n/1e9).toFixed(a>=1e10?0:2).replace(/\.0+$/,'')+'B';
+  if(a>=1e6) return (n/1e6).toFixed(a>=1e7?0:2).replace(/\.0+$/,'')+'M';
+  if(a>=1e3) return (n/1e3).toFixed(0)+'K';
+  return commas(n); }
+function when(ts){ if(!ts) return ''; const d=new Date(ts*1000);
+  return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}); }
+const cap = (s)=> s? s.charAt(0).toUpperCase()+s.slice(1) : s;
+
+const SKILL_ORDER = ["attack","strength","defence","ranged","prayer","magic","runecraft","construction",
+  "hitpoints","agility","herblore","thieving","crafting","fletching","slayer","hunter","mining",
+  "smithing","fishing","cooking","firemaking","woodcutting","farming","sailing"];
+const SKILL_NAME = {attack:"Attack",strength:"Strength",defence:"Defence",ranged:"Ranged",prayer:"Prayer",
+  magic:"Magic",runecraft:"Runecraft",construction:"Construction",hitpoints:"Hitpoints",agility:"Agility",
+  herblore:"Herblore",thieving:"Thieving",crafting:"Crafting",fletching:"Fletching",slayer:"Slayer",
+  hunter:"Hunter",mining:"Mining",smithing:"Smithing",fishing:"Fishing",cooking:"Cooking",
+  firemaking:"Firemaking",woodcutting:"Woodcutting",farming:"Farming",sailing:"Sailing"};
+
+const app = document.getElementById('app');
+const add = (h)=> app.appendChild($(h));
+
+// ---- masthead --------------------------------------------------------------
+(function(){
+  const d = DATA || {};
+  const acct = (d.account_type||'').toLowerCase();
+  const acctLabel = {ironman:'Ironman',hardcore_ironman:'Hardcore Ironman',ultimate_ironman:'Ultimate Ironman',
+    group_ironman:'Group Ironman',normal:''}[acct] || (acct?cap(acct.replace(/_/g,' ')):'');
+  const sk = d.skills||{};
+  const combat = d.combat_level ? `<span>Combat <b>${d.combat_level}</b></span>`:'';
+  const tl = sk.overall && sk.overall.level ? `<span>Total level <b class="tnum">${commas(sk.overall.level)}</b></span>`:'';
+  add(`<header class="mast">
+    <p class="kicker">Fitzgerald · Local Ledger</p>
+    <h1 class="rsn">${esc(d.rsn||'Your account')}</h1>
+    <div class="mast-meta">
+      ${acctLabel?`<span class="badge">${esc(acctLabel)}</span>`:''}
+      ${combat} ${tl}
+      ${d.updated_at?`<span>As of <b>${when(d.updated_at)}</b></span>`:''}
+    </div>
+    <p class="privacy"><b>This page lives on your computer.</b> Nothing here was sent to any server —
+      it's built from what the plugin sees as you play, priced locally. Drops and kills accumulate from
+      when you turned Local on; drop rarity and dryness (which need the site) aren't shown.</p>
+  </header>`);
+})();
+
+// ---- character sheet -------------------------------------------------------
+(function(){
+  const sk = (DATA&&DATA.skills)||{};
+  if(!Object.keys(sk).length) return;
+  const ov = sk.overall||{};
+  const maxed = SKILL_ORDER.filter(k=>sk[k]&&sk[k].level>=99).length;
+  let cells='';
+  for(const k of SKILL_ORDER){
+    const s = sk[k]; if(!s) continue;
+    const isMax = s.level>=99;
+    cells += `<div class="skill${isMax?' max':''}">
+      <div><span class="n">${SKILL_NAME[k]||cap(k)}</span>
+        <span class="xp tnum">${commas(s.xp)} xp</span></div>
+      <span class="l tnum">${s.level}</span></div>`;
+  }
+  add(`<section>
+    <p class="eyebrow">Character <span class="count">${maxed} at 99</span></p>
+    <div class="totals">
+      <div class="stat"><div class="k">Total level</div><div class="v tnum">${commas(ov.level||0)}</div></div>
+      <div class="stat"><div class="k">Total experience</div><div class="v tnum">${commas(ov.xp||0)} <small>xp</small></div></div>
+    </div>
+    <div class="skills">${cells}</div>
+  </section>`);
+})();
+
+// ---- trackers --------------------------------------------------------------
+(function(){
+  const t = (DATA&&DATA.trackers)||{};
+  if(!Object.keys(t).length) return;
+  const GP = new Set(['itemsDroppedValue','coinsFromAlchemy','coinsSpentAtShops','coinsEarnedAtShops']);
+  const GROUPS = [
+    {title:'Combat', keys:[['damageDealt','Damage dealt'],['damageTaken','Damage taken'],
+      ['highestHit','Highest hit'],['highestHitTaken','Highest hit taken'],['deaths','Deaths'],
+      ['specialAttacksUsed','Special attacks'],['hitsMissed','Attacks missed'],['hitsBlocked','Hits blocked'],
+      ['poisonDamageTaken','Poison damage'],['venomDamageTaken','Venom damage'],['hitpointsRegenerated','HP regenerated']]},
+    {title:'Consumables', keys:[['foodEaten','Food eaten'],['potionDoses','Potion doses'],
+      ['beersDrunk','Beers drunk'],['vialsShattered','Vials shattered'],['divinePotionDamage','Divine self-damage']]},
+    {title:'Offerings & magic', keys:[['bonesSacrificed','Bones sacrificed'],['ashesSacrificed','Ashes sacrificed'],
+      ['demonicOfferingsCast','Demonic offerings'],['sinisterOfferingsCast','Sinister offerings'],
+      ['offensiveSpellsCast','Offensive casts'],['coinsFromAlchemy','Alchemy coins'],['ammoConsumed','Ammo used']]},
+    {title:'Economy', keys:[['itemsDroppedValue','Value dropped'],['itemsDiscarded','Items dropped'],
+      ['coinsSpentAtShops','Spent at shops'],['coinsEarnedAtShops','Earned at shops'],['examines','Examines']]},
+    {title:'Gathered by hand', keys:[['cabbagesPicked','Cabbages picked'],['flaxGathered','Flax gathered'],
+      ['patchesRaked','Patches raked'],['animalsPetted','Animals petted']]},
+  ];
+  const val = (k)=> Number(t[k])||0;
+  const fmt = (k)=> GP.has(k)? `<span class="tv gpv tnum" title="${commas(val(k))} gp">${gp(val(k))}</span>`
+    : `<span class="tv tnum">${commas(val(k))}</span>`;
+
+  // Travel: distance + teleports (aggregate the ~70 destination keys).
+  const teleKeys = Object.keys(t).filter(k=>/^teleports/.test(k) && k!=='teleportsTotal');
+  const teleTotal = val('teleportsTotal') || teleKeys.reduce((s,k)=>s+val(k),0);
+  const topTele = teleKeys.map(k=>[k.replace(/^teleports/,'').replace(/([A-Z])/g,' $1').trim(),val(k)])
+    .filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]).slice(0,4);
+  let travel = [];
+  if(val('distanceWalked')) travel.push(['distanceWalked','Tiles walked']);
+  if(val('distanceRan')) travel.push(['distanceRan','Tiles run']);
+
+  let cols='';
+  for(const g of GROUPS){
+    const rows = g.keys.filter(([k])=>val(k)!==0);
+    if(!rows.length) continue;
+    cols += `<div class="tgroup"><h3>${g.title}</h3>` +
+      rows.map(([k,l])=>`<div class="trow"><span class="tk">${l}</span>${fmt(k)}</div>`).join('') + `</div>`;
+  }
+  if(travel.length || teleTotal){
+    let rows = travel.map(([k,l])=>`<div class="trow"><span class="tk">${l}</span>${fmt(k)}</div>`).join('');
+    if(teleTotal) rows += `<div class="trow"><span class="tk">Teleports</span><span class="tv tnum">${commas(teleTotal)}</span></div>`;
+    const sub = topTele.length? `<div class="tsub">${topTele.map(x=>`${esc(x[0])} <b>${commas(x[1])}</b>`).join(' · ')}</div>`:'';
+    cols += `<div class="tgroup"><h3>Travel</h3>${rows}${sub}</div>`;
+  }
+  if(!cols) return;
+
+  const xp = val('totalXpGained');
+  const lead = xp? `<div class="track-lead"><div class="stat">
+    <div class="k">Experience gained</div><div class="v tnum">${commas(xp)} <small>xp</small></div></div></div>`:'';
+  add(`<section><p class="eyebrow">Trackers</p>
+    <p class="lead">Everything the plugin counts as you play, tracked since Local mode came on.
+      Per-resource skilling totals (logs, fish, ores) are derived on the site and aren't shown offline.</p>
+    ${lead}<div class="tracks">${cols}</div></section>`);
+})();
+
+// ---- the ledger (drops) ----------------------------------------------------
+(function(){
+  const drops = (DATA&&DATA.drops)||{};
+  const rows = Object.entries(drops).map(([source,s])=>({source, ...s}));
+  add(`<section id="ledger"><p class="eyebrow">The Ledger <span class="count">${rows.length} source${rows.length===1?'':'s'}</span></p>
+    <p class="lead">Every drop the plugin has logged since Local mode came on, priced at the live
+      Grand Exchange guide value on your client.</p><div id="ledger-body"></div></section>`);
+  const body = document.getElementById('ledger-body');
+  if(!rows.length){ body.appendChild($(`<p class="empty">No drops logged yet — go and make some history.</p>`)); return; }
+  rows.sort((a,b)=>(b.value||0)-(a.value||0));
+  const total = rows.reduce((t,r)=>t+(r.value||0),0);
+
+  function itemLine(s){
+    const items = Object.values(s.items||{}).sort((a,b)=>(b.value||0)-(a.value||0));
+    if(!items.length) return '';
+    const top = items.slice(0,4).map(i=>`${esc(i.name)}${i.qty>1?' ×'+commas(i.qty):''}`).join(' · ');
+    const more = items.length>4? ` +${items.length-4} more` : '';
+    return `<div class="items">${top}${more}</div>`;
+  }
+  function row(r){
+    const count = r.kc>0 ? `${commas(r.kc)} <span style="color:var(--faint)">kc</span>`
+      : `${commas(r.loots||0)} <span style="color:var(--faint)">drops</span>`;
+    return `<tr>
+      <td class="src">${esc(r.source)}${itemLine(r)}</td>
+      <td class="r tnum">${count}</td>
+      <td class="r val tnum" title="${commas(r.value)} gp">${gp(r.value||0)}</td></tr>`;
+  }
+  const head = `<table class="ledger"><thead><tr>
+    <th>Source</th><th class="r">Count</th><th class="r">Value</th></tr></thead><tbody>`;
+  const foot = `</tbody></table>`;
+  const shown = rows.slice(0,12).map(row).join('');
+  let html = head + shown + foot;
+  if(rows.length>12){
+    const rest = rows.slice(12).map(row).join('');
+    html += `<details class="more"><summary>Show all ${rows.length} sources</summary>
+      <table class="ledger"><tbody>${rest}</tbody></table></details>`;
+  }
+  html += `<div class="totals" style="margin-top:26px"><div class="stat">
+    <div class="k">Logged loot value</div><div class="v val tnum" title="${commas(total)} gp">${gp(total)}</div></div></div>`;
+  body.appendChild($(html.replace(/^<table/,'<table')));
+  // the replace above is a no-op guard; append parsed
+})();
+
+// ---- collection log --------------------------------------------------------
+(function(){
+  const cl = (DATA&&DATA.collection_log)||{};
+  const fin = cl.finished||0, avail = cl.available||0;
+  const cats = cl.by_cat||{};
+  const scraped = Object.keys(cats).length;
+  if(!avail && !scraped) return;
+  const pct = avail? Math.round(fin/avail*100) : 0;
+  let cards = '';
+  if(avail){
+    cards += `<div class="card"><div class="k">Collection log</div>
+      <div class="v tnum">${commas(fin)} <small>/ ${commas(avail)}</small></div>
+      <div class="sub">${pct}% complete</div></div>`;
+  }
+  const kcs = cl.kcs||{};
+  const topKc = Object.entries(kcs).sort((a,b)=>b[1]-a[1]).slice(0,3)
+    .map(([n,v])=>`${esc(cap(n))} <b class="tnum">${commas(v)}</b>`).join(' · ');
+  if(topKc){
+    cards += `<div class="card"><div class="k">Logged kill counts</div>
+      <div class="sub" style="margin-top:12px;font-size:13px;line-height:1.7">${topKc}</div></div>`;
+  }
+  add(`<section><p class="eyebrow">Collection Log</p>
+    <p class="lead">Read from the log's header on login; per-page detail fills in for pages you open in game.</p>
+    <div class="cards">${cards}</div></section>`);
+})();
+
+// ---- achievements ----------------------------------------------------------
+(function(){
+  const a = (DATA&&DATA.achievements)||{};
+  const q = a.quests||{}, di = a.diaries||{}, cb = a.combat||{};
+  const qKeys = Object.keys(q);
+  if(!qKeys.length && !Object.keys(di).length && !Object.keys(cb).length) return;
+  let cards='';
+  if(qKeys.length){
+    const done = qKeys.filter(k=>String(q[k]).toUpperCase()==='FINISHED').length;
+    const prog = qKeys.filter(k=>String(q[k]).toUpperCase()==='IN_PROGRESS').length;
+    cards += `<div class="card"><div class="k">Quests</div>
+      <div class="v tnum">${done} <small>/ ${qKeys.length}</small></div>
+      <div class="sub">${prog?prog+' in progress':'complete where started'}</div></div>`;
+  }
+  const diAreas = Object.keys(di);
+  if(diAreas.length){
+    let tiers=0, doneTiers=0;
+    for(const area of diAreas){ const t=di[area]||{};
+      for(const k of Object.keys(t)){ tiers++; if(t[k]===true) doneTiers++; } }
+    const fullAreas = diAreas.filter(area=>{ const t=di[area]||{}; const ks=Object.keys(t);
+      return ks.length && ks.every(k=>t[k]===true); }).length;
+    cards += `<div class="card"><div class="k">Achievement diaries</div>
+      <div class="v tnum">${doneTiers} <small>/ ${tiers} tiers</small></div>
+      <div class="sub">${fullAreas} area${fullAreas===1?'':'s'} fully complete</div></div>`;
+  }
+  if(cb && (cb.points!=null || cb.tiers)){
+    const tiers = cb.tiers||{};
+    const order=['EASY','MEDIUM','HARD','ELITE','MASTER','GRANDMASTER'];
+    let highest=''; for(const t of order){ if(tiers[t]&&Number(tiers[t])>0) highest=cap(t.toLowerCase()); }
+    cards += `<div class="card"><div class="k">Combat achievements</div>
+      <div class="v tnum">${commas(cb.points||0)} <small>pts</small></div>
+      <div class="sub">${highest?highest+' tier reached':'in progress'}</div></div>`;
+  }
+  add(`<section><p class="eyebrow">Achievements</p><div class="cards">${cards}</div></section>`);
+})();
+
+// ---- field notes (feed) ----------------------------------------------------
+(function(){
+  const feed = ((DATA&&DATA.feed)||[]).slice().sort((a,b)=>(b.ts||0)-(a.ts||0));
+  add(`<section><p class="eyebrow">Field Notes <span class="count">${feed.length} entr${feed.length===1?'y':'ies'}</span></p>
+    <div id="feed"></div></section>`);
+  const el = document.getElementById('feed');
+  if(!feed.length){ el.appendChild($(`<p class="empty">Milestones — pets, log slots, tasks, quests — will be noted here as they happen.</p>`)); return; }
+  const HI = new Set(['PET','COLLECTION','COMBAT_ACHIEVEMENT']);
+  function line(e){
+    const d = e.data||{};
+    switch(e.type){
+      case 'PET': return {g:'❦', t:`Received a pet — <b>${esc(d.petName||'a follower')}</b>`};
+      case 'COLLECTION': return {g:'◈', t:`New collection log slot — <b>${esc(d.itemName||'an unlock')}</b>`};
+      case 'COMBAT_ACHIEVEMENT': return {g:'✦', t:`${esc(cap((d.tier||'').toLowerCase()))} combat achievement${d.task?` — <b>${esc(d.task)}</b>`:''}`};
+      case 'QUEST': return {g:'❧', t:`Quest complete — <b>${esc(d.questName||'')}</b>`};
+      case 'DIARY': return {g:'❧', t:`${esc(cap((d.difficulty||'').toLowerCase()))} diary — <b>${esc(d.area||'')}</b>`};
+      case 'CLUE': return {g:'✧', t:`${esc(cap((d.clueType||'').toLowerCase()))} clue${d.clueCount?` <span style="color:var(--faint)">(#${commas(d.clueCount)})</span>`:''}`};
+      case 'DEATH': return {g:'†', t:`Died${d.killerName?` to <b>${esc(d.killerName)}</b>`:''}`};
+      case 'SLAYER': return {g:'✦', t:`Slayer milestone${d.count?` — <b>${commas(d.count)}</b> tasks`:''}`};
+      default: return {g:'·', t:esc(cap((e.type||'').toLowerCase()))};
+    }
+  }
+  const html = feed.map(e=>{ const L=line(e);
+    return `<div class="fitem${HI.has(e.type)?' hi':''}">
+      <div class="when">${when(e.ts)}</div>
+      <div class="what"><span class="glyph">${L.g}</span> ${L.t}</div></div>`;
+  }).join('');
+  el.appendChild($(`<div class="feed">${html}</div>`));
+})();
+
+// ---- footer ----------------------------------------------------------------
+add(`<footer><span class="seal">Fitzgerald.gg</span>
+  <span>Kept on your computer · nothing sent anywhere · switch to Cloud in the plugin to publish online</span></footer>`);
+</script>
+</body>
+</html>

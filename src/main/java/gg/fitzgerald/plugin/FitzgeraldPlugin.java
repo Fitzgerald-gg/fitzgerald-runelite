@@ -52,10 +52,11 @@ import net.runelite.client.ui.NavigationButton;
 @Slf4j
 @PluginDescriptor(
 	name = "Fitzgerald.gg",
-	description = "Syncs your OSRS activity — loot, levels, kill counts, collection log, "
+	description = "Tracks your OSRS activity — loot, levels, kill counts, collection log, "
 		+ "clues, quests, diaries, combat achievements, slayer, pets, deaths and lifetime "
-		+ "counters — to your profile on fitzgerald.gg, a third-party server operated by the "
-		+ "plugin author. Off until you enable it; screenshot upload is a separate opt-in.",
+		+ "counters. Cloud mode (the default) sends it to your profile on fitzgerald.gg, a "
+		+ "third-party server operated by the plugin author; Local mode keeps everything on your "
+		+ "own computer and sends nothing. Off until you enable it; screenshots are a separate opt-in.",
 	tags = {"fitzgerald", "stats", "tracker", "loot", "slayer", "external", "collection", "osrs"}
 )
 // The Slayer plugin's service supplies the active task so we can tag on-task
@@ -112,6 +113,9 @@ public class FitzgeraldPlugin extends Plugin
 	@Inject
 	private AchievementSync achievementSync;
 
+	@Inject
+	private LocalStore localStore;
+
 	private FitzgeraldPanel panel;
 	private NavigationButton navButton;
 
@@ -145,6 +149,9 @@ public class FitzgeraldPlugin extends Plugin
 
 	// Panel-facing status.
 	private volatile String enrolledRsn;
+	// The logged-in name in local mode (no enrolment happens, but the panel and the
+	// on-disk page still need to know whose account this is).
+	private volatile String localName;
 	private volatile String statusLine = "Not enrolled yet.";
 
 	// Self-service profile state, mirrored from the server so the panel can show
@@ -323,7 +330,25 @@ public class FitzgeraldPlugin extends Plugin
 			return; // wait for the name to populate
 		}
 		pendingEnrolCheck = false;
-		ensureEnrolled(name);
+		if (cloudActive())
+		{
+			ensureEnrolled(name);
+		}
+		else if (localMode())
+		{
+			// No enrolment, no network. Remember whose account this is, load their
+			// on-disk record so drops keep accumulating across sessions, then write
+			// the first page for this login.
+			localName = name;
+			statusLine = "Local mode — your data stays on this computer.";
+			refreshPanel();
+			final String who = name;
+			executor.submit(() ->
+			{
+				localStore.load(localDir(), who);
+				clientThread.invoke(this::refreshLocal);
+			});
+		}
 	}
 
 	@Subscribe
@@ -334,20 +359,28 @@ public class FitzgeraldPlugin extends Plugin
 			return;
 		}
 		String key = e.getKey();
-		if ("pushIntervalMinutes".equals(key) || "enabled".equals(key))
+		if ("pushIntervalMinutes".equals(key) || "enabled".equals(key) || "syncMode".equals(key))
 		{
 			reschedulePushLoop();
-			if ("enabled".equals(key) && config.enabled()
+			if ("syncMode".equals(key))
+			{
+				// The session-counter baseline means different things per mode (a cloud
+				// session is seeded to server absolutes; a local one counts from zero).
+				// Reset it so a switch can't carry one mode's baseline into the other.
+				countersSeeded = false;
+				statStore.clear();
+				counters.reset();
+			}
+			// Turning on, or switching mode, re-runs the per-login branch (cloud enrol
+			// vs. local name-capture) for the newly-selected mode.
+			if (("enabled".equals(key) || "syncMode".equals(key)) && config.enabled()
 				&& client.getGameState() == GameState.LOGGED_IN)
 			{
 				pendingEnrolCheck = true;
 			}
-			// Reflect the switch immediately: clear the "off" prompt when turned on,
-			// restore it when turned off.
-			if ("enabled".equals(key))
-			{
-				refreshPanel();
-			}
+			// Reflect the change immediately: the off prompt, the cloud UI, and the
+			// pared-back local UI are all driven by the panel's mode read.
+			refreshPanel();
 		}
 	}
 
@@ -436,16 +469,25 @@ public class FitzgeraldPlugin extends Plugin
 	/** Scheduled on the executor; hops to the client thread to read config. */
 	private void scheduledPush()
 	{
-		if (!config.enabled())
+		if (cloudActive())
 		{
-			return;
+			clientThread.invoke(this::pushCurrent);
 		}
-		clientThread.invoke(this::pushCurrent);
+		else if (localMode())
+		{
+			// Same cadence, different sink: refresh the on-disk page instead of pushing.
+			clientThread.invoke(this::refreshLocal);
+		}
 	}
 
 	/** Runs on the client thread. Harvests the current counters and pushes them. */
 	private void pushCurrent()
 	{
+		// Hard stop for local mode: nothing in this method may touch the network.
+		if (!cloudActive())
+		{
+			return;
+		}
 		if (client.getGameState() != GameState.LOGGED_IN)
 		{
 			return;
@@ -598,6 +640,20 @@ public class FitzgeraldPlugin extends Plugin
 	/** Runs on the client thread (GameStateChanged). Best-effort final push. */
 	private void onLogout()
 	{
+		if (localMode())
+		{
+			// Capture this session's final counters (statStore is cleared further down),
+			// write, then close the session so a different account logging in next can't
+			// record onto this model.
+			if (localName != null)
+			{
+				localStore.setTrackers(harvest(), localName);
+			}
+			executor.submit(() -> localStore.flush(localDir()));
+			localStore.endSession();
+			// Fall through: the cloud bookkeeping below clears the (unused-in-local)
+			// counter stores too, and its final push is already gated on cloudActive.
+		}
 		// Re-seed from the server on the next login (another device may have
 		// advanced the totals). The final push below still uses the in-memory
 		// snapshot we accumulated this session.
@@ -633,7 +689,7 @@ public class FitzgeraldPlugin extends Plugin
 		// the store survives, and any path that reaches a push before re-seeding
 		// would file one player's lifetime counters under another's name.
 		statStore.clear();
-		if (!pushable || cachedToken == null || cachedName == null
+		if (!cloudActive() || !pushable || cachedToken == null || cachedName == null
 			|| cachedSnapshot == null || cachedSnapshot.isEmpty())
 		{
 			return;
@@ -793,6 +849,112 @@ public class FitzgeraldPlugin extends Plugin
 	boolean syncEnabled()
 	{
 		return config.enabled();
+	}
+
+	/** Cloud mode active: enabled AND configured to push to the server. */
+	boolean cloudActive()
+	{
+		return config.enabled() && config.syncMode() == SyncMode.CLOUD;
+	}
+
+	/** Local mode active: enabled AND keeping everything on this computer. */
+	boolean localMode()
+	{
+		return config.enabled() && config.syncMode() == SyncMode.LOCAL;
+	}
+
+	/** RSN to show in the panel: the enrolled name in cloud mode, the logged-in name in local. */
+	String displayRsn()
+	{
+		return localMode() ? localName : enrolledRsn;
+	}
+
+	/**
+	 * Panel "Open my page" in local mode: open the self-contained page the plugin
+	 * maintains under {@code .runelite/fitzgerald/}. Nothing is fetched from the
+	 * network — the page carries its own data inline. When logged in we freshen the
+	 * page first; otherwise we open the last copy written.
+	 */
+	void openLocalPage()
+	{
+		final String rsn = localName;
+		if (rsn == null || rsn.isEmpty())
+		{
+			chat("Fitzgerald.gg: log in on the account you want to view, then open your page.");
+			return;
+		}
+		if (client.getGameState() == GameState.LOGGED_IN && localStore.isReadyFor(rsn))
+		{
+			clientThread.invoke(() ->
+			{
+				gatherCharacter();
+				executor.submit(() ->
+				{
+					File page = localStore.flush(localDir());
+					openInBrowser(page != null ? page : localStore.pageFor(localDir(), rsn));
+				});
+			});
+			return;
+		}
+		openInBrowser(localStore.pageFor(localDir(), rsn));
+	}
+
+	private void openInBrowser(File page)
+	{
+		if (page == null || !page.isFile())
+		{
+			chat("Fitzgerald.gg: your local page is still being built — play for a moment, then try again.");
+			return;
+		}
+		try
+		{
+			if (java.awt.Desktop.isDesktopSupported())
+			{
+				java.awt.Desktop.getDesktop().browse(page.toURI());
+			}
+			else
+			{
+				chat("Fitzgerald.gg: open " + page.getAbsolutePath() + " in your browser.");
+			}
+		}
+		catch (Exception ex)   // noqa: browse can throw a range of IO/security exceptions
+		{
+			log.debug("open local page failed", ex);
+			chat("Fitzgerald.gg: couldn't open the page automatically — it's at " + page.getAbsolutePath());
+		}
+	}
+
+	private static File localDir()
+	{
+		return new File(net.runelite.client.RuneLite.RUNELITE_DIR, "fitzgerald");
+	}
+
+	/** Copy the always-current character sheet into the local store. Client thread. */
+	private void gatherCharacter()
+	{
+		if (!localMode() || client.getGameState() != GameState.LOGGED_IN)
+		{
+			return;
+		}
+		Player lp = client.getLocalPlayer();
+		String name = lp != null ? lp.getName() : null;
+		if (name == null || name.isEmpty())
+		{
+			return;
+		}
+		localStore.setCharacter(name, accountTypeTag(client.getVarbitValue(VarbitID.IRONMAN)),
+			harvestSkills(), lp.getCombatLevel(), clogCapture.snapshot(), achievementSync.snapshot());
+		// The client-computed counters (this session's totals) fold into the lifetime
+		// trackers. The server-derived per-resource skilling counters aren't available
+		// offline, so they don't appear in local mode.
+		localStore.setTrackers(harvest(), name);
+	}
+
+	/** Local-mode equivalent of a push: refresh the sheet, then rewrite the page. */
+	private void refreshLocal()
+	{
+		gatherCharacter();
+		executor.submit(() -> localStore.flush(localDir()));
 	}
 
 	String statusLine()

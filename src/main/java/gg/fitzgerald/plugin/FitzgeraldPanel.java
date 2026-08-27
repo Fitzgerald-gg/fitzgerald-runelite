@@ -28,11 +28,16 @@ import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.util.LinkBrowser;
 
 /**
- * Side panel: the enrolled RSN + last-push status, the manual sync actions, and a
- * self-service privacy section (lock the page, list/unlist it, export or delete
- * the data). All the privacy actions are authenticated by the account's token,
- * which the plugin already holds — so a plugin-only user manages their own
- * profile without a website login.
+ * Side panel with three faces, driven by the plugin's mode:
+ * <ul>
+ *   <li><b>Off</b> — the master switch is off: just a prompt to enable it.</li>
+ *   <li><b>Cloud</b> — the enrolled RSN + push status, the sync actions, and the
+ *       self-service privacy section (lock, list/unlist, export, delete), each
+ *       authenticated by the account token the plugin already holds.</li>
+ *   <li><b>Local</b> — nothing is enrolled or transmitted, so the server-only
+ *       controls are hidden; only "Open my page" remains, pointing at the
+ *       self-contained page the plugin keeps on disk.</li>
+ * </ul>
  */
 class FitzgeraldPanel extends PluginPanel
 {
@@ -43,8 +48,12 @@ class FitzgeraldPanel extends PluginPanel
 
 	private final JLabel rsnLabel = new JLabel();
 	private final JLabel statusLabel = new JLabel();
+	private final JButton pushNowButton = new JButton("Push stats now");
+	private final JButton reEnrolButton = new JButton("Re-enrol this account");
 	private final JButton openPageButton = new JButton("Open my page");
 
+	// The whole privacy block, shown/hidden as a unit (cloud only).
+	private final JPanel privacySection = new JPanel();
 	private final JLabel privacyState = new JLabel();
 	private final JButton lockButton = new JButton();
 	private final JButton listButton = new JButton();
@@ -79,37 +88,32 @@ class FitzgeraldPanel extends PluginPanel
 		buttons.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		buttons.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		JButton pushNow = new JButton("Push stats now");
-		pushNow.addActionListener(e -> plugin.actionPushNow());
-		buttons.add(pushNow);
+		pushNowButton.addActionListener(e -> plugin.actionPushNow());
+		buttons.add(pushNowButton);
 
-		JButton reEnrol = new JButton("Re-enrol this account");
-		reEnrol.addActionListener(e -> plugin.actionReEnrol());
-		buttons.add(reEnrol);
+		reEnrolButton.addActionListener(e -> plugin.actionReEnrol());
+		buttons.add(reEnrolButton);
 
-		openPageButton.addActionListener(e ->
-		{
-			String rsn = plugin.enrolledRsn();
-			if (rsn != null && !rsn.isEmpty())
-			{
-				LinkBrowser.browse(plugin.serverBaseUrl() + "/osrs/" + encode(rsn));
-			}
-		});
+		openPageButton.addActionListener(e -> onOpenPage());
 		buttons.add(openPageButton);
 
 		content.add(buttons);
 		content.add(vgap(14));
 
-		// ── Privacy & data ────────────────────────────────────────────────
+		// ── Privacy & data (cloud only) ───────────────────────────────────
+		privacySection.setLayout(new BoxLayout(privacySection, BoxLayout.Y_AXIS));
+		privacySection.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		privacySection.setAlignmentX(Component.LEFT_ALIGNMENT);
+
 		JLabel privacyTitle = new JLabel("Privacy & data");
 		privacyTitle.setFont(privacyTitle.getFont().deriveFont(java.awt.Font.BOLD));
 		privacyTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
-		content.add(privacyTitle);
-		content.add(vgap(4));
+		privacySection.add(privacyTitle);
+		privacySection.add(vgap(4));
 
 		privacyState.setAlignmentX(Component.LEFT_ALIGNMENT);
-		content.add(privacyState);
-		content.add(vgap(8));
+		privacySection.add(privacyState);
+		privacySection.add(vgap(8));
 
 		JPanel privacy = new JPanel(new GridLayout(0, 1, 0, 6));
 		privacy.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -128,10 +132,26 @@ class FitzgeraldPanel extends PluginPanel
 		deleteButton.addActionListener(e -> onDeleteClicked());
 		privacy.add(deleteButton);
 
-		content.add(privacy);
+		privacySection.add(privacy);
+		content.add(privacySection);
 
 		add(content, BorderLayout.NORTH);
 		update();
+	}
+
+	/** "Open my page": the on-disk page in local mode, the website profile in cloud. */
+	private void onOpenPage()
+	{
+		if (plugin.localMode())
+		{
+			plugin.openLocalPage();
+			return;
+		}
+		String rsn = plugin.enrolledRsn();
+		if (rsn != null && !rsn.isEmpty())
+		{
+			LinkBrowser.browse(plugin.serverBaseUrl() + "/osrs/" + encode(rsn));
+		}
 	}
 
 	private void onLockClicked()
@@ -185,20 +205,45 @@ class FitzgeraldPanel extends PluginPanel
 	{
 		SwingUtilities.invokeLater(() ->
 		{
-			// Off-by-default gate: until the master switch is on, nothing enrols or
-			// pushes, so point the user straight at it instead of a bare "Not enrolled".
+			// State 1 — master switch off. Blank but for the prompt.
 			if (!plugin.syncEnabled())
 			{
 				rsnLabel.setText("Fitzgerald.gg is off");
-				statusLabel.setText("<html>Turn on the <b>Enabled</b> switch in this plugin's "
-					+ "settings to start syncing your stats to your fitzgerald.gg profile.</html>");
-				privacyState.setText("<html>Enable it to enrol and manage privacy.</html>");
-				openPageButton.setEnabled(false);
-				lockButton.setEnabled(false);
-				listButton.setEnabled(false);
-				deleteButton.setEnabled(false);
+				statusLabel.setText("<html>Please enable the plugin in the settings.</html>");
+				pushNowButton.setVisible(false);
+				reEnrolButton.setVisible(false);
+				openPageButton.setVisible(false);
+				privacySection.setVisible(false);
+				revalidate();
+				repaint();
 				return;
 			}
+
+			// State 2 — local mode. No enrolment, no server controls; just the page.
+			if (plugin.localMode())
+			{
+				String rsn = plugin.displayRsn();
+				rsnLabel.setText(rsn != null && !rsn.isEmpty()
+					? "<html><b>" + escape(rsn) + "</b> · local</html>"
+					: "Local mode");
+				statusLabel.setText("<html>Everything stays on this computer — nothing is sent to "
+					+ "the server. Your page updates as you play; open it below.</html>");
+				pushNowButton.setVisible(false);
+				reEnrolButton.setVisible(false);
+				openPageButton.setVisible(true);
+				openPageButton.setEnabled(true);
+				privacySection.setVisible(false);
+				revalidate();
+				repaint();
+				return;
+			}
+
+			// State 3 — cloud mode. Full sync + privacy controls.
+			pushNowButton.setVisible(true);
+			reEnrolButton.setVisible(true);
+			openPageButton.setVisible(true);
+			privacySection.setVisible(true);
+
 			String rsn = plugin.enrolledRsn();
 			boolean enrolled = rsn != null && !rsn.isEmpty();
 			rsnLabel.setText(enrolled
@@ -230,10 +275,12 @@ class FitzgeraldPanel extends PluginPanel
 			}
 			privacyState.setText("<html>" + state + "</html>");
 
-			boolean canManage = enrolled;
-			lockButton.setEnabled(canManage);
-			listButton.setEnabled(canManage);
-			deleteButton.setEnabled(canManage);
+			lockButton.setEnabled(enrolled);
+			listButton.setEnabled(enrolled);
+			deleteButton.setEnabled(enrolled);
+
+			revalidate();
+			repaint();
 		});
 	}
 
