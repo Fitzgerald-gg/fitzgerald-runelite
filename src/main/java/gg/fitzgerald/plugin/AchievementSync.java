@@ -34,10 +34,10 @@ public class AchievementSync
 	private static final String[] DIARY_TIERS = {"easy", "medium", "hard", "elite"};
 
 	// Every diary whose four tiers all have completion varbits, easy→elite per
-	// row. Karamja is the game's oldest diary and predates the varbit system —
-	// its easy/medium/hard claim state lives in undocumented varps — so only
-	// its elite tier is snapshotted (appended explicitly in snapshot()); the
-	// DIARY chat capture still records those completions the moment they happen.
+	// row. Karamja is the game's oldest diary: its easy/medium/hard have NO
+	// <TIER>_COMPLETE varbit (only elite does), so it's handled separately in
+	// snapshot() from its task-count varbits (a tier is done when its count hits
+	// the tier total, per the game's [proc,diary_completion_info] script).
 	private static final String[] DIARY_REGIONS = {
 		"ardougne", "desert", "falador", "fremennik", "kandarin",
 		"kourend", "lumbridge", "morytania", "varrock", "western", "wilderness",
@@ -106,7 +106,13 @@ public class AchievementSync
 			}
 			diaries.add(DIARY_REGIONS[r], region);
 		}
+		// Karamja easy/medium/hard have no completion varbit — mark a tier done when
+		// its task-completed count reaches that tier's total (10 / 19 / 10, from the
+		// game's diary_completion_info script). Elite alone got a real complete varbit.
 		JsonObject karamja = new JsonObject();
+		karamja.addProperty("easy", client.getVarbitValue(VarbitID.KARAMJA_EASY_COUNT) >= 10);
+		karamja.addProperty("medium", client.getVarbitValue(VarbitID.KARAMJA_MED_COUNT) >= 19);
+		karamja.addProperty("hard", client.getVarbitValue(VarbitID.KARAMJA_HARD_COUNT) >= 10);
 		karamja.addProperty("elite", client.getVarbitValue(VarbitID.KARAMJA_DIARY_ELITE_COMPLETE) != 0);
 		diaries.add("karamja", karamja);
 
