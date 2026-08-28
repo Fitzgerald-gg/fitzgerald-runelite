@@ -57,6 +57,13 @@ public class ClogCapture
 	// Account-wide unique clog slots — synced on login without opening anything.
 	private static final int VARP_CLOG_OBTAINED = 2943;
 	private static final int VARP_CLOG_TOTAL = 2944;
+	// Per-tab obtained/total — also login-synced varps (no open needed), so the
+	// site can show a Bosses/Raids/Clues/Minigames/Other breakdown for the whole
+	// account even before the player opens their log this session.
+	private static final String[] CAT_NAMES = {"bosses", "raids", "clues", "minigames", "other"};
+	private static final int[][] VARP_CAT = {
+		{4613, 4614}, {4615, 4616}, {4617, 4618}, {4619, 4620}, {4621, 4622},
+	};
 	// The kill/completion count in a "<label>: 1,234" header line.
 	private static final Pattern COUNT_LINE = Pattern.compile(":\\s*([\\d,]+)\\s*$");
 
@@ -87,6 +94,8 @@ public class ClogCapture
 	// tick or two after WidgetLoaded, so we retry the scrape briefly once open.
 	private int killLogTicks = -1;
 
+	// Per-tab obtained/total, keyed "<tab>_obtained"/"<tab>_total" (login varps).
+	private final Map<String, Integer> catCounts = new HashMap<>();
 	// The COMPLETE obtained set from a full-log transmit: itemName -> quantity.
 	// Populated by the COLLECTION_DELAYED_TRANSMIT capture; the server folds it
 	// into obtained-detection so every page reads correctly, not just viewed ones.
@@ -118,6 +127,10 @@ public class ClogCapture
 			{
 				finished = obtained;
 				available = total;
+				dirty = true;
+			}
+			if (readCategoryCounts())
+			{
 				dirty = true;
 			}
 		}
@@ -315,6 +328,12 @@ public class ClogCapture
 	/** Read the collection-log page the player just drew (their own action). */
 	private void scrapeOpenPage()
 	{
+		// Never harvest a page drawn while viewing another player's log through a
+		// POH adventure log — same guard the full-transmit paths use (own account only).
+		if (client.getVarbitValue(VarbitID.COLLECTION_POH_HOST_BOOK_OPEN) == 1)
+		{
+			return;
+		}
 		try
 		{
 			Widget header = client.getWidget(ComponentID.COLLECTION_LOG_ENTRY_HEADER);
@@ -381,6 +400,29 @@ public class ClogCapture
 		}
 	}
 
+	/** Read the five per-tab obtained/total varps; returns true if anything changed. */
+	private boolean readCategoryCounts()
+	{
+		boolean changed = false;
+		for (int i = 0; i < CAT_NAMES.length; i++)
+		{
+			int tot = client.getVarpValue(VARP_CAT[i][1]);
+			if (tot <= 0)
+			{
+				continue;   // not synced yet — leave any prior value in place
+			}
+			int obt = client.getVarpValue(VARP_CAT[i][0]);
+			String ok = CAT_NAMES[i] + "_obtained", tk = CAT_NAMES[i] + "_total";
+			if (!Integer.valueOf(obt).equals(catCounts.get(ok)) || !Integer.valueOf(tot).equals(catCounts.get(tk)))
+			{
+				catCounts.put(ok, obt);
+				catCounts.put(tk, tot);
+				changed = true;
+			}
+		}
+		return changed;
+	}
+
 	private String itemName(int id)
 	{
 		try
@@ -423,6 +465,7 @@ public class ClogCapture
 		kcs.clear();
 		slayerKcs.clear();
 		clogItems.clear();
+		catCounts.clear();
 		finished = 0;
 		available = 0;
 		killLogTicks = -1;
@@ -438,6 +481,8 @@ public class ClogCapture
 		out.put("by_cat", byCat);
 		out.put("kcs", kcs);
 		out.put("slayer_kcs", slayerKcs);
+		// Per-tab obtained/total from the login varps (whole account, no open needed).
+		out.put("cat_counts", catCounts);
 		// The complete obtained set from a full-log open (empty until the player
 		// opens their log once this session); server folds it into obtained-detection.
 		out.put("clog_items", clogItems);

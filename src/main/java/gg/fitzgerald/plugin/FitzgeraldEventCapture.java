@@ -314,6 +314,12 @@ public class FitzgeraldEventCapture
 	private String pendingSlayerTask;
 	private String pendingSlayerMonster;
 	private Integer pendingSlayerKills;
+	// Ticks since a finished-task line armed a pending completion; -1 = idle. If the
+	// "You've completed N tasks" streak line never finalises it within the window
+	// (reworded/missed/wrong chat type), the finished line IS itself a real
+	// completion, so we flush it rather than silently drop it. Disarmed the moment
+	// the streak line processes, so this never double-emits.
+	private int slayerPendingTicks = -1;
 	// The task name seen at KILL time (via the loot stamp, when getTask() is still
 	// valid). RuneLite clears getTask() on the completing tick, so at the streak
 	// line the live service is empty — this is the authoritative fallback identity.
@@ -355,6 +361,7 @@ public class FitzgeraldEventCapture
 		pendingSlayerTask = null;
 		pendingSlayerMonster = null;
 		pendingSlayerKills = null;
+		slayerPendingTicks = -1;
 		lastSlayerTask = null;
 		// Ground-item refs belong to the scene we're leaving; drop them. The
 		// untaken batch is pending data to send, so it is deliberately kept.
@@ -950,8 +957,11 @@ public class FitzgeraldEventCapture
 		ChatMessageType t = message.getType();
 		String msg = Text.removeTags(message.getMessage());
 
-		// Diary completion arrives as a MESBOX line.
-		if (t == ChatMessageType.MESBOX)
+		// Diary completion is usually a MESBOX line, but the same congratulatory
+		// line can also arrive as a plain GAMEMESSAGE — check both so it isn't
+		// silently dropped when the game classifies it as a game message.
+		if (t == ChatMessageType.MESBOX
+			|| t == ChatMessageType.GAMEMESSAGE || t == ChatMessageType.SPAM)
 		{
 			Matcher d = DIARY_COMPLETION.matcher(msg);
 			if (d.find())
@@ -960,8 +970,12 @@ public class FitzgeraldEventCapture
 				data.addProperty("area", d.group("region").trim());
 				data.addProperty("difficulty", d.group("grade").trim().toUpperCase());
 				emit("DIARY", data);
+				return;
 			}
-			return;
+		}
+		if (t == ChatMessageType.MESBOX)
+		{
+			return;   // MESBOX only ever carries the diary line handled above
 		}
 
 		if (t != ChatMessageType.GAMEMESSAGE && t != ChatMessageType.SPAM)
@@ -1068,6 +1082,7 @@ public class FitzgeraldEventCapture
 			{
 				pendingSlayerKills = null;
 			}
+			slayerPendingTicks = 0;   // arm the flush; the streak line normally disarms it
 			return;
 		}
 		Matcher sd = SLAYER_TOTAL.matcher(msg);
@@ -1123,11 +1138,12 @@ public class FitzgeraldEventCapture
 			}
 			else
 			{
-				log.debug("[fitz] slayer streak line but no task identity — dropped: '{}'", msg);
+				log.debug("slayer streak line but no task identity — dropped: '{}'", msg);
 			}
 			pendingSlayerTask = null;
 			pendingSlayerMonster = null;
 			pendingSlayerKills = null;
+			slayerPendingTicks = -1;   // streak line handled it — disarm the flush
 			lastSlayerTask = null;
 			return;
 		}
@@ -1151,6 +1167,41 @@ public class FitzgeraldEventCapture
 		emit("PET", data);
 	}
 
+	/**
+	 * The finished-task line ("You have completed your task! You killed N X.") was
+	 * captured, but the streak line never finalised the completion. That finished
+	 * line IS a real completion, so emit it from what we have — the same task-identity
+	 * fallbacks the streak-line path uses — then clear ALL pending state (including
+	 * lastSlayerTask) so a late streak line finds nothing and can't re-emit.
+	 */
+	private void flushPendingSlayer()
+	{
+		String task = pendingSlayerMonster;
+		if (task == null || task.isEmpty())
+		{
+			task = lastSlayerTask;
+		}
+		if (task == null || task.isEmpty())
+		{
+			task = pendingSlayerTask;
+		}
+		if (task != null && !task.isEmpty())
+		{
+			JsonObject data = new JsonObject();
+			data.addProperty("task", task);
+			data.addProperty("monster", task);
+			if (pendingSlayerKills != null)
+			{
+				data.addProperty("killCount", pendingSlayerKills);
+			}
+			emit("SLAYER", data);   // no lifetime "count" — the finished line has none
+		}
+		pendingSlayerTask = null;
+		pendingSlayerMonster = null;
+		pendingSlayerKills = null;
+		lastSlayerTask = null;
+	}
+
 	// ── tick / state ──────────────────────────────────────────────────────
 
 	@Subscribe
@@ -1160,11 +1211,19 @@ public class FitzgeraldEventCapture
 		flushPendingClientLoot();
 		flushUntakenLoot();
 
-		// Expire a pet prime that never got a name (3-tick window), and a slayer
-		// task-line that never got its completion line.
+		// Expire a pet prime that never got a name (3-tick window).
 		if (petPendingTicks >= 0 && ++petPendingTicks > 3)
 		{
 			petPendingTicks = -1;
+		}
+
+		// A finished-task line whose streak line never finalised it: flush it after a
+		// short window (the finished line is itself a real completion). Disarmed above
+		// if the streak line already handled it, so this can't double-emit.
+		if (slayerPendingTicks >= 0 && ++slayerPendingTicks > 4)
+		{
+			flushPendingSlayer();
+			slayerPendingTicks = -1;
 		}
 
 		if (pendingLevels.isEmpty())

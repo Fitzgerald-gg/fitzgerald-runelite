@@ -202,7 +202,7 @@ public class FitzgeraldPlugin extends Plugin
 
 		reschedulePushLoop();
 		warnIfSlayerDisabled();
-		log.info("Fitzgerald.gg v2 started — slayer service: {}",
+		log.debug("Fitzgerald.gg v2 started — slayer service: {}",
 			eventCapture.hasSlayerService() ? "AVAILABLE" : "MISSING");
 
 		// If the plugin is toggled on mid-session, catch the already-logged-in case.
@@ -276,7 +276,7 @@ public class FitzgeraldPlugin extends Plugin
 					{
 						statusLine = "Turn on the Slayer plugin for on-task drop tagging.";
 						refreshPanel();
-						log.info("Slayer plugin is disabled — on-task drop tagging is inactive.");
+						log.debug("Slayer plugin is disabled — on-task drop tagging is inactive.");
 					}
 					return;
 				}
