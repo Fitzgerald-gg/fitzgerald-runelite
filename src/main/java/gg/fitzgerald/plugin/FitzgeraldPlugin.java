@@ -13,6 +13,8 @@ import com.google.inject.Provides;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -48,7 +50,6 @@ import net.runelite.client.plugins.PluginManager;
 import net.runelite.client.plugins.slayer.SlayerPlugin;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
-import net.runelite.client.util.LinkBrowser;
 
 @Slf4j
 @PluginDescriptor(
@@ -871,10 +872,11 @@ public class FitzgeraldPlugin extends Plugin
 	}
 
 	/**
-	 * Panel "Open my page" in local mode: open the self-contained page the plugin
-	 * maintains under {@code .runelite/fitzgerald/}. Nothing is fetched from the
-	 * network — the page carries its own data inline. When logged in we freshen the
-	 * page first; otherwise we open the last copy written.
+	 * Panel "Copy my page link" in local mode: freshen the self-contained page the
+	 * plugin maintains under {@code .runelite/fitzgerald/}, then copy its file link to
+	 * the clipboard so the player can paste it into their own browser (a Hub plugin
+	 * can't open a local file itself). Nothing is fetched from the network — the page
+	 * carries its own data inline. When logged out we use the last copy written.
 	 */
 	void openLocalPage()
 	{
@@ -892,26 +894,36 @@ public class FitzgeraldPlugin extends Plugin
 				executor.submit(() ->
 				{
 					File page = localStore.flush(localDir());
-					openInBrowser(page != null ? page : localStore.pageFor(localDir(), rsn));
+					copyLocalPageLink(page != null ? page : localStore.pageFor(localDir(), rsn));
 				});
 			});
 			return;
 		}
-		openInBrowser(localStore.pageFor(localDir(), rsn));
+		copyLocalPageLink(localStore.pageFor(localDir(), rsn));
 	}
 
-	private void openInBrowser(File page)
+	private void copyLocalPageLink(File page)
 	{
 		if (page == null || !page.isFile())
 		{
 			chat("Fitzgerald.gg: your local page is still being built — play for a moment, then try again.");
 			return;
 		}
-		// Hub rules forbid the AWT desktop API directly — LinkBrowser is the
-		// sanctioned opener. Its browse() takes http(s) only, so open() is the route
-		// for a local file: it launches the .html in the default browser (via the
-		// wrapped OS opener) and shows its own fallback dialog if it can't. Off-thread.
-		LinkBrowser.open(page.getAbsolutePath());
+		// A Hub plugin can't open a local file itself, so copy the page's link to the
+		// clipboard and let the player paste it into their own browser — the same
+		// clipboard pattern LinkBrowser falls back to when it can't open a URL.
+		final String link = page.toURI().toString();   // file:///…/<slug>.html
+		try
+		{
+			Toolkit.getDefaultToolkit().getSystemClipboard()
+				.setContents(new StringSelection(link), null);
+			chat("Fitzgerald.gg: your page link is copied — paste it into your browser's address bar.");
+		}
+		catch (RuntimeException ex)   // headless / clipboard unavailable
+		{
+			log.debug("clipboard copy failed", ex);
+			chat("Fitzgerald.gg: your page is at " + page.getAbsolutePath());
+		}
 	}
 
 	private static File localDir()

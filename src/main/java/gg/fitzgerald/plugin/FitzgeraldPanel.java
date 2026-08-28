@@ -139,7 +139,7 @@ class FitzgeraldPanel extends PluginPanel
 		update();
 	}
 
-	/** "Open my page": the on-disk page in local mode, the website profile in cloud. */
+	/** The page button: copy the on-disk page's link in local mode, open the website profile in cloud. */
 	private void onOpenPage()
 	{
 		if (plugin.localMode())
@@ -227,9 +227,11 @@ class FitzgeraldPanel extends PluginPanel
 					? "<html><b>" + escape(rsn) + "</b> · local</html>"
 					: "Local mode");
 				statusLabel.setText("<html>Everything stays on this computer — nothing is sent to "
-					+ "the server. Your page updates as you play; open it below.</html>");
+					+ "the server. Your page updates as you play; copy its link below and paste it "
+					+ "into your browser.</html>");
 				pushNowButton.setVisible(false);
 				reEnrolButton.setVisible(false);
+				openPageButton.setText("Copy my page link");
 				openPageButton.setVisible(true);
 				openPageButton.setEnabled(true);
 				privacySection.setVisible(false);
@@ -241,6 +243,7 @@ class FitzgeraldPanel extends PluginPanel
 			// State 3 — cloud mode. Full sync + privacy controls.
 			pushNowButton.setVisible(true);
 			reEnrolButton.setVisible(true);
+			openPageButton.setText("Open my page");
 			openPageButton.setVisible(true);
 			privacySection.setVisible(true);
 
