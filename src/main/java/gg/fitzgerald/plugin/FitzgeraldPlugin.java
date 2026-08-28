@@ -48,6 +48,7 @@ import net.runelite.client.plugins.PluginManager;
 import net.runelite.client.plugins.slayer.SlayerPlugin;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
+import net.runelite.client.util.LinkBrowser;
 
 @Slf4j
 @PluginDescriptor(
@@ -906,22 +907,11 @@ public class FitzgeraldPlugin extends Plugin
 			chat("Fitzgerald.gg: your local page is still being built — play for a moment, then try again.");
 			return;
 		}
-		try
-		{
-			if (java.awt.Desktop.isDesktopSupported())
-			{
-				java.awt.Desktop.getDesktop().browse(page.toURI());
-			}
-			else
-			{
-				chat("Fitzgerald.gg: open " + page.getAbsolutePath() + " in your browser.");
-			}
-		}
-		catch (Exception ex)   // noqa: browse can throw a range of IO/security exceptions
-		{
-			log.debug("open local page failed", ex);
-			chat("Fitzgerald.gg: couldn't open the page automatically — it's at " + page.getAbsolutePath());
-		}
+		// Hub rules forbid the AWT desktop API directly — LinkBrowser is the
+		// sanctioned opener. Its browse() takes http(s) only, so open() is the route
+		// for a local file: it launches the .html in the default browser (via the
+		// wrapped OS opener) and shows its own fallback dialog if it can't. Off-thread.
+		LinkBrowser.open(page.getAbsolutePath());
 	}
 
 	private static File localDir()
