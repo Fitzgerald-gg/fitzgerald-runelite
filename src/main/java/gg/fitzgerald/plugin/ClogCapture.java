@@ -17,12 +17,15 @@ import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.MenuAction;
 import net.runelite.api.ScriptID;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.ScriptPreFired;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.eventbus.Subscribe;
@@ -31,16 +34,17 @@ import net.runelite.client.game.ItemManager;
 /**
  * Passive collection-log capture.
  *
- * <p>The client only exposes a clog page's items, obtained counts and kill count
- * once the player OPENS that page in-game, and Jagex forbid a plugin from opening
- * it automatically (a synthetic action fired without a click is an automation
- * flag). So this never opens the log, never prompts, and never injects a control:
- * it reads the account-wide completion fraction on login (a plain varp, always
- * available) and quietly scrapes whatever page the player views themselves,
- * letting the picture complete over sessions. Everything read here is drawn by the
- * player's own action — no synthetic menu/script calls — which keeps it inside the
- * automation rules (WikiSync / Collection Log plugins set the read+upload
- * precedent).
+ * <p>Jagex forbid a plugin from OPENING the collection log itself (a synthetic
+ * open fired without a click is an automation flag), so this never opens it,
+ * prompts, or injects a control. It reads the account-wide completion fraction on
+ * login (a plain varp, always available). Then, the moment the player opens their
+ * OWN log, it asks the server to transmit every entry — the log's own "Search" op,
+ * exactly what WikiSync / TempleOSRS / RuneProfile do — so a single open captures
+ * the WHOLE log (id + quantity per obtained item), not just the page in view. The
+ * per-page header scrape still runs on the player's own page draws to pick up kill
+ * counts. Everything is driven by the player's own open; nothing is auto-opened.
+ * The POH adventure-log varbit guards against ever harvesting another player's log
+ * (own account only).
  *
  * <p>The accumulated model is the server's clog shape; the plugin's push loop
  * flushes it when dirty and the server MERGES partial pushes (clog data only
@@ -55,6 +59,17 @@ public class ClogCapture
 	private static final int VARP_CLOG_TOTAL = 2944;
 	// The kill/completion count in a "<label>: 1,234" header line.
 	private static final Pattern COUNT_LINE = Pattern.compile(":\\s*([\\d,]+)\\s*$");
+
+	// Full-log capture (WikiSync/TempleOSRS/RuneProfile approach). When the player
+	// OPENS the collection log themselves, COLLECTION_LOG_SETUP fires; we then ask
+	// the server to transmit every entry (the log's own "Search" op), and each
+	// obtained item arrives as a COLLECTION_DELAYED_TRANSMIT pre-fire carrying its
+	// id + quantity. So one open captures the WHOLE log — no page-by-page browsing.
+	// This never opens the log itself (only reacts to the player's open), matching
+	// the automation rules the WikiSync/collection-log plugins established.
+	private static final int COLLECTION_LOG_SETUP = 7797;
+	private static final int COLLECTION_DELAYED_TRANSMIT = 4100;
+	private static final int COLLECTION_INIT_SCRIPT = 2240;
 
 	private final Client client;
 	private final ItemManager itemManager;
@@ -71,6 +86,17 @@ public class ClogCapture
 	// Ticks since the kill log opened; -1 = idle. The row widgets can be built a
 	// tick or two after WidgetLoaded, so we retry the scrape briefly once open.
 	private int killLogTicks = -1;
+
+	// The COMPLETE obtained set from a full-log transmit: itemName -> quantity.
+	// Populated by the COLLECTION_DELAYED_TRANSMIT capture; the server folds it
+	// into obtained-detection so every page reads correctly, not just viewed ones.
+	private final Map<String, Integer> clogItems = new HashMap<>();
+	// Guard: the init script we run to reset the view re-fires SETUP, so ignore
+	// our own re-trigger. Cleared once the transmit burst settles.
+	private boolean clogRetrieving;
+	// Tick to flush on, a short buffer after the last transmit item (large logs
+	// stream over a few ticks); -1 = idle.
+	private int clogFlushTick = -1;
 
 	@Inject
 	ClogCapture(Client client, ItemManager itemManager)
@@ -107,6 +133,68 @@ public class ClogCapture
 		if (e.getScriptId() == ScriptID.COLLECTION_DRAW_LIST)
 		{
 			scrapeOpenPage();
+			return;
+		}
+		if (e.getScriptId() == COLLECTION_LOG_SETUP)
+		{
+			// The player just opened their own collection log. Never harvest another
+			// player's log viewed through a POH adventure log (also honours our "own
+			// account only" rule) — and don't recurse on the reset we run below.
+			if (client.getVarbitValue(VarbitID.COLLECTION_POH_HOST_BOOK_OPEN) == 1)
+			{
+				clogItems.clear();
+				return;
+			}
+			if (clogRetrieving)
+			{
+				return;
+			}
+			clogRetrieving = true;
+			clogItems.clear();
+			// Ask the server to transmit every entry (the log's own "Search" op),
+			// then re-run the init script to reset the view (closing the search).
+			// Each entry then arrives as a COLLECTION_DELAYED_TRANSMIT pre-fire.
+			client.menuAction(-1, InterfaceID.Collection.SEARCH_TOGGLE, MenuAction.CC_OP,
+				1, -1, "Search", null);
+			client.runScript(COLLECTION_INIT_SCRIPT);
+			// Fallback deadline so the guard always clears — even for an empty log
+			// that never fires a transmit; each captured item pushes this out by 3.
+			clogFlushTick = client.getTickCount() + 5;
+		}
+	}
+
+	@Subscribe
+	public void onScriptPreFired(ScriptPreFired e)
+	{
+		if (e.getScriptId() != COLLECTION_DELAYED_TRANSMIT)
+		{
+			return;
+		}
+		// Belt and braces: never capture while an adventure-log view is open.
+		if (client.getVarbitValue(VarbitID.COLLECTION_POH_HOST_BOOK_OPEN) == 1)
+		{
+			return;
+		}
+		Object[] args = e.getScriptEvent().getArguments();
+		if (args == null || args.length < 3)
+		{
+			return;
+		}
+		try
+		{
+			int itemId = (int) args[1];
+			int quantity = (int) args[2];
+			String name = itemName(itemId);
+			if (name != null)
+			{
+				clogItems.put(name, Math.max(1, quantity));
+				// Flush a few ticks after the last item (big logs stream over ticks).
+				clogFlushTick = client.getTickCount() + 3;
+			}
+		}
+		catch (RuntimeException ex)
+		{
+			log.debug("clog transmit read failed", ex);
 		}
 	}
 
@@ -122,6 +210,17 @@ public class ClogCapture
 	@Subscribe
 	public void onGameTick(GameTick t)
 	{
+		// Full-log transmit finished (no new item for a few ticks) → publish it.
+		if (clogFlushTick > 0 && client.getTickCount() >= clogFlushTick)
+		{
+			clogFlushTick = -1;
+			clogRetrieving = false;
+			if (!clogItems.isEmpty())
+			{
+				dirty = true;
+			}
+		}
+
 		// The Slayer-log rows are built a tick or two after the interface loads, so
 		// we retry the scrape briefly after it opens rather than reading it empty.
 		if (killLogTicks < 0)
@@ -323,9 +422,12 @@ public class ClogCapture
 		byCat.clear();
 		kcs.clear();
 		slayerKcs.clear();
+		clogItems.clear();
 		finished = 0;
 		available = 0;
 		killLogTicks = -1;
+		clogFlushTick = -1;
+		clogRetrieving = false;
 		dirty = false;
 	}
 
@@ -336,6 +438,9 @@ public class ClogCapture
 		out.put("by_cat", byCat);
 		out.put("kcs", kcs);
 		out.put("slayer_kcs", slayerKcs);
+		// The complete obtained set from a full-log open (empty until the player
+		// opens their log once this session); server folds it into obtained-detection.
+		out.put("clog_items", clogItems);
 		out.put("finished", finished);
 		out.put("available", available);
 		return out;
