@@ -164,6 +164,9 @@ public class MovementStatTracker implements StatTracker
 	private String pendingLabel;
 	private int pendingTick = -1;
 	private boolean pendingFromNexus;
+	// The method family behind the pending teleport (jewellery/tablet/scroll/
+	// spell/cape), or null when the means isn't identifiable from the click.
+	private String pendingMethod;
 
 	public MovementStatTracker(StatStore statStore, Client client)
 	{
@@ -232,7 +235,65 @@ public class MovementStatTracker implements StatTracker
 		if (optLow.contains("tele") || tgtLow.contains("tele"))
 		{
 			armTeleport(optLow + " " + tgtLow, false);
+			pendingMethod = methodOf(optLow, tgtLow);
+			return;
 		}
+
+		// Equipped/rubbed teleport jewellery never says "tele" — the option IS the
+		// destination ("Castle Wars" on a Ring of dueling) — so these teleports were
+		// invisible to the arming above. Arm them off the item name; the option text
+		// doubles as the destination label where the table knows it.
+		if (isTeleportJewellery(tgtLow) && !isWearHandling(optLow))
+		{
+			armTeleport(optLow + " " + tgtLow, false);
+			pendingMethod = TELEPORTS_VIA_JEWELLERY;
+		}
+	}
+
+	/** The teleport-jewellery family, matched on the worn/rubbed item's name. */
+	private static boolean isTeleportJewellery(String tgtLow)
+	{
+		return tgtLow.contains("ring of dueling") || tgtLow.contains("games necklace")
+			|| tgtLow.contains("amulet of glory") || tgtLow.contains("amulet of eternal glory")
+			|| tgtLow.contains("combat bracelet") || tgtLow.contains("skills necklace")
+			|| tgtLow.contains("ring of wealth") || tgtLow.contains("burning amulet")
+			|| tgtLow.contains("necklace of passage") || tgtLow.contains("digsite pendant")
+			|| tgtLow.contains("xeric's talisman") || tgtLow.contains("slayer ring")
+			|| tgtLow.contains("ring of returning") || tgtLow.contains("drakan's medallion");
+	}
+
+	/** Wearing/removing/checking jewellery is not teleporting with it. */
+	private static boolean isWearHandling(String option)
+	{
+		return option.startsWith("wear") || option.startsWith("wield")
+			|| option.startsWith("remove") || option.startsWith("check")
+			|| option.startsWith("destroy") || isInventoryManagement(option);
+	}
+
+	/** The method family a teleport click reveals, or null when it doesn't. */
+	private static String methodOf(String optLow, String tgtLow)
+	{
+		if (optLow.startsWith("break"))
+		{
+			return TELEPORTS_VIA_TABLET;
+		}
+		if (optLow.startsWith("cast"))
+		{
+			return TELEPORTS_VIA_SPELL;
+		}
+		if (tgtLow.contains("scroll"))
+		{
+			return TELEPORTS_VIA_SCROLL;
+		}
+		if (tgtLow.contains("cape") || tgtLow.contains("max hood") || optLow.contains("tele to poh"))
+		{
+			return TELEPORTS_VIA_CAPE;
+		}
+		if (isTeleportJewellery(tgtLow))
+		{
+			return TELEPORTS_VIA_JEWELLERY;
+		}
+		return null;
 	}
 
 	/** Bank/inventory verbs that name a teleport item without activating it. */
@@ -250,6 +311,7 @@ public class MovementStatTracker implements StatTracker
 		pendingLabel = label == null ? "" : label.toLowerCase();
 		pendingFromNexus = fromNexus;
 		pendingTick = client.getTickCount();
+		pendingMethod = null;   // callers that know the means set it after arming
 	}
 
 	/**
@@ -335,6 +397,7 @@ public class MovementStatTracker implements StatTracker
 			pendingLabel = null;
 			pendingTick = -1;
 			pendingFromNexus = false;
+			pendingMethod = null;
 		}
 	}
 
@@ -365,9 +428,14 @@ public class MovementStatTracker implements StatTracker
 		{
 			statStore.incrementStat(credited);
 		}
+		if (pendingMethod != null)
+		{
+			statStore.incrementStat(pendingMethod);   // the means, beside the place
+		}
 		pendingLabel = null;
 		pendingTick = -1;
 		pendingFromNexus = false;
+		pendingMethod = null;
 	}
 
 	@Override

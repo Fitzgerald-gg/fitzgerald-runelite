@@ -19,7 +19,9 @@ import net.runelite.api.VarPlayer;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.Skill;
 import net.runelite.api.events.HitsplatApplied;
+import net.runelite.api.events.StatChanged;
 
 import static gg.fitzgerald.plugin.counters.StatKeys.SPECIAL_ATTACKS_USED;
 import static gg.fitzgerald.plugin.counters.StatKeys.HITS_BLOCKED;
@@ -27,6 +29,9 @@ import static gg.fitzgerald.plugin.counters.StatKeys.HITS_MISSED;
 import static gg.fitzgerald.plugin.counters.StatKeys.HIGHEST_HIT;
 import static gg.fitzgerald.plugin.counters.StatKeys.HIGHEST_HIT_TAKEN;
 import static gg.fitzgerald.plugin.counters.StatKeys.DAMAGE_DEALT;
+import static gg.fitzgerald.plugin.counters.StatKeys.DAMAGE_DEALT_MELEE;
+import static gg.fitzgerald.plugin.counters.StatKeys.DAMAGE_DEALT_RANGED;
+import static gg.fitzgerald.plugin.counters.StatKeys.DAMAGE_DEALT_MAGIC;
 import static gg.fitzgerald.plugin.counters.StatKeys.DAMAGE_TAKEN;
 import static gg.fitzgerald.plugin.counters.StatKeys.DEATHS;
 import static gg.fitzgerald.plugin.counters.StatKeys.POISON_DAMAGE_TAKEN;
@@ -164,10 +169,47 @@ public class CombatStatTracker implements StatTracker
 		}
 	}
 
+	// The style behind the current damage: combat XP rides every hit on the same
+	// tick (or one either side), so the freshest combat-XP skill names the style.
+	// Defensive/shared drops don't overwrite a fresher primary read.
+	private String lastStyleKey;
+	private int lastStyleTick = -1;
+
+	@Override
+	public void onStatChanged(StatChanged e)
+	{
+		final Skill sk = e.getSkill();
+		String style = null;
+		if (sk == Skill.ATTACK || sk == Skill.STRENGTH)
+		{
+			style = DAMAGE_DEALT_MELEE;
+		}
+		else if (sk == Skill.RANGED)
+		{
+			style = DAMAGE_DEALT_RANGED;
+		}
+		else if (sk == Skill.MAGIC)
+		{
+			style = DAMAGE_DEALT_MAGIC;
+		}
+		if (style != null)
+		{
+			lastStyleKey = style;
+			lastStyleTick = client.getTickCount();
+		}
+	}
+
 	/** Add outgoing damage to the running total and promote it if it is a new best hit. */
 	private void recordDamageDealt(int amount)
 	{
 		store.incrementStatBy(DAMAGE_DEALT, amount);
+		// Attribute to the style whose XP drop is fresh (within 2 ticks) — a
+		// breakdown of the total, deliberately allowed to undercount rather than
+		// ever guess wrong (the first hit of a session may go unattributed).
+		if (lastStyleKey != null && client.getTickCount() - lastStyleTick <= 2)
+		{
+			store.incrementStatBy(lastStyleKey, amount);
+		}
 		if (amount > store.getStat(HIGHEST_HIT))
 		{
 			store.setStat(HIGHEST_HIT, amount);

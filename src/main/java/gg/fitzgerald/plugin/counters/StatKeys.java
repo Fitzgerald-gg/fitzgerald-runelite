@@ -49,6 +49,14 @@ public final class StatKeys
 
 	public static final String TELEPORTS_TOTAL = "teleportsTotal";
 
+	// HOW you travelled, apart from where: the method family, credited alongside
+	// the destination (a jewellery teleport to Castle Wars ticks both).
+	public static final String TELEPORTS_VIA_JEWELLERY = "teleportsViaJewellery";
+	public static final String TELEPORTS_VIA_TABLET = "teleportsViaTablet";
+	public static final String TELEPORTS_VIA_SCROLL = "teleportsViaScroll";
+	public static final String TELEPORTS_VIA_SPELL = "teleportsViaSpell";
+	public static final String TELEPORTS_VIA_CAPE = "teleportsViaCape";
+
 	// Standard spellbook + their teleport tablets, each also a portal-nexus row.
 	public static final String TELEPORTS_VARROCK = "teleportsVarrock";
 	public static final String TELEPORTS_GRAND_EXCHANGE = "teleportsGrandExchange";
@@ -133,6 +141,11 @@ public final class StatKeys
 	// rather than what was rolled.
 
 	public static final String DAMAGE_DEALT = "damageDealt";
+	// The same damage, attributed to the style that dealt it (via the combat XP
+	// drop that rides each hit) — a breakdown of damageDealt, not an addition.
+	public static final String DAMAGE_DEALT_MELEE = "damageDealtMelee";
+	public static final String DAMAGE_DEALT_RANGED = "damageDealtRanged";
+	public static final String DAMAGE_DEALT_MAGIC = "damageDealtMagic";
 	public static final String DAMAGE_TAKEN = "damageTaken";
 	public static final String HIGHEST_HIT = "highestHit";
 	/** Biggest single hit ever received (all damage colours + max-hit variants). */
