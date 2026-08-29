@@ -293,9 +293,13 @@ const add = (h)=> app.appendChild($(h));
     const more = items.length>4? ` +${items.length-4} more` : '';
     return `<div class="items">${top}${more}</div>`;
   }
+  function fmtDur(sec){ sec=Math.round(sec); const m=Math.floor(sec/60), s=sec%60;
+    const h=Math.floor(m/60); return h? `${h}:${String(m%60).padStart(2,'0')}:${String(s).padStart(2,'0')}`
+      : `${m}:${String(s).padStart(2,'0')}`; }
   function row(r){
-    const count = r.kc>0 ? `${commas(r.kc)} <span style="color:var(--faint)">kc</span>`
+    let count = r.kc>0 ? `${commas(r.kc)} <span style="color:var(--faint)">kc</span>`
       : `${commas(r.loots||0)} <span style="color:var(--faint)">drops</span>`;
+    if(r.pb>0) count += ` <span style="color:var(--faint)">· PB ${fmtDur(r.pb)}</span>`;
     return `<tr>
       <td class="src">${esc(r.source)}${itemLine(r)}</td>
       <td class="r tnum">${count}</td>

@@ -217,6 +217,21 @@ class LocalStore
 			}
 		}
 
+		// Best kill time: the standing PB when the game restated it, else this
+		// kill's own time when it WAS the record. Same rule the site uses, so
+		// the local page and the web page agree on every PB they both know.
+		Double pbCand = null;
+		if (data.has("personalBestTime") && !data.get("personalBestTime").isJsonNull())
+		{
+			pbCand = data.get("personalBestTime").getAsDouble();
+		}
+		else if (data.has("personalBest") && !data.get("personalBest").isJsonNull()
+			&& data.get("personalBest").getAsBoolean()
+			&& data.has("killTime") && data.get("killTime").getAsDouble() >= 0)
+		{
+			pbCand = data.get("killTime").getAsDouble();
+		}
+
 		synchronized (lock)
 		{
 			JsonObject drops = root.getAsJsonObject("drops");
@@ -235,6 +250,11 @@ class LocalStore
 			}
 			src.addProperty("loots", src.get("loots").getAsInt() + 1);
 			src.addProperty("value", src.get("value").getAsLong() + batchValue);
+			if (pbCand != null && pbCand > 0
+				&& (!src.has("pb") || pbCand < src.get("pb").getAsDouble()))
+			{
+				src.addProperty("pb", pbCand);
+			}
 
 			JsonObject bag = src.getAsJsonObject("items");
 			for (JsonElement pe : priced)
