@@ -81,6 +81,7 @@ public class MovementStatTracker implements StatTracker
 		// contained-substring pairs: the longer name first
 		{"ape atoll dungeon", TELEPORTS_APE_ATOLL_DUNGEON},
 		{"ape atoll", TELEPORTS_APE_ATOLL},
+		{"marim", TELEPORTS_APE_ATOLL},                 // the POH portal-chamber name for Ape Atoll
 		{"west ardougne", TELEPORTS_WEST_ARDOUGNE},
 		{"ardougne", TELEPORTS_ARDOUGNE},
 		// diary secondary-destination switches: before their base town
@@ -94,6 +95,7 @@ public class MovementStatTracker implements StatTracker
 		{"lumbridge", TELEPORTS_LUMBRIDGE},
 		{"falador", TELEPORTS_FALADOR},
 		{"kourend", TELEPORTS_KOUREND},
+		{"fortis colosseum", TELEPORTS_COLOSSEUM},   // before "fortis" (the city)
 		{"civitas", TELEPORTS_FORTIS},
 		{"fortis", TELEPORTS_FORTIS},
 		{"trollheim", TELEPORTS_TROLLHEIM},
@@ -134,7 +136,21 @@ public class MovementStatTracker implements StatTracker
 		{"stony basalt", TELEPORTS_TROLL_STRONGHOLD},
 		{"weiss", TELEPORTS_WEISS},
 		{"icy basalt", TELEPORTS_WEISS},
-		// house: spell "Teleport to House" + construction/max cape "Tele to POH"
+		// scroll-of-redirection house tabs: a redirected tab breaks as
+		// "break <place> teleport". Yanille and Pollnivneach redirects land on
+		// their rows above; none of these words occurs in any other row's label,
+		// so this block's internal order is free.
+		{"rimmington", TELEPORTS_RIMMINGTON},
+		{"taverley", TELEPORTS_TAVERLEY},
+		{"rellekka", TELEPORTS_RELLEKKA},
+		{"brimhaven", TELEPORTS_BRIMHAVEN},
+		{"hosidius", TELEPORTS_HOSIDIUS},
+		{"prifddinas", TELEPORTS_PRIFDDINAS},
+		{"teleport crystal", TELEPORTS_PRIFDDINAS},   // "Activate" names no place; the item name does
+		// house: spell "Teleport to House" + construction/max cape "Tele to POH".
+		// "house on the hill" (Fossil Island — digsite pendant / jewellery box row)
+		// contains "house", so it must sit above the POH row.
+		{"house on the hill", TELEPORTS_FOSSIL_ISLAND},   // before "house" (the POH)
 		{"house", TELEPORTS_HOUSE},
 		{"poh", TELEPORTS_HOUSE},
 		// Skillcapes. The Fishing cape names its place in the option ("Otto's Grotto",
@@ -142,6 +158,64 @@ public class MovementStatTracker implements StatTracker
 		// the cape NAME in the target. No cape name is contained in another, and none
 		// collides with a place substring, so this block's internal order is free.
 		{"otto's grotto", TELEPORTS_OTTOS_GROTTO},
+
+		// Jewellery places (worn/rubbed items and the POH jewellery box). Substring
+		// order matters: compound names sit above the words they contain.
+		{"castle wars", TELEPORTS_CASTLE_WARS},
+		{"ferox", TELEPORTS_FEROX_ENCLAVE},
+		{"emir", TELEPORTS_EMIRS_ARENA},
+		{"duel arena", TELEPORTS_EMIRS_ARENA},         // older wording of the same place
+		{"edgeville", TELEPORTS_EDGEVILLE},
+		{"karamja", TELEPORTS_KARAMJA},
+		{"draynor", TELEPORTS_DRAYNOR},                // "draynor manor" matched above
+		{"al kharid", TELEPORTS_AL_KHARID},
+		{"burthorpe", TELEPORTS_BURTHORPE},
+		{"corporeal", TELEPORTS_CORPOREAL_BEAST},
+		{"tears of guthix", TELEPORTS_TEARS_OF_GUTHIX},
+		{"wintertodt", TELEPORTS_WINTERTODT_CAMP},
+		{"warriors' guild", TELEPORTS_WARRIORS_GUILD},
+		{"champions' guild", TELEPORTS_CHAMPIONS_GUILD},
+		{"monastery", TELEPORTS_MONASTERY},
+		{"ranging guild", TELEPORTS_RANGING_GUILD},
+		{"mining guild", TELEPORTS_MINING_GUILD},
+		{"woodcutting guild", TELEPORTS_WOODCUTTING_GUILD},
+		{"cooking guild", TELEPORTS_COOKING_GUILD},
+		{"crafting guild", TELEPORTS_CRAFTING_GUILD},
+		{"farming guild", TELEPORTS_FARMING_GUILD},
+		{"miscellania", TELEPORTS_MISCELLANIA},
+		{"dondakan", TELEPORTS_DONDAKANS_ROCK},        // ring of wealth's Between a Rock option
+		{"chaos temple", TELEPORTS_CHAOS_TEMPLE},
+		{"bandit camp", TELEPORTS_BANDIT_CAMP},
+		{"lava maze", TELEPORTS_LAVA_MAZE},
+		{"wizards' tower", TELEPORTS_WIZARDS_TOWER},
+		{"outpost", TELEPORTS_THE_OUTPOST},            // "barbarian outpost" matched above
+		{"eyrie", TELEPORTS_EAGLES_EYRIE},             // Eagle's Eyrie, necklace of passage
+		{"ver sinhaza", TELEPORTS_VER_SINHAZA},
+		{"darkmeyer", TELEPORTS_DARKMEYER},
+		{"slepe", TELEPORTS_SLEPE},                    // Drakan's medallion's third option
+		{"lithkren", TELEPORTS_LITHKREN},              // before "digsite" — the pendant's name carries "digsite"
+		{"fossil island", TELEPORTS_FOSSIL_ISLAND},    // "house on the hill" alias lives in the house block above
+		{"digsite", TELEPORTS_DIGSITE},                // after fossil island/lithkren — the pendant's name carries "digsite"
+		{"xeric", TELEPORTS_KOUREND},
+		{"slayer ring", TELEPORTS_SLAYER_DUNGEONS},
+		{"pvp arena", TELEPORTS_EMIRS_ARENA},
+		{"ring of returning", TELEPORTS_HOUSE},        // its only destination
+		// Scroll-of-redirection house tabs (Yanille/Pollnivneach already above).
+		{"aldarin", TELEPORTS_ALDARIN},
+		// Everyday teleport items.
+		{"ectophial", TELEPORTS_ECTOFUNTUS},
+		{"seed pod", TELEPORTS_GRAND_TREE},
+		{"chronicle", TELEPORTS_CHAMPIONS_GUILD},      // lands at the guild's door
+		{"kharedst", TELEPORTS_KOUREND},               // district tokens above win when present
+		{"book of the dead", TELEPORTS_KOUREND},
+		{"air altar", TELEPORTS_ELEMENTAL_ALTARS},
+		{"water altar", TELEPORTS_ELEMENTAL_ALTARS},
+		{"earth altar", TELEPORTS_ELEMENTAL_ALTARS},
+		{"fire altar", TELEPORTS_ELEMENTAL_ALTARS},
+		{"foundry", TELEPORTS_GIANTS_FOUNDRY},
+		{"obelisk", TELEPORTS_OBELISK},
+		// named teleport items (not jewellery): the item name is the destination
+		{"royal seed pod", TELEPORTS_GRAND_TREE},      // option "Commune"
 		{"strength cape", TELEPORTS_WARRIORS_GUILD},
 		{"crafting cape", TELEPORTS_CRAFTING_GUILD},
 		{"farming cape", TELEPORTS_FARMING_GUILD},
@@ -167,6 +241,10 @@ public class MovementStatTracker implements StatTracker
 	// The method family behind the pending teleport (jewellery/tablet/scroll/
 	// spell/cape), or null when the means isn't identifiable from the click.
 	private String pendingMethod;
+	// Tick of the last "Rub" on teleport jewellery — the destination arrives as
+	// a chat-menu row click shortly after; -1 = idle.
+	private int rubTick = -1;
+	private static final int RUB_MENU_WINDOW_TICKS = 25;
 
 	public MovementStatTracker(StatStore statStore, Client client)
 	{
@@ -189,6 +267,35 @@ public class MovementStatTracker implements StatTracker
 		if ((event.getWidgetId() >> 16) == InterfaceID.TELENEXUS_TELEPORT)
 		{
 			armTeleport(nexusRowText(event.getParam0()), true);
+			return;
+		}
+
+		// The POH jewellery box: one interface listing every jewellery destination
+		// as text rows. Only the six destination sections arm — the FRAME child
+		// carries the close button and scroll furniture, and arming on those would
+		// phantom-credit the next house exit.
+		if ((event.getWidgetId() >> 16) == InterfaceID.POH_JEWELLERY_BOX)
+		{
+			if (event.getWidgetId() >= InterfaceID.PohJewelleryBox.DUELING
+				&& event.getWidgetId() <= InterfaceID.PohJewelleryBox.GLORY)
+			{
+				String row = widgetChildText(event.getWidgetId(), event.getParam0());
+				armTeleport((row == null || row.isEmpty()) ? optLow + " " + tgtLow : row, false);
+				pendingMethod = TELEPORTS_VIA_JEWELLERY;
+			}
+			return;
+		}
+
+		// The chat menu a RUBBED item opens: its rows are the destinations. Armed
+		// only when a rub on teleport jewellery just happened, so ordinary chat
+		// menus never count.
+		if ((event.getWidgetId() >> 16) == InterfaceID.MENU && rubTick >= 0
+			&& client.getTickCount() - rubTick <= RUB_MENU_WINDOW_TICKS)
+		{
+			String row = widgetChildText(event.getWidgetId(), event.getParam0());
+			armTeleport((row == null || row.isEmpty()) ? optLow + " " + tgtLow : row, false);
+			pendingMethod = TELEPORTS_VIA_JEWELLERY;
+			rubTick = -1;
 			return;
 		}
 
@@ -228,6 +335,18 @@ public class MovementStatTracker implements StatTracker
 			return;
 		}
 
+		// A POH portal-chamber portal: option "Enter", target "<Place> Portal" — no
+		// "tele" anywhere, so the generic arming below never sees it. Gate on the
+		// destination table recognising the place, which excludes the bare house exit
+		// "Portal", Clan Wars' "Free-for-all portal" and the like; every named house
+		// portal resolves via an existing row (Marim is Ape Atoll's). The method stays
+		// null: a house portal is neither jewellery nor tablet nor any tracked family.
+		if (optLow.equals("enter") && tgtLow.endsWith("portal") && matchDestinationKey(tgtLow) != null)
+		{
+			armTeleport(tgtLow, false);
+			return;
+		}
+
 		// Any spell / tab / cape / item teleport. The destination can sit on EITHER the
 		// option (a spell's "Cast <place>", the cape's "Tele to POH") or the target (a
 		// tab's "<place> teleport", a cape's name), so arm with both joined and let the
@@ -247,7 +366,23 @@ public class MovementStatTracker implements StatTracker
 		{
 			armTeleport(optLow + " " + tgtLow, false);
 			pendingMethod = TELEPORTS_VIA_JEWELLERY;
+			return;
 		}
+
+		// A few teleport items say "tele" nowhere at all: the Ectophial's option is
+		// "Empty" and the Royal seed pod's is "Commune". Their item NAME is the
+		// destination, so arm off it. They are not jewellery — no method family.
+		if (isNamedTeleportItem(tgtLow) && !isWearHandling(optLow))
+		{
+			armTeleport(optLow + " " + tgtLow, false);
+		}
+	}
+
+	/** Teleport items whose activating option names neither "tele" nor a jewellery
+	 * family ("Empty", "Commune") — the item's own name carries the destination. */
+	private static boolean isNamedTeleportItem(String tgtLow)
+	{
+		return tgtLow.contains("ectophial") || tgtLow.contains("royal seed pod");
 	}
 
 	/** The teleport-jewellery family, matched on the worn/rubbed item's name. */
@@ -259,7 +394,8 @@ public class MovementStatTracker implements StatTracker
 			|| tgtLow.contains("ring of wealth") || tgtLow.contains("burning amulet")
 			|| tgtLow.contains("necklace of passage") || tgtLow.contains("digsite pendant")
 			|| tgtLow.contains("xeric's talisman") || tgtLow.contains("slayer ring")
-			|| tgtLow.contains("ring of returning") || tgtLow.contains("drakan's medallion");
+			|| tgtLow.contains("ring of returning") || tgtLow.contains("drakan's medallion")
+			|| tgtLow.contains("ring of the elements") || tgtLow.contains("giantsoul amulet");
 	}
 
 	/** Wearing/removing/checking jewellery is not teleporting with it. */
@@ -312,6 +448,24 @@ public class MovementStatTracker implements StatTracker
 		pendingFromNexus = fromNexus;
 		pendingTick = client.getTickCount();
 		pendingMethod = null;   // callers that know the means set it after arming
+	}
+
+	/** The text of a clicked component's child at {@code index}, else the
+	 * component's own text — tag-stripped. Empty when neither carries any. */
+	private String widgetChildText(int compositeId, int index)
+	{
+		Widget w = client.getWidget(compositeId);
+		if (w == null)
+		{
+			return "";
+		}
+		Widget[] kids = w.getChildren();
+		if (kids != null && index >= 0 && index < kids.length
+			&& kids[index] != null && kids[index].getText() != null)
+		{
+			return Text.removeTags(kids[index].getText()).trim();
+		}
+		return w.getText() == null ? "" : Text.removeTags(w.getText()).trim();
 	}
 
 	/**

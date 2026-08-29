@@ -6,7 +6,7 @@ other plugin installed for it to work. It runs in one of two modes:
 - **Cloud** (the default) syncs everything to *your* profile on **[Fitzgerald.gg](https://fitzgerald.gg)**,
   a personal OSRS profile site, so it's viewable and shareable online.
 - **Local** keeps everything on your own computer — nothing is ever sent to any server — and builds a
-  self-contained page you open straight from the side panel. See [Cloud vs Local](#cloud-vs-local).
+  self-contained page whose link the side panel copies for you. See [Cloud vs Local](#cloud-vs-local).
 
 It records two kinds of thing:
 
@@ -38,7 +38,7 @@ Local — from the dropdown right below the switch. Cloud is the default.
 | | **Cloud** (default) | **Local** |
 |---|---|---|
 | Where your data goes | Your online profile at `fitzgerald.gg` | Stays on your own computer; nothing is sent |
-| Viewing it | `https://fitzgerald.gg/osrs/<your-rsn>` | A self-contained page under `.runelite/fitzgerald/`, opened with **Open my page** |
+| Viewing it | `https://fitzgerald.gg/osrs/<your-rsn>` | A self-contained page under `.runelite/fitzgerald/` — **Copy my page link** puts its address on your clipboard |
 | Enrolment / token | Yes (trust-on-first-use) | None — no account, no token, no network |
 | Item names & prices | Enriched server-side (Grand Exchange + drop rarity) | Priced locally on your client; no rarity/dryness |
 | Screenshots | Optional opt-in, uploaded with events | Not used |
@@ -46,7 +46,7 @@ Local — from the dropdown right below the switch. Cloud is the default.
 
 Switching mode is a dropdown; you can move between them at any time. The rest of this document
 describes **Cloud** mode. In **Local** mode nothing leaves your computer, so the enrolment, privacy
-and "what gets sent" sections below don't apply — the side panel simply offers **Open my page**.
+and "what gets sent" sections below don't apply — the side panel simply offers **Copy my page link**.
 
 ## What gets sent, and to whom
 
@@ -102,7 +102,8 @@ Open the Fitzgerald.gg icon in the RuneLite sidebar. Its contents depend on the 
 - **Open my page** — opens `https://fitzgerald.gg/osrs/<your-rsn>`.
 
 **Local mode** hides the server-only controls (enrol, push, and the privacy section below), leaving
-just **Open my page**, which writes the latest copy of your local page and opens it in your browser.
+just **Copy my page link**, which writes the latest copy of your local page and puts its link on
+your clipboard — paste it into your browser to open it.
 
 ### Privacy & data (self-service) — Cloud mode
 

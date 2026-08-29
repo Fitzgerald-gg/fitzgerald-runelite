@@ -57,6 +57,58 @@ public final class StatKeys
 	public static final String TELEPORTS_VIA_SPELL = "teleportsViaSpell";
 	public static final String TELEPORTS_VIA_CAPE = "teleportsViaCape";
 
+	// Jewellery destinations (rings, amulets, necklaces, bracelets — worn, rubbed,
+	// or via the POH jewellery box; several are also nexus/scroll places).
+	public static final String TELEPORTS_CASTLE_WARS = "teleportsCastleWars";
+	public static final String TELEPORTS_FEROX_ENCLAVE = "teleportsFeroxEnclave";
+	public static final String TELEPORTS_EMIRS_ARENA = "teleportsEmirsArena";
+	public static final String TELEPORTS_COLOSSEUM = "teleportsColosseum";
+	public static final String TELEPORTS_EDGEVILLE = "teleportsEdgeville";
+	public static final String TELEPORTS_KARAMJA = "teleportsKaramja";
+	public static final String TELEPORTS_DRAYNOR = "teleportsDraynor";
+	public static final String TELEPORTS_AL_KHARID = "teleportsAlKharid";
+	public static final String TELEPORTS_BURTHORPE = "teleportsBurthorpe";
+	public static final String TELEPORTS_CORPOREAL_BEAST = "teleportsCorporealBeast";
+	public static final String TELEPORTS_TEARS_OF_GUTHIX = "teleportsTearsOfGuthix";
+	public static final String TELEPORTS_WINTERTODT_CAMP = "teleportsWintertodtCamp";
+	public static final String TELEPORTS_CHAMPIONS_GUILD = "teleportsChampionsGuild";
+	public static final String TELEPORTS_MONASTERY = "teleportsMonastery";
+	public static final String TELEPORTS_RANGING_GUILD = "teleportsRangingGuild";
+	public static final String TELEPORTS_MINING_GUILD = "teleportsMiningGuild";
+	public static final String TELEPORTS_WOODCUTTING_GUILD = "teleportsWoodcuttingGuild";
+	public static final String TELEPORTS_COOKING_GUILD = "teleportsCookingGuild";
+	public static final String TELEPORTS_MISCELLANIA = "teleportsMiscellania";
+	public static final String TELEPORTS_CHAOS_TEMPLE = "teleportsChaosTemple";
+	public static final String TELEPORTS_BANDIT_CAMP = "teleportsBanditCamp";
+	public static final String TELEPORTS_LAVA_MAZE = "teleportsLavaMaze";
+	public static final String TELEPORTS_WIZARDS_TOWER = "teleportsWizardsTower";
+	public static final String TELEPORTS_THE_OUTPOST = "teleportsTheOutpost";
+	public static final String TELEPORTS_EAGLES_EYRIE = "teleportsEaglesEyrie";
+	public static final String TELEPORTS_DONDAKANS_ROCK = "teleportsDondakansRock";
+	public static final String TELEPORTS_VER_SINHAZA = "teleportsVerSinhaza";
+	public static final String TELEPORTS_DARKMEYER = "teleportsDarkmeyer";
+	public static final String TELEPORTS_SLEPE = "teleportsSlepe";
+	public static final String TELEPORTS_DIGSITE = "teleportsDigsite";
+	public static final String TELEPORTS_FOSSIL_ISLAND = "teleportsFossilIsland";
+	public static final String TELEPORTS_LITHKREN = "teleportsLithkren";
+	public static final String TELEPORTS_SLAYER_DUNGEONS = "teleportsSlayerDungeons";
+	// Scroll-of-redirection house tabs, the everyday teleport items, and the rest.
+	public static final String TELEPORTS_TAVERLEY = "teleportsTaverley";
+	public static final String TELEPORTS_RIMMINGTON = "teleportsRimmington";
+	public static final String TELEPORTS_RELLEKKA = "teleportsRellekka";
+	public static final String TELEPORTS_BRIMHAVEN = "teleportsBrimhaven";
+	public static final String TELEPORTS_HOSIDIUS = "teleportsHosidius";
+	public static final String TELEPORTS_PRIFDDINAS = "teleportsPrifddinas";
+	public static final String TELEPORTS_ALDARIN = "teleportsAldarin";
+	public static final String TELEPORTS_ECTOFUNTUS = "teleportsEctofuntus";
+	public static final String TELEPORTS_GRAND_TREE = "teleportsGrandTree";
+	public static final String TELEPORTS_OBELISK = "teleportsObelisk";
+	public static final String TELEPORTS_ELEMENTAL_ALTARS = "teleportsElementalAltars";
+	public static final String TELEPORTS_GIANTS_FOUNDRY = "teleportsGiantsFoundry";
+
+	// Named teleport items whose bespoke option ("Empty", "Commune") names no
+	// teleport and no jewellery family — attributed by the item's own name.
+
 	// Standard spellbook + their teleport tablets, each also a portal-nexus row.
 	public static final String TELEPORTS_VARROCK = "teleportsVarrock";
 	public static final String TELEPORTS_GRAND_EXCHANGE = "teleportsGrandExchange";
@@ -115,6 +167,10 @@ public final class StatKeys
 	public static final String TELEPORTS_POLLNIVNEACH = "teleportsPollnivneach";
 	public static final String TELEPORTS_TROLL_STRONGHOLD = "teleportsTrollStronghold";
 	public static final String TELEPORTS_WEISS = "teleportsWeiss";
+
+	// Scroll-of-redirection house tabs. Two of the eight redirect places already
+	// had keys (Yanille above, Pollnivneach here); these are the other six.
+	// Prifddinas doubles as the (eternal) teleport crystal's destination.
 
 	// Skillcape teleports. Most fire a bare "Teleport" whose destination is not in the
 	// menu text, so they are attributed by the cape name in the target instead. Only

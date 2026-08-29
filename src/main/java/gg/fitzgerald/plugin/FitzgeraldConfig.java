@@ -60,8 +60,8 @@ public interface FitzgeraldConfig extends Config
 		name = "Mode",
 		description = "Cloud sends your captured activity to your fitzgerald.gg profile so it "
 			+ "appears online. Local keeps everything on this computer only — nothing is sent "
-			+ "to the server — and builds a self-contained page you open from the side panel "
-			+ "(\"Open my page\").",
+			+ "to the server — and builds a self-contained page whose link the side panel "
+			+ "copies for you (\"Copy my page link\").",
 		position = 1,
 		section = generalSection
 	)

@@ -135,6 +135,162 @@ public class MovementDestinationTest
 	{
 		assertNull(matchDestinationKey(null));
 		assertNull(matchDestinationKey("break teleport to bounty target"));
-		assertNull(matchDestinationKey("rub games necklace")); // jewellery, out of scope
+		assertNull(matchDestinationKey("rub games necklace")); // a rub names no place yet
+	}
+
+	// ── Jewellery places — substring order keeps compounds ahead of their words ──
+
+	@Test
+	public void jewelleryDestinationsResolve()
+	{
+		assertEquals(TELEPORTS_CASTLE_WARS, matchDestinationKey("castle wars ring of dueling(8)"));
+		assertEquals(TELEPORTS_FEROX_ENCLAVE, matchDestinationKey("ferox enclave ring of dueling(8)"));
+		assertEquals(TELEPORTS_EDGEVILLE, matchDestinationKey("edgeville amulet of glory(6)"));
+		assertEquals(TELEPORTS_WARRIORS_GUILD, matchDestinationKey("warriors' guild combat bracelet(4)"));
+		assertEquals(TELEPORTS_MINING_GUILD, matchDestinationKey("mining guild skills necklace(4)"));
+		assertEquals(TELEPORTS_WINTERTODT_CAMP, matchDestinationKey("wintertodt camp games necklace(8)"));
+	}
+
+	@Test
+	public void colosseumBeatsTheFortisCity()
+	{
+		assertEquals(TELEPORTS_COLOSSEUM, matchDestinationKey("fortis colosseum ring of dueling(8)"));
+	}
+
+	@Test
+	public void fossilIslandBeatsTheDigsitePendantsOwnName()
+	{
+		// The pendant's item name carries "digsite", so a fossil-island hop must
+		// resolve on the destination, not the jewellery's name.
+		assertEquals(TELEPORTS_FOSSIL_ISLAND, matchDestinationKey("fossil island digsite pendant(5)"));
+		assertEquals(TELEPORTS_DIGSITE, matchDestinationKey("digsite digsite pendant(5)"));
+	}
+
+	@Test
+	public void houseOnTheHillBeatsThePoh()
+	{
+		// "house on the hill" contains "house" — the Fossil Island row must sit
+		// above the POH row or every hop there credits the player's house.
+		assertEquals(TELEPORTS_FOSSIL_ISLAND, matchDestinationKey("house on the hill digsite pendant(5)"));
+		// ...and the plain POH routes still resolve to House.
+		assertEquals(TELEPORTS_HOUSE, matchDestinationKey("cast teleport to house"));
+		assertEquals(TELEPORTS_HOUSE, matchDestinationKey("tele to poh construct. cape(t)"));
+	}
+
+	@Test
+	public void barbarianOutpostBeatsTheOutpost()
+	{
+		assertEquals(TELEPORTS_BARBARIAN_OUTPOST, matchDestinationKey("barbarian outpost games necklace(8)"));
+		assertEquals(TELEPORTS_THE_OUTPOST, matchDestinationKey("the outpost necklace of passage(5)"));
+	}
+
+	@Test
+	public void everyAllowlistedJewelleryOptionLandsOnAPlace()
+	{
+		// Each allowlisted item's LAST destination — the ones that fell to
+		// total-only before their rows existed.
+		assertEquals(TELEPORTS_SLEPE, matchDestinationKey("slepe drakan's medallion"));
+		assertEquals(TELEPORTS_EAGLES_EYRIE, matchDestinationKey("eagle's eyrie necklace of passage(5)"));
+		assertEquals(TELEPORTS_DONDAKANS_ROCK, matchDestinationKey("dondakan's rock ring of wealth(5)"));
+		// The ring of returning goes to the POH but its label never says "house".
+		assertEquals(TELEPORTS_HOUSE, matchDestinationKey("teleport ring of returning(8)"));
+	}
+
+	@Test
+	public void lithkrenBeatsTheDigsitePendantsOwnName()
+	{
+		// Without its own row this label falls through to "digsite" (the pendant's
+		// name) and MIS-attributes the hop, so "lithkren" must sit above "digsite".
+		assertEquals(TELEPORTS_LITHKREN, matchDestinationKey("lithkren digsite pendant(5)"));
+	}
+
+	@Test
+	public void chronicleResolvesToChampionsGuild()
+	{
+		// The Chronicle's bare "Teleport" arms via the tele branch but names no
+		// place; the book's own name is the destination label.
+		assertEquals(TELEPORTS_CHAMPIONS_GUILD, matchDestinationKey("teleport chronicle"));
+	}
+
+	// ── POH portal-chamber portals: option "Enter", target "<Place> Portal" ──
+
+	@Test
+	public void pohPortalTargetsResolveToTheirPlace()
+	{
+		assertEquals(TELEPORTS_VARROCK, matchDestinationKey("varrock portal"));
+		assertEquals(TELEPORTS_TROLL_STRONGHOLD, matchDestinationKey("troll stronghold portal"));
+		assertEquals(TELEPORTS_FORTIS, matchDestinationKey("civitas illa fortis portal"));
+		// Ape Atoll's portal is named for the town, not the spell.
+		assertEquals(TELEPORTS_APE_ATOLL, matchDestinationKey("marim portal"));
+	}
+
+	@Test
+	public void unnamedPortalsStayExcluded()
+	{
+		// The match-guard on the "Enter … Portal" branch: the bare house exit and
+		// minigame portals name no tracked place, so they never arm a teleport.
+		assertNull(matchDestinationKey("portal"));
+		assertNull(matchDestinationKey("free-for-all portal"));
+	}
+
+	// ── Named items: option carries no "tele", the item name is the place ──
+
+	@Test
+	public void namedItemsResolveByTheirOwnName()
+	{
+		assertEquals(TELEPORTS_ECTOFUNTUS, matchDestinationKey("empty ectophial"));
+		assertEquals(TELEPORTS_GRAND_TREE, matchDestinationKey("commune royal seed pod"));
+	}
+
+
+
+	@Test
+	public void everydayItemsResolve()
+	{
+		assertEquals(TELEPORTS_ECTOFUNTUS, matchDestinationKey("empty ectophial"));
+		assertEquals(TELEPORTS_GRAND_TREE, matchDestinationKey("commune royal seed pod"));
+		assertEquals(TELEPORTS_CHAMPIONS_GUILD, matchDestinationKey("teleport chronicle"));
+		assertEquals(TELEPORTS_KOUREND, matchDestinationKey("the fisher's flute kharedst's memoirs"));
+		assertEquals(TELEPORTS_HOSIDIUS, matchDestinationKey("lunch by the lancalliums (hosidius) kharedst's memoirs"));
+		assertEquals(TELEPORTS_OBELISK, matchDestinationKey("activate obelisk"));
+		assertEquals(TELEPORTS_ELEMENTAL_ALTARS, matchDestinationKey("fire altar ring of the elements(4)"));
+		assertEquals(TELEPORTS_GIANTS_FOUNDRY, matchDestinationKey("giants' foundry giantsoul amulet(6)"));
+		assertEquals(TELEPORTS_DONDAKANS_ROCK, matchDestinationKey("dondakan's rock ring of wealth(5)"));
+		assertEquals(TELEPORTS_EAGLES_EYRIE, matchDestinationKey("eagle's eyrie necklace of passage(5)"));
+		assertEquals(TELEPORTS_SLEPE, matchDestinationKey("slepe drakan's medallion"));
+		assertEquals(TELEPORTS_TAVERLEY, matchDestinationKey("break taverley teleport"));
+	}
+
+	@Test
+	public void pohPortalRoomsResolve()
+	{
+		assertEquals(TELEPORTS_VARROCK, matchDestinationKey("varrock portal"));
+		assertEquals(TELEPORTS_LUMBRIDGE, matchDestinationKey("lumbridge portal"));
+	}
+
+	@Test
+	public void draynorManorStillBeatsDraynorVillage()
+	{
+		assertEquals(TELEPORTS_DRAYNOR_MANOR, matchDestinationKey("cast draynor manor teleport"));
+		assertEquals(TELEPORTS_DRAYNOR, matchDestinationKey("draynor village amulet of glory(6)"));
+	}
+
+	// ── Scroll-of-redirection house tabs: all eight redirects have a name ──
+
+	@Test
+	public void redirectedHouseTabsAllResolve()
+	{
+		assertEquals(TELEPORTS_RIMMINGTON, matchDestinationKey("break rimmington teleport"));
+		assertEquals(TELEPORTS_TAVERLEY, matchDestinationKey("break taverley teleport"));
+		assertEquals(TELEPORTS_RELLEKKA, matchDestinationKey("break rellekka teleport"));
+		assertEquals(TELEPORTS_BRIMHAVEN, matchDestinationKey("break brimhaven teleport"));
+		assertEquals(TELEPORTS_HOSIDIUS, matchDestinationKey("break hosidius teleport"));
+		assertEquals(TELEPORTS_PRIFDDINAS, matchDestinationKey("break prifddinas teleport"));
+		// ...and the two that already had keys keep them.
+		assertEquals(TELEPORTS_YANILLE, matchDestinationKey("break yanille teleport"));
+		assertEquals(TELEPORTS_POLLNIVNEACH, matchDestinationKey("break pollnivneach teleport"));
+		// The teleport crystal's "Activate" names no place; the item name is Prif.
+		assertEquals(TELEPORTS_PRIFDDINAS, matchDestinationKey("activate teleport crystal (4)"));
+		assertEquals(TELEPORTS_PRIFDDINAS, matchDestinationKey("activate eternal teleport crystal"));
 	}
 }
