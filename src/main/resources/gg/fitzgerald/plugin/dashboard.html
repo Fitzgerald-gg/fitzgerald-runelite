@@ -130,6 +130,20 @@
 .clitems{padding:2px 0 12px}
 .clitem{display:flex;justify-content:space-between;gap:12px;padding:3px 12px;color:var(--faint,#98876e);font-size:13px}
 .clitem.got{color:var(--ink,#e8d9b9)}
+.srcrow{cursor:pointer}
+.srcrow:hover .src{color:var(--gold,#d6b58a)}
+.drill{padding:4px 0 14px}
+.drill-head{padding:6px 12px 10px;color:var(--faint,#98876e);font-size:13px}
+.drill-head b,.drill-head span{color:var(--gold,#d6b58a)}
+.drill-head span{color:var(--faint,#98876e)}
+.drill-item{display:flex;justify-content:space-between;gap:14px;padding:4px 12px;font-size:13px;color:var(--ink,#e8d9b9)}
+.drill-item.dim{color:var(--faint,#98876e)}
+.drill-item .tnum{color:var(--faint,#98876e)}
+.drill-empty{padding:8px 12px;color:var(--faint,#98876e);font-style:italic;font-size:13px}
+.pips{display:flex;gap:5px}
+.pip{width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+  font-size:11px;border:1px solid var(--line,#3a352c);color:var(--faint,#98876e)}
+.pip.done{background:var(--gold,#d6b58a);border-color:var(--gold,#d6b58a);color:#1c1a17}
 </style>
 </head>
 <body>
@@ -293,32 +307,65 @@ const add = (h)=> app.appendChild($(h));
     const more = items.length>4? ` +${items.length-4} more` : '';
     return `<div class="items">${top}${more}</div>`;
   }
-  function fmtDur(sec){ sec=Math.round(sec); const m=Math.floor(sec/60), s=sec%60;
-    const h=Math.floor(m/60); return h? `${h}:${String(m%60).padStart(2,'0')}:${String(s).padStart(2,'0')}`
-      : `${m}:${String(s).padStart(2,'0')}`; }
-  function row(r){
+  function fmtDur(sec){ sec=Math.round(sec); const m=Math.floor(sec/60), ss=sec%60;
+    const h=Math.floor(m/60); return h? `${h}:${String(m%60).padStart(2,'0')}:${String(ss).padStart(2,'0')}`
+      : `${m}:${String(ss).padStart(2,'0')}`; }
+  function drillRows(r){
+    const items = Object.values(r.items||{}).sort((a,b)=>(b.value||0)-(a.value||0));
+    if(!items.length) return `<div class="drill-empty">No items recorded for this source.</div>`;
+    const gpk = r.kc>0 ? `<div class="drill-head">${gp(Math.round((r.value||0)/r.kc))} <span>per kill</span>` +
+      (r.pb>0?` · PB <b>${fmtDur(r.pb)}</b>`:'') + `</div>` : '';
+    return gpk + items.map(i=>`<div class="drill-item"><span>${esc(i.name)}${i.qty>1?` <b>×${commas(i.qty)}</b>`:''}</span>` +
+      `<span class="tnum" title="${commas(i.value)} gp">${gp(i.value||0)}</span></div>`).join('');
+  }
+  function row(r, idx){
     let count = r.kc>0 ? `${commas(r.kc)} <span style="color:var(--faint)">kc</span>`
       : `${commas(r.loots||0)} <span style="color:var(--faint)">drops</span>`;
     if(r.pb>0) count += ` <span style="color:var(--faint)">· PB ${fmtDur(r.pb)}</span>`;
-    return `<tr>
+    return `<tr class="srcrow" data-i="${idx}">
       <td class="src">${esc(r.source)}${itemLine(r)}</td>
       <td class="r tnum">${count}</td>
-      <td class="r val tnum" title="${commas(r.value)} gp">${gp(r.value||0)}</td></tr>`;
+      <td class="r val tnum" title="${commas(r.value)} gp">${gp(r.value||0)}</td></tr>
+      <tr class="drillrow" data-i="${idx}" hidden><td colspan="3"><div class="drill">${drillRows(r)}</div></td></tr>`;
   }
   const head = `<table class="ledger"><thead><tr>
     <th>Source</th><th class="r">Count</th><th class="r">Value</th></tr></thead><tbody>`;
   const foot = `</tbody></table>`;
-  const shown = rows.slice(0,12).map(row).join('');
+  const shown = rows.slice(0,12).map((r,i)=>row(r,i)).join('');
   let html = head + shown + foot;
   if(rows.length>12){
-    const rest = rows.slice(12).map(row).join('');
+    const rest = rows.slice(12).map((r,i)=>row(r,i+12)).join('');
     html += `<details class="more"><summary>Show all ${rows.length} sources</summary>
       <table class="ledger"><tbody>${rest}</tbody></table></details>`;
   }
   html += `<div class="totals" style="margin-top:26px"><div class="stat">
     <div class="k">Logged loot value</div><div class="v val tnum" title="${commas(total)} gp">${gp(total)}</div></div></div>`;
   body.appendChild($(html.replace(/^<table/,'<table')));
-  // the replace above is a no-op guard; append parsed
+  body.querySelectorAll('tr.srcrow').forEach(tr=>tr.addEventListener('click',()=>{
+    const d = body.querySelector(`tr.drillrow[data-i="${tr.dataset.i}"]`);
+    if(d) d.hidden = !d.hidden;
+  }));
+})();
+
+// ---- the slayer log --------------------------------------------------------
+// The in-game Kill Log, replicated: per-species lifetime kill counts, read
+// passively whenever you open the log in game.
+(function(){
+  const sk = ((DATA&&DATA.collection_log)||{}).slayer_kcs||{};
+  const names = Object.keys(sk);
+  if(!names.length) return;
+  const rows = names.map(n=>[n, Number(sk[n])||0]).sort((a,b)=>b[1]-a[1]);
+  const total = rows.reduce((t,r)=>t+r[1],0);
+  const shown = rows.slice(0,10);
+  const rest = rows.slice(10);
+  const line = (r)=>`<div class="drill-item"><span>${esc(cap(r[0]))}</span><span class="tnum">${commas(r[1])}</span></div>`;
+  let html = `<div class="drill">${shown.map(line).join('')}</div>`;
+  if(rest.length){
+    html += `<details class="more"><summary>Show all ${rows.length} monsters</summary>
+      <div class="drill">${rest.map(line).join('')}</div></details>`;
+  }
+  add(`<section><p class="eyebrow">The Slayer Log <span class="count">${commas(total)} kills · ${rows.length} monsters</span></p>
+    <p class="lead">Your in-game Kill Log, mirrored — counts refresh whenever you open it in game.</p>${html}</section>`);
 })();
 
 // ---- collection log --------------------------------------------------------
@@ -414,7 +461,34 @@ const CLOG_TAX = {"Bosses":{"Abyssal Sire":["Abyssal orphan","Unsired","Abyssal 
       <div class="v tnum">${commas(cb.points||0)} <small>pts</small></div>
       <div class="sub">${highest?highest+' tier reached':'in progress'}</div></div>`;
   }
-  add(`<section><p class="eyebrow">Achievements</p><div class="cards">${cards}</div></section>`);
+  // Drills beneath the cards: the full quest list, per-region diary tiers,
+  // and the CA tier ladder.
+  let drills='';
+  if(qKeys.length){
+    const states = (want)=>qKeys.filter(k=>String(q[k]).toUpperCase()===want).sort();
+    const fin = states('FINISHED'), prog = states('IN_PROGRESS'), not = states('NOT_STARTED');
+    const list = (arr,mark)=>arr.map(n=>`<div class="drill-item"><span>${esc(n)}</span><span>${mark}</span></div>`).join('');
+    drills += `<details class="more"><summary>Quests — ${fin.length} finished${prog.length?`, ${prog.length} in progress`:''}</summary><div class="drill">`
+      + list(prog,'&hellip;') + list(fin,'&check;') + (not.length?list(not,'&mdash;'):'') + `</div></details>`;
+  }
+  if(diAreas.length){
+    const TIERS=['easy','medium','hard','elite'];
+    const rows = diAreas.sort().map(area=>{
+      const t=di[area]||{};
+      const pips = TIERS.map(k=>`<span class="pip${t[k]===true?' done':''}">${k[0].toUpperCase()}</span>`).join('');
+      return `<div class="drill-item"><span>${esc(cap(area))}</span><span class="pips">${pips}</span></div>`;
+    }).join('');
+    drills += `<details class="more"><summary>Diaries — every region</summary><div class="drill">${rows}</div></details>`;
+  }
+  if(cb && cb.tiers){
+    const order=['EASY','MEDIUM','HARD','ELITE','MASTER','GRANDMASTER'];
+    const rows = order.map(t=>{
+      const done = Number((cb.tiers||{})[t])>0;
+      return `<div class="drill-item${done?'':' dim'}"><span>${cap(t.toLowerCase())}</span><span>${done?'&check; Complete':'&mdash;'}</span></div>`;
+    }).join('');
+    drills += `<details class="more"><summary>Combat achievement tiers</summary><div class="drill">${rows}</div></details>`;
+  }
+  add(`<section><p class="eyebrow">Achievements</p><div class="cards">${cards}</div>${drills}</section>`);
 })();
 
 // ---- field notes (feed) ----------------------------------------------------
