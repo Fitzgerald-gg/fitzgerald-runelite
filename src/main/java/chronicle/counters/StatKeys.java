@@ -203,6 +203,7 @@ public final class StatKeys
 	public static final String DAMAGE_DEALT_RANGED = "damageDealtRanged";
 	public static final String DAMAGE_DEALT_MAGIC = "damageDealtMagic";
 	public static final String DAMAGE_TAKEN = "damageTaken";
+	public static final String CONSUMED_VALUE = "consumedValue";
 	public static final String HIGHEST_HIT = "highestHit";
 	/** Biggest single hit ever received (all damage colours + max-hit variants). */
 	public static final String HIGHEST_HIT_TAKEN = "highestHitTaken";

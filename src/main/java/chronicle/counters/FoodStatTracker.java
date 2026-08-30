@@ -20,6 +20,8 @@ import net.runelite.api.GameState;
 import net.runelite.api.InventoryID;
 import net.runelite.api.Item;
 import net.runelite.api.ItemComposition;
+import net.runelite.client.game.ItemManager;
+import net.runelite.http.api.item.ItemPrice;
 import net.runelite.api.Skill;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
@@ -30,6 +32,7 @@ import net.runelite.client.util.Text;
 
 import static chronicle.counters.StatKeys.BEERS_DRUNK;
 import static chronicle.counters.StatKeys.DIVINE_POTION_DAMAGE;
+import static chronicle.counters.StatKeys.CONSUMED_VALUE;
 import static chronicle.counters.StatKeys.FOOD_EATEN;
 import static chronicle.counters.StatKeys.HITPOINTS_REGENERATED;
 import static chronicle.counters.StatKeys.POTION_DOSES;
@@ -90,6 +93,7 @@ public class FoodStatTracker implements StatTracker
 
 	private final StatStore store;
 	private final Client client;
+	private final ItemManager itemManager;
 
 	/** Menu target of the latest Eat/Drink click; null once it has been reconciled. */
 	private String lastConsumed;
@@ -124,8 +128,9 @@ public class FoodStatTracker implements StatTracker
 	/** Previous inventory contents, used to spot the eaten stack shrinking. */
 	private Map<Integer, Integer> inventorySnapshot;
 
-	public FoodStatTracker(StatStore statStore, Client client)
+	public FoodStatTracker(StatStore statStore, Client client, ItemManager itemManager)
 	{
+		this.itemManager = itemManager;
 		this.store = statStore;
 		this.client = client;
 	}
@@ -256,6 +261,13 @@ public class FoodStatTracker implements StatTracker
 					continue;
 				}
 				store.incrementStat(FOOD_EATEN);
+				// Consumed-gp: priced at the moment of the bite from the client's
+				// own GE feed — the same price-at-record pattern drops use.
+				int price = itemManager.getItemPrice(itemManager.canonicalize(before.getKey()));
+				if (price > 0)
+				{
+					store.incrementStatBy(CONSUMED_VALUE, price);
+				}
 				String typed = perFoodKey(itemName(before.getKey()));
 				if (!typed.isEmpty())
 				{
@@ -265,6 +277,30 @@ public class FoodStatTracker implements StatTracker
 		}
 
 		inventorySnapshot = current;
+	}
+
+	/** A dose's worth: the 4-dose item's GE price over four, or 0 unknown. */
+	private int dosePrice(String potion)
+	{
+		if (potion == null || potion.isEmpty())
+		{
+			return 0;
+		}
+		try
+		{
+			for (ItemPrice p : itemManager.search(potion + "(4)"))
+			{
+				if (p.getName().equalsIgnoreCase(potion + "(4)"))
+				{
+					return p.getPrice() / 4;
+				}
+			}
+		}
+		catch (RuntimeException ignored)
+		{
+			// price cache unavailable — the dose goes unpriced, never guessed
+		}
+		return 0;
 	}
 
 	private String itemName(int itemId)
@@ -365,6 +401,14 @@ public class FoodStatTracker implements StatTracker
 			if (message.contains("You drink some of the") || message.contains("You drink some of your"))
 			{
 				store.incrementStat(POTION_DOSES);
+				// Consumed-gp for a dose: a quarter of the 4-dose GE price — an
+				// estimate (chat carries no item id), erring honest-low for
+				// anything unpriced.
+				int dose = dosePrice(potionName(message));
+				if (dose > 0)
+				{
+					store.incrementStatBy(CONSUMED_VALUE, dose);
+				}
 				// Per-potion tally beside the aggregate — the same rule that
 				// mints per-food keys, so "Prayer potion" -> prayerPotionDoses
 				// with no list to maintain.

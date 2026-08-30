@@ -71,6 +71,9 @@ class LocalStore
 	// in-memory only, reset at the account boundary. Guarded by lock.
 	private int sessionLoots;
 	private long sessionLootValue;
+	private int sessionUntaken;
+	private long sessionUntakenValue;
+	private final java.util.LinkedHashMap<String, long[]> sessionSources = new java.util.LinkedHashMap<>();
 	private final java.util.ArrayDeque<RecentDrop> recentDrops = new java.util.ArrayDeque<>();
 
 	/** One recent drop, panel-facing (immutable copy). */
@@ -147,6 +150,9 @@ class LocalStore
 		{
 			sessionLoots = 0;
 			sessionLootValue = 0;
+			sessionUntaken = 0;
+			sessionUntakenValue = 0;
+			sessionSources.clear();
 			recentDrops.clear();
 		}
 	}
@@ -170,6 +176,11 @@ class LocalStore
 		if ("LOOT".equals(type))
 		{
 			recordLoot(data);
+			return;
+		}
+		if ("LOOT_UNTAKEN".equals(type))
+		{
+			recordUntaken(data);
 			return;
 		}
 		if (FEED_TYPES.contains(type))
@@ -277,6 +288,9 @@ class LocalStore
 			src.addProperty("value", src.get("value").getAsLong() + batchValue);
 			sessionLoots++;
 			sessionLootValue += batchValue;
+			long[] tally = sessionSources.computeIfAbsent(source, k -> new long[2]);
+			tally[0]++;
+			tally[1] += batchValue;
 			for (JsonElement pe : priced)
 			{
 				JsonObject p = pe.getAsJsonObject();
@@ -861,6 +875,131 @@ class LocalStore
 			}
 			root.add("feed", next);
 			root.addProperty("updated_at", nowSec());
+		}
+	}
+
+	/**
+	 * Left-behind loot: the same price-at-record pattern as drops, aggregated
+	 * per source ({@code untaken: {source: {qty, value}}}). Forward-only and
+	 * local — the morbid ledger of what was declined.
+	 */
+	private void recordUntaken(JsonObject data)
+	{
+		String source = data.has("source") && !data.get("source").isJsonNull()
+			? data.get("source").getAsString() : "Unknown";
+		JsonArray items = data.has("items") && data.get("items").isJsonArray()
+			? data.getAsJsonArray("items") : null;
+		if (items == null)
+		{
+			return;
+		}
+		long qty = 0;
+		long value = 0;
+		for (JsonElement ie : items)
+		{
+			if (!ie.isJsonObject() || !ie.getAsJsonObject().has("id"))
+			{
+				continue;
+			}
+			JsonObject it = ie.getAsJsonObject();
+			int id = it.get("id").getAsInt();
+			int n = it.has("quantity") ? it.get("quantity").getAsInt() : 1;
+			qty += n;
+			value += (long) itemManager.getItemPrice(itemManager.canonicalize(id)) * n;
+		}
+		synchronized (lock)
+		{
+			JsonObject untaken = root.has("untaken") && root.get("untaken").isJsonObject()
+				? root.getAsJsonObject("untaken") : new JsonObject();
+			JsonObject src = untaken.has(source) && untaken.get(source).isJsonObject()
+				? untaken.getAsJsonObject(source) : new JsonObject();
+			src.addProperty("qty", (src.has("qty") ? src.get("qty").getAsLong() : 0) + qty);
+			src.addProperty("value", (src.has("value") ? src.get("value").getAsLong() : 0) + value);
+			untaken.add(source, src);
+			root.add("untaken", untaken);
+			sessionUntaken += qty;
+			sessionUntakenValue += value;
+			root.addProperty("updated_at", nowSec());
+		}
+	}
+
+	/** One left-behind source (lifetime aggregate). */
+	static final class UntakenRow
+	{
+		final String name;
+		final long qty;
+		final long value;
+
+		UntakenRow(String name, long qty, long value)
+		{
+			this.name = name;
+			this.qty = qty;
+			this.value = value;
+		}
+	}
+
+	java.util.List<UntakenRow> untakenSources()
+	{
+		java.util.List<UntakenRow> out = new java.util.ArrayList<>();
+		synchronized (lock)
+		{
+			if (root == null || !root.has("untaken") || !root.get("untaken").isJsonObject())
+			{
+				return out;
+			}
+			for (java.util.Map.Entry<String, JsonElement> e
+				: root.getAsJsonObject("untaken").entrySet())
+			{
+				if (!e.getValue().isJsonObject())
+				{
+					continue;
+				}
+				JsonObject src = e.getValue().getAsJsonObject();
+				out.add(new UntakenRow(e.getKey(),
+					src.has("qty") ? src.get("qty").getAsLong() : 0,
+					src.has("value") ? src.get("value").getAsLong() : 0));
+			}
+		}
+		return out;
+	}
+
+	long[] sessionUntakenTally()
+	{
+		synchronized (lock)
+		{
+			return new long[]{sessionUntaken, sessionUntakenValue};
+		}
+	}
+
+	/** This session's drop sources only (loots, value per source). */
+	java.util.List<SourceRow> sessionSourceRows()
+	{
+		java.util.List<SourceRow> out = new java.util.ArrayList<>();
+		synchronized (lock)
+		{
+			for (java.util.Map.Entry<String, long[]> e : sessionSources.entrySet())
+			{
+				out.add(new SourceRow(e.getKey(), 0, (int) e.getValue()[0],
+					e.getValue()[1], null, 0));
+			}
+		}
+		return out;
+	}
+
+	/** The journal-held clog fraction: {finished, available}, zero when unknown. */
+	int[] clogFraction()
+	{
+		synchronized (lock)
+		{
+			if (root == null || !root.has("collection_log")
+				|| !root.get("collection_log").isJsonObject())
+			{
+				return new int[]{0, 0};
+			}
+			JsonObject cl = root.getAsJsonObject("collection_log");
+			return new int[]{
+				cl.has("finished") ? (int) asLong(cl.get("finished")) : 0,
+				cl.has("available") ? (int) asLong(cl.get("available")) : 0};
 		}
 	}
 

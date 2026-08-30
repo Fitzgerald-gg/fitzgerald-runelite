@@ -50,6 +50,7 @@ public final class StatRegistry
 		LABELS.put("tilesRan", "Tiles run");
 		LABELS.put("coinsFromAlchemy", "Coins from alchemy");
 		LABELS.put("specialAttacksUsed", "Specials spent");
+		LABELS.put("consumedValue", "Consumed value");
 	}
 
 	private StatRegistry()
@@ -84,6 +85,10 @@ public final class StatRegistry
 	/** The family a key files under, one of {@link #FAMILIES}. */
 	public static String family(String key)
 	{
+		if (key.equals("consumedValue"))
+		{
+			return "Living";
+		}
 		if (COMBAT.contains(key))
 		{
 			return "Combat";

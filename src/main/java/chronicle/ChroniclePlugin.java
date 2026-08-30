@@ -672,13 +672,20 @@ public class ChroniclePlugin extends Plugin
 			// be in flight; refreshLocal (which always runs after the load, and on
 			// every push interval) applies it once the store is ready.
 			pendingServerFloor = base;
-			// The drop ledger adopts the same way: sources/kc/values floor at the
-			// server's rollup so the Drops tab shows the whole history, not just
-			// what this install has witnessed.
-			api.fetchDropLedger(config.serverBaseUrl(), name,
-				ledger -> pendingDropsAdopt = ledger);
-			api.fetchFeed(config.serverBaseUrl(), name,
-				events -> pendingFeedAdopt = events);
+			// The drop ledger and the feed adopt the same way. Each callback
+			// nudges refreshLocal immediately — a stash must never sit waiting
+			// for the next five-minute interval to become visible.
+			api.fetchDropLedger(config.serverBaseUrl(), name, ledger ->
+			{
+				pendingDropsAdopt = ledger;
+				clientThread.invoke(this::refreshLocal);
+			});
+			api.fetchFeed(config.serverBaseUrl(), name, events ->
+			{
+				pendingFeedAdopt = events;
+				clientThread.invoke(this::refreshLocal);
+			});
+			clientThread.invoke(this::refreshLocal);   // the counter floor, likewise
 			countersSeeded = true;
 			resetSeedBackoff();
 			enrolledRsn = name;
@@ -1046,12 +1053,48 @@ public class ChroniclePlugin extends Plugin
 
 	int clogFinished()
 	{
-		return clogCapture.finishedCount();
+		return Math.max(clogCapture.finishedCount(), localStore.clogFraction()[0]);
 	}
 
 	int clogAvailable()
 	{
-		return clogCapture.availableCount();
+		return Math.max(clogCapture.availableCount(), localStore.clogFraction()[1]);
+	}
+
+	java.util.List<LocalStore.UntakenRow> untakenSources()
+	{
+		return localStore.untakenSources();
+	}
+
+	long[] sessionUntakenTally()
+	{
+		return localStore.sessionUntakenTally();
+	}
+
+	java.util.List<LocalStore.SourceRow> sessionSourceRows()
+	{
+		return localStore.sessionSourceRows();
+	}
+
+	/**
+	 * Session counters shaped for DISPLAY: peak keys (highest hit and friends)
+	 * only appear when this session actually beat the seeded baseline — the
+	 * journal-write path keeps its absolutes, but the panel must never show a
+	 * lifetime peak as a session feat.
+	 */
+	Map<String, Integer> sessionDisplayCounters()
+	{
+		Map<String, Integer> out = new java.util.HashMap<>(sessionView());
+		Map<String, Integer> seeded = statStore.seededBaseline();
+		for (String key : LocalStore.MAX_KEYS)
+		{
+			Integer val = out.get(key);
+			if (val != null && val <= seeded.getOrDefault(key, 0))
+			{
+				out.remove(key);
+			}
+		}
+		return out;
 	}
 
 	net.runelite.client.game.ItemManager items()
@@ -1149,6 +1192,7 @@ public class ChroniclePlugin extends Plugin
 		{
 			pendingFeedAdopt = null;
 			localStore.adoptFeed(feed, localName);
+			refreshPanel();
 		}
 		if (localName != null)
 		{

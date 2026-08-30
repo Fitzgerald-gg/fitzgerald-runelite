@@ -66,7 +66,7 @@ public class ChronicleCounters
 				new ItemStatTracker(store, client, itemManager),
 				new MovementStatTracker(store, client),
 				new SkillingStatTracker(store, client, xpTrackerService, skillBuffer),
-				new FoodStatTracker(store, client),
+				new FoodStatTracker(store, client, itemManager),
 				new NPCStatTracker(store),
 				new ExperienceStatTracker(store),
 				new MagicStatTracker(store, client),

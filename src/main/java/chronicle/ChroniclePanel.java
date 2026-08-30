@@ -70,6 +70,7 @@ class ChroniclePanel extends PluginPanel
 		DateTimeFormatter.ofPattern("d MMM").withZone(ZoneId.systemDefault());
 	private static final Color ACCENT_LIFETIME = ColorScheme.BRAND_ORANGE;
 	private static final Color ACCENT_SESSION = new Color(85, 163, 90);
+	private static final Color ACCENT_RED = new Color(196, 84, 74);
 	private static final int ROW_CAP = 30;
 
 	private enum Scope
@@ -247,7 +248,7 @@ class ChroniclePanel extends PluginPanel
 		if (scope == Scope.SESSION)
 		{
 			Map<String, Long> out = new LinkedHashMap<>();
-			plugin.sessionCounters().forEach((k, v) -> out.put(k, v.longValue()));
+			plugin.sessionDisplayCounters().forEach((k, v) -> out.put(k, v.longValue()));
 			return out;
 		}
 		return plugin.lifetimeCounters();
@@ -294,7 +295,7 @@ class ChroniclePanel extends PluginPanel
 			}
 		}
 		JScrollPane scroll = new JScrollPane(wrapTop(body),
-			ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+			ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS,
 			ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
 		scroll.setBorder(null);
 		scroll.getVerticalScrollBar().setUnitIncrement(14);
@@ -347,6 +348,9 @@ class ChroniclePanel extends PluginPanel
 		strip.add(row("Damage dealt", fmt(sess.getOrDefault("damageDealt", 0)), null));
 		strip.add(row("Drops taken",
 			plugin.sessionLoots() + " · " + gp(plugin.sessionLootValue()) + " gp", null));
+		long[] untaken = plugin.sessionUntakenTally();
+		strip.add(row("Left behind", fmt(untaken[0]) + " · " + gp(untaken[1]) + " gp", null));
+		strip.add(row("Consumed", gp(sess.getOrDefault("consumedValue", 0)) + " gp", null));
 		strip.add(row("Tiles run", fmt(sess.getOrDefault("tilesRan", 0)), null));
 		p.add(strip);
 		p.add(vgap(6));
@@ -390,9 +394,36 @@ class ChroniclePanel extends PluginPanel
 		return p;
 	}
 
+	private boolean dropsLeftBehind;
+
 	private JPanel buildDrops()
 	{
 		JPanel p = column();
+		JPanel lens = new JPanel(new GridLayout(1, 2, 3, 3));
+		lens.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		for (String l : new String[]{"Taken", "Left behind"})
+		{
+			boolean on = l.equals("Left behind") == dropsLeftBehind;
+			JLabel pill = new JLabel(l, JLabel.CENTER);
+			pill.setOpaque(true);
+			pill.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
+			pill.setFont(FontManager.getRunescapeSmallFont());
+			pill.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+			pill.setForeground(on ? accent() : ColorScheme.LIGHT_GRAY_COLOR.darker());
+			pill.addMouseListener(clicker(() ->
+			{
+				dropsLeftBehind = l.equals("Left behind");
+				rebuild();
+			}));
+			lens.add(pill);
+		}
+		p.add(lens);
+		p.add(vgap(6));
+
+		if (dropsLeftBehind)
+		{
+			return buildLeftBehind(p);
+		}
 		if (scope == Scope.SESSION)
 		{
 			JPanel card = card("This session");
@@ -401,11 +432,15 @@ class ChroniclePanel extends PluginPanel
 			p.add(card);
 			p.add(vgap(6));
 		}
-		List<LocalStore.SourceRow> sources = plugin.dropSources();
+		// Session scope ranks only this session's take; lifetime is the journal.
+		List<LocalStore.SourceRow> sources = scope == Scope.SESSION
+			? plugin.sessionSourceRows() : plugin.dropSources();
 		sources.sort(Comparator.comparingLong((LocalStore.SourceRow r) -> r.value).reversed());
 		if (sources.isEmpty())
 		{
-			p.add(note("Drops appear here as you play — every kill, priced as it lands."));
+			p.add(note(scope == Scope.SESSION
+				? "Nothing taken yet this session."
+				: "Drops appear here as you play — every kill, priced as it lands."));
 			return p;
 		}
 		int shown = 0;
@@ -444,6 +479,48 @@ class ChroniclePanel extends PluginPanel
 				rebuild();
 			});
 			p.add(more);
+		}
+		return p;
+	}
+
+	/** The uncollected ledger: ghost economics, looked at by choice. */
+	private JPanel buildLeftBehind(JPanel p)
+	{
+		long[] sess = plugin.sessionUntakenTally();
+		if (scope == Scope.SESSION)
+		{
+			JPanel card = card("This session");
+			card.add(row("Left behind", fmt(sess[0]) + " items · " + gp(sess[1]) + " gp", accent()));
+			p.add(card);
+			p.add(vgap(6));
+		}
+		List<LocalStore.UntakenRow> rows = plugin.untakenSources();
+		rows.sort(Comparator.comparingLong((LocalStore.UntakenRow r) -> r.value).reversed());
+		long totalQty = 0;
+		long totalVal = 0;
+		for (LocalStore.UntakenRow r : rows)
+		{
+			totalQty += r.qty;
+			totalVal += r.value;
+		}
+		if (rows.isEmpty())
+		{
+			p.add(note("What you walk past gets counted here — priced at the "
+				+ "moment you declined it. The record starts with this build."));
+			return p;
+		}
+		JPanel head = card("Walked past, lifetime");
+		head.add(row(fmt(totalQty) + " items", gp(totalVal) + " gp", ACCENT_RED));
+		p.add(head);
+		p.add(vgap(6));
+		int shown = 0;
+		for (LocalStore.UntakenRow r : rows)
+		{
+			if (shown++ >= ROW_CAP)
+			{
+				break;
+			}
+			p.add(row(r.name, fmt(r.qty) + " · " + gp(r.value) + " gp", ACCENT_RED));
 		}
 		return p;
 	}
@@ -647,8 +724,9 @@ class ChroniclePanel extends PluginPanel
 				JPanel drill = cardPlain();
 				for (int i = 0; i < slots.size(); i++)
 				{
-					drill.add(row(slots.get(i), lit[i] ? "✓" : "—",
-						lit[i] ? ACCENT_SESSION : null));
+					// the in-game log's own idiom: green owned, red missing
+					drill.add(row(slots.get(i), "",
+						lit[i] ? ACCENT_SESSION : ACCENT_RED, true));
 				}
 				p.add(drill);
 				p.add(vgap(3));
@@ -864,7 +942,7 @@ class ChroniclePanel extends PluginPanel
 			default:
 				start = end.minusDays(6);
 				label = start.format(java.time.format.DateTimeFormatter.ofPattern("d MMM"))
-					+ " – " + end.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"));
+					+ " - " + end.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"));
 				break;
 		}
 		final java.time.LocalDate pStart = start;
@@ -1244,24 +1322,68 @@ class ChroniclePanel extends PluginPanel
 			}
 		}
 
-		// Collection log — pages the journal holds.
-		List<LocalStore.ClogPage> pageHits = new ArrayList<>();
-		for (LocalStore.ClogPage pg : plugin.clogPages())
+		// Drop items — every bag the journal holds, by item name.
+		List<String[]> itemHits = new ArrayList<>();
+		outerItems:
+		for (LocalStore.SourceRow src : plugin.dropSources())
 		{
-			if (pg.page.toLowerCase(Locale.ROOT).contains(ql))
+			for (LocalStore.BagItem b : plugin.sourceItems(src.name))
 			{
-				pageHits.add(pg);
+				if (b.name.toLowerCase(Locale.ROOT).contains(ql))
+				{
+					itemHits.add(new String[]{b.name + (b.qty > 1 ? " ×" + fmt(b.qty) : ""), src.name});
+					if (itemHits.size() >= 4)
+					{
+						break outerItems;
+					}
+				}
 			}
 		}
-		if (!pageHits.isEmpty())
+		if (!itemHits.isEmpty())
 		{
-			p.add(group("Collection log"));
-			for (int i = 0; i < Math.min(4, pageHits.size()); i++)
+			p.add(group("Drop items"));
+			for (String[] hit : itemHits)
 			{
-				LocalStore.ClogPage pg = pageHits.get(i);
-				p.add(row(pg.page, pg.held + " held"
-					+ (pg.kc != null ? " · " + fmt(pg.kc) + " kc" : ""), null));
+				p.add(row(hit[0], hit[1], null));
 				total++;
+			}
+		}
+
+		// Collection log — the whole taxonomy, with your obtained state.
+		JsonObject cl = plugin.clogSnapshot();
+		Map<String, Long> owned = new LinkedHashMap<>();
+		if (cl.has("clog_items") && cl.get("clog_items").isJsonObject())
+		{
+			for (Map.Entry<String, com.google.gson.JsonElement> e
+				: cl.getAsJsonObject("clog_items").entrySet())
+			{
+				owned.merge(e.getKey().toLowerCase(Locale.ROOT), safeLong(e.getValue()), Math::max);
+			}
+		}
+		int slotHits = 0;
+		clogSearch:
+		for (Map.Entry<String, Map<String, List<String>>> tab : taxonomy().entrySet())
+		{
+			for (Map.Entry<String, List<String>> pg : tab.getValue().entrySet())
+			{
+				for (String slot : pg.getValue())
+				{
+					if (slot.toLowerCase(Locale.ROOT).contains(ql))
+					{
+						if (slotHits == 0)
+						{
+							p.add(group("Collection log"));
+						}
+						boolean got = owned.containsKey(slot.toLowerCase(Locale.ROOT));
+						p.add(row(slot, got ? "obtained" : pg.getKey(),
+							got ? ACCENT_SESSION : null));
+						total++;
+						if (++slotHits >= 4)
+						{
+							break clogSearch;
+						}
+					}
+				}
 			}
 		}
 
@@ -1468,6 +1590,17 @@ class ChroniclePanel extends PluginPanel
 		c.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
 		c.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return c;
+	}
+
+	private static JPanel row(String left, String right, Color color, boolean colorName)
+	{
+		JPanel r = row(left, right, color);
+		if (colorName && color != null)
+		{
+			((JLabel) ((BorderLayout) r.getLayout())
+				.getLayoutComponent(BorderLayout.CENTER)).setForeground(color);
+		}
+		return r;
 	}
 
 	private static JPanel row(String left, String right, Color rightColor)
