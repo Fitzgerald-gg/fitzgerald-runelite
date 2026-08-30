@@ -20,7 +20,7 @@ repositories {
 // `runeLiteVersion` is read from gradle.properties. It defaults to
 // 'latest.release'; the Plugin Hub CI builds against a pinned client, and you
 // can pin it locally by editing gradle.properties if a fresh API breaks you.
-def pluginMainClass = 'gg.fitzgerald.plugin.FitzgeraldPluginTest'
+def pluginMainClass = 'chronicle.ChroniclePluginTest'
 
 dependencies {
 	compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
@@ -33,7 +33,7 @@ dependencies {
 	testImplementation group: 'net.runelite', name: 'jshell', version: runeLiteVersion
 }
 
-group = 'gg.fitzgerald'
+group = 'chronicle'
 
 // Bundle the plugin descriptor into the jar so a dev-mode client can load it
 // from ~/.runelite/sideloaded-plugins (the Plugin Hub reads the repo-root copy
