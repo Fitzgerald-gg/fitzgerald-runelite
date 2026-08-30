@@ -1293,14 +1293,27 @@ public class ChroniclePlugin extends Plugin
 	/** Small programmatic icon so the repo ships no binary assets. */
 	private static BufferedImage buildIcon()
 	{
+		// A small open book — the Chronicle. Distinct from every text-badge
+		// icon on the rail (and from the old plugin's "F", so a dev client
+		// running both is never ambiguous).
 		BufferedImage img = new BufferedImage(24, 24, BufferedImage.TYPE_INT_ARGB);
 		Graphics2D g = img.createGraphics();
 		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 		g.setColor(new Color(0x1E, 0x1B, 0x16));
 		g.fillRoundRect(1, 1, 22, 22, 6, 6);
-		g.setColor(new Color(0xC8, 0xA2, 0x5A)); // brass/gold "F"
-		g.setFont(g.getFont().deriveFont(java.awt.Font.BOLD, 16f));
-		g.drawString("F", 8, 18);
+		Color gold = new Color(0xC8, 0xA2, 0x5A);
+		g.setColor(gold);
+		// two page leaves meeting at a spine
+		g.fillPolygon(new int[]{4, 11, 11, 4}, new int[]{7, 5, 17, 19}, 4);
+		g.fillPolygon(new int[]{20, 13, 13, 20}, new int[]{7, 5, 17, 19}, 4);
+		g.setColor(new Color(0x1E, 0x1B, 0x16));
+		// page lines
+		g.drawLine(6, 9, 10, 8);
+		g.drawLine(6, 12, 10, 11);
+		g.drawLine(14, 8, 18, 9);
+		g.drawLine(14, 11, 18, 12);
+		g.setColor(gold);
+		g.drawLine(12, 5, 12, 18);   // spine
 		g.dispose();
 		return img;
 	}
