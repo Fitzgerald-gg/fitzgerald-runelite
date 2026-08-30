@@ -3,72 +3,342 @@
  */
 package chronicle.panel;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Locale;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * The one table that makes every counter presentable: key → (label, family).
+ * The one table that makes every counter presentable: key → (label, family,
+ * section) — a direct port of the site's settled tracker taxonomy (the
+ * trackers page's COMBAT/LIVING_FLAT/LEDGER sets and SKILLS specs), so the
+ * panel and fitzgerald.gg file, label and sort every key the same way.
  *
- * <p>This registry drives the Stats tab, the search index and Home's strip at
- * once — a tracker that exists in the model appears on every surface with no
- * panel code, which is what keeps "comprehensive" from rotting as counters are
- * added. Labels fall back to a camelCase→words prettifier, so even a key this
- * class has never heard of renders acceptably; explicit entries exist only
- * where the prettifier would read wrong.
- *
- * <p>Five families, everything filed: offerings live under Skilling as the
- * Prayer craft (that is what they are in game), travel takes the distance
- * counters, economy takes every gp figure, and anything unrecognised lands
- * visibly in Living → Elsewhere rather than in a dumping-ground tab.
+ * <p>Four facets, the site's own: Living · Combat · Skilling · Ledger &amp;
+ * Roads. Within Skilling each craft owns its keys by explicit claim first,
+ * then typed suffix (longest first, so "FailedPickpockets" beats
+ * "Pickpockets"). Generic totals ("floors" — logsChopped, bonesBuried) stay
+ * OUT of the rows: they head their section, and the unresolved remainder
+ * surfaces as a ghost "Other" row so rows always reconcile to the headline.
  */
 public final class StatRegistry
 {
-	/** Display families, in tab-pill order. */
+	/** Display facets, in the site's tab order. */
 	public static final String[] FAMILIES = {
-		"Combat", "Skilling", "Travel", "Living", "Economy"
+		"Living", "Combat", "Skilling", "Ledger & Roads"
 	};
 
-	private static final Map<String, String> LABELS = new HashMap<>();
+	// ── ownership sets, ported verbatim from the site ──────────────────
 	private static final Set<String> COMBAT = new HashSet<>(Arrays.asList(
-		"damageDealt", "damageDealtMelee", "damageDealtRanged", "damageDealtMagic",
-		"damageTaken", "highestHit", "highestHitTaken", "deaths", "hitsMissed",
-		"hitsBlocked", "specialAttacksUsed", "poisonDamageTaken", "venomDamageTaken",
-		"ammoConsumed", "hitpointsRegenerated", "divinePotionDamage"));
-	private static final Set<String> ECONOMY = new HashSet<>(Arrays.asList(
-		"coinsFromAlchemy", "coinsSpentAtShops", "coinsEarnedAtShops",
-		"itemsDroppedValue", "highAlchemyCasts", "lowAlchemyCasts",
-		"itemsDiscarded", "untakenLootCount"));
+		"damageDealt", "damageTaken", "highestHit", "highestHitTaken",
+		"hitsMissed", "hitsBlocked", "deaths", "poisonDamageTaken", "venomDamageTaken",
+		"specialAttacksUsed", "damageDealtMelee", "damageDealtRanged", "damageDealtMagic"));
+	private static final Set<String> LIVING_FLAT = new HashSet<>(Arrays.asList(
+		"foodEaten", "potionDoses", "beersDrunk", "vialsShattered",
+		"hitpointsRegenerated", "divinePotionDamage", "potionsConsumedValue",
+		"foodConsumedValue", "consumedValue"));
+	private static final Set<String> LEDGER = new HashSet<>(Arrays.asList(
+		"resourcesGatheredValue", "coinsFromAlchemy", "itemsDroppedValue",
+		"itemsDiscarded", "examines", "coinsSpentAtShops", "coinsEarnedAtShops",
+		"untakenLootValue", "untakenLootCount", "distanceWalked", "distanceRan",
+		"ammoConsumed", "offensiveSpellsCast", "cabbagesPicked", "flaxGathered",
+		"animalsPetted", "patchesRaked", "highAlchemyCasts", "lowAlchemyCasts"));
+	// The site hides these outright: totals whose story other surfaces tell
+	// (History owns xp; the offering-xp figures double-count real Prayer xp).
+	private static final Set<String> HIDE = new HashSet<>(Arrays.asList(
+		"totalXpGained", "bowsFletched", "demonicOfferingXp", "sinisterOfferingXp"));
+
+	/** One craft's claim: explicit keys and floors first, then typed suffixes. */
+	private static final class SkillSpec
+	{
+		final String name;
+		final String[] suffixes;
+		final String[] floors;
+		final String[] keys;
+
+		SkillSpec(String name, String[] suffixes, String[] floors, String[] keys)
+		{
+			this.name = name;
+			this.suffixes = suffixes;
+			this.floors = floors;
+			this.keys = keys;
+		}
+	}
+
+	private static final String[] NONE = {};
+	// Canonical order, ported from the site's SKILLS array.
+	private static final List<SkillSpec> SKILLS = Arrays.asList(
+		new SkillSpec("Woodcutting", new String[]{"LogsChopped"}, new String[]{"logsChopped"}, NONE),
+		new SkillSpec("Fishing", new String[]{"Caught"}, new String[]{"fishCaught"}, NONE),
+		new SkillSpec("Cooking", new String[]{"Cooked"}, new String[]{"foodCooked"},
+			new String[]{"foodBurned"}),
+		new SkillSpec("Firemaking", new String[]{"LogsBurned"}, new String[]{"logsBurned"}, NONE),
+		new SkillSpec("Mining", new String[]{"OreMined", "Mined"}, new String[]{"rocksMined"}, NONE),
+		new SkillSpec("Smithing", new String[]{"BarsSmelted", "ItemsSmithed"}, NONE,
+			new String[]{"itemsSmithed"}),
+		new SkillSpec("Herblore", NONE, NONE,
+			new String[]{"herbsCleaned", "unfinishedPotionsMade", "potionsMade"}),
+		new SkillSpec("Fletching", new String[]{"LogsFletched"}, NONE,
+			new String[]{"dartsFletched", "arrowsFletched", "boltsFletched", "boltsUnfinished",
+				"javelinsFletched", "boltTips", "crossbowsStrung", "crossbowsUnstrung",
+				"crossbowStocksCut", "bowsStrung", "logsFletched"}),
+		new SkillSpec("Crafting", NONE, NONE,
+			new String[]{"gemsCut", "glassBlown", "leatherCrafted", "dhideCrafted",
+				"jewelleryCrafted", "potteryMade", "battlestavesCrafted", "itemsSpun"}),
+		new SkillSpec("Runecraft", new String[]{"Runecrafted"}, new String[]{"runesCrafted"}, NONE),
+		new SkillSpec("Agility", NONE, new String[]{"agilityObstacles"},
+			new String[]{"rooftopAgilityLaps", "normalAgilityLaps"}),
+		new SkillSpec("Thieving",
+			new String[]{"FailedPickpockets", "Pickpockets", "StallsThieved", "ChestsLooted"},
+			new String[]{"pickPockets", "stallsThieved", "chestsLooted"},
+			new String[]{"failedPickPockets", "safesCracked"}),
+		new SkillSpec("Farming", new String[]{"Harvested"}, new String[]{"farmingActions"},
+			new String[]{"seedsPlanted"}),
+		new SkillSpec("Hunter", new String[]{"Trapped"}, new String[]{"creaturesTrapped"},
+			new String[]{"implingsCaught", "chompyBirdsPlucked"}),
+		new SkillSpec("Prayer",
+			new String[]{"BonesBuried", "AshesScattered", "HeadsReanimated"},
+			new String[]{"bonesBuried", "ashesScattered", "headsReanimated"},
+			new String[]{"bonesSacrificed", "ashesSacrificed"}),
+		new SkillSpec("Construction", NONE, NONE, new String[]{"constructionBuilds"}));
+
+	// Explicit claims resolve before any suffix sweep — a broad suffix
+	// (Fishing "Caught") can never steal another craft's key (implingsCaught).
+	private static final Map<String, String> KEY_SKILL = new HashMap<>();
+	private static final Set<String> FLOORS = new HashSet<>();
 
 	static
 	{
-		// Only where the prettifier misleads; everything else falls through.
+		for (SkillSpec s : SKILLS)
+		{
+			for (String k : s.keys)
+			{
+				KEY_SKILL.put(k, s.name);
+			}
+			for (String k : s.floors)
+			{
+				KEY_SKILL.put(k, s.name);
+				FLOORS.add(k);
+			}
+		}
+		FLOORS.add("teleportsTotal");
+		FLOORS.add("teleports");
+	}
+
+	private static final Map<String, String> LABELS = new HashMap<>();
+	private static final Map<String, String> TELE_NAMES = new HashMap<>();
+
+	static
+	{
+		// The site's LABELS table, plus the panel's own price-at-use counter.
+		LABELS.put("hitpointsRegenerated", "Hitpoints regained");
+		LABELS.put("divinePotionDamage", "Divine potion self-damage");
+		LABELS.put("distanceWalked", "Distance walked");
+		LABELS.put("distanceRan", "Distance run");
+		LABELS.put("tilesWalked", "Tiles walked");
+		LABELS.put("tilesRan", "Tiles run");
+		LABELS.put("coinsFromAlchemy", "Coins from alchemy");
+		LABELS.put("itemsDroppedValue", "Value dropped");
+		LABELS.put("resourcesGatheredValue", "Resources gathered");
+		LABELS.put("untakenLootValue", "Uncollected loot");
+		LABELS.put("untakenLootCount", "Loot left behind");
+		LABELS.put("coinsSpentAtShops", "Spent at shops");
+		LABELS.put("coinsEarnedAtShops", "Earned at shops");
+		LABELS.put("offensiveSpellsCast", "Offensive casts");
+		LABELS.put("ammoConsumed", "Ammunition spent");
+		LABELS.put("foodEaten", "Meals eaten");
+		LABELS.put("potionDoses", "Doses drunk");
+		LABELS.put("highestHit", "Highest hit");
+		LABELS.put("highestHitTaken", "Highest hit taken");
+		LABELS.put("specialAttacksUsed", "Specials spent");
+		LABELS.put("consumedValue", "Consumed value");
 		LABELS.put("damageDealtMelee", "— by melee");
 		LABELS.put("damageDealtRanged", "— by ranged");
 		LABELS.put("damageDealtMagic", "— by magic");
-		LABELS.put("highestHit", "Highest hit");
-		LABELS.put("highestHitTaken", "Highest hit taken");
-		LABELS.put("tilesWalked", "Tiles walked");
-		LABELS.put("tilesRan", "Tiles run");
-		LABELS.put("distanceRan", "Distance run");
-		LABELS.put("coinsFromAlchemy", "Coins from alchemy");
-		LABELS.put("specialAttacksUsed", "Specials spent");
-		LABELS.put("consumedValue", "Consumed value");
-		LABELS.put("totalXpGained", "Total xp gained");
-		LABELS.put("untakenLootCount", "Loot left behind");
+
+		// Destinations are place names: Title Case, with the punctuation the
+		// camelCase split can't recover — the site's TELE_NAMES, verbatim.
+		TELE_NAMES.put("teleportsSeersVillage", "Seers' Village");
+		TELE_NAMES.put("teleportsFenkenstrain", "Fenkenstrain's Castle");
+		TELE_NAMES.put("teleportsFortis", "Civitas illa Fortis");
+		TELE_NAMES.put("teleportsGrandExchange", "Grand Exchange");
+		TELE_NAMES.put("teleportsWarriorsGuild", "Warriors' Guild");
+		TELE_NAMES.put("teleportsLegendsGuild", "Legends' Guild");
+		TELE_NAMES.put("teleportsOttosGrotto", "Otto's Grotto");
+		TELE_NAMES.put("teleportsDiaryRegion", "Achievement Diary");
+		TELE_NAMES.put("teleportsFalo", "Falo the Bard");
+		TELE_NAMES.put("teleportsPandemonium", "The Pandemonium");
+		TELE_NAMES.put("teleportsEmirsArena", "Emir's Arena");
+		TELE_NAMES.put("teleportsChampionsGuild", "Champions' Guild");
+		TELE_NAMES.put("teleportsWizardsTower", "Wizards' Tower");
+		TELE_NAMES.put("teleportsTearsOfGuthix", "Tears of Guthix");
+		TELE_NAMES.put("teleportsTheOutpost", "The Outpost");
+		TELE_NAMES.put("teleportsSlayerDungeons", "Slayer dungeons");
+		TELE_NAMES.put("teleportsColosseum", "Fortis Colosseum");
+		TELE_NAMES.put("teleportsDondakansRock", "Dondakan's Rock");
+		TELE_NAMES.put("teleportsEaglesEyrie", "Eagle's Eyrie");
+		TELE_NAMES.put("teleportsGiantsFoundry", "Giants' Foundry");
+		TELE_NAMES.put("teleportsKharedst", "Kourend (Memoirs)");
 	}
 
 	private StatRegistry()
 	{
 	}
 
-	/** Diagnostic keys the panel never shows (leading underscore convention). */
+	/** Keys the panel never shows: diagnostics, plus the site's HIDE set. */
 	public static boolean hidden(String key)
 	{
-		return key.startsWith("_");
+		return key.startsWith("_") || HIDE.contains(key);
+	}
+
+	/**
+	 * Floors are generic totals (logsChopped, bonesBuried, teleportsTotal):
+	 * they head their section rather than appearing as rows, and their
+	 * unresolved remainder reconciles as the ghost "Other" row.
+	 */
+	public static boolean isFloor(String key)
+	{
+		return FLOORS.contains(key);
+	}
+
+	/** The craft that owns a key, or null: explicit claim, then suffix. */
+	public static String skillOf(String key)
+	{
+		String claimed = KEY_SKILL.get(key);
+		if (claimed != null)
+		{
+			return claimed;
+		}
+		if (key.endsWith("Value") || COMBAT.contains(key))
+		{
+			return null;   // value keys and damage are never actions
+		}
+		for (SkillSpec s : SKILLS)
+		{
+			for (String suf : s.suffixes)
+			{
+				if (key.endsWith(suf) && !key.equals(suf))
+				{
+					return s.name;
+				}
+			}
+		}
+		return null;
+	}
+
+	/** The facet a key files under, one of {@link #FAMILIES}. */
+	public static String family(String key)
+	{
+		if (LIVING_FLAT.contains(key))
+		{
+			return "Living";
+		}
+		if (COMBAT.contains(key))
+		{
+			return "Combat";
+		}
+		if (LEDGER.contains(key))
+		{
+			return "Ledger & Roads";
+		}
+		if (key.endsWith("Value") || key.startsWith("coins"))
+		{
+			return "Ledger & Roads";
+		}
+		if (skillOf(key) != null)
+		{
+			return "Skilling";
+		}
+		if (key.endsWith("Eaten") || key.endsWith("Doses") || key.contains("Drunk")
+			|| key.startsWith("food") || key.startsWith("potion") || key.startsWith("vials"))
+		{
+			return "Living";
+		}
+		if (key.startsWith("teleports") || key.startsWith("tiles") || key.startsWith("distance"))
+		{
+			return "Ledger & Roads";
+		}
+		// Everything unclaimed is an odd or an end — visible, never a junk tab.
+		return "Ledger & Roads";
+	}
+
+	/**
+	 * The section within a facet. Skilling → the craft; Living → Food /
+	 * Potions / "" (flat); Ledger &amp; Roads → The purse / On foot /
+	 * Teleports / Destinations / Odds &amp; ends. Empty string = the facet's
+	 * flat top list.
+	 */
+	public static String subgroup(String key)
+	{
+		String fam = family(key);
+		if (fam.equals("Skilling"))
+		{
+			String skill = skillOf(key);
+			return skill != null ? skill : "";
+		}
+		if (fam.equals("Living"))
+		{
+			if (LIVING_FLAT.contains(key))
+			{
+				return "";
+			}
+			if (key.endsWith("Eaten"))
+			{
+				return "Food";
+			}
+			if (key.endsWith("Doses"))
+			{
+				return "Potions";
+			}
+			return "";
+		}
+		if (fam.equals("Ledger & Roads"))
+		{
+			if (key.startsWith("teleportsVia") || key.equals("teleportsTotal") || key.equals("teleports"))
+			{
+				return "Teleports";
+			}
+			if (key.startsWith("teleports"))
+			{
+				return "Destinations";
+			}
+			if (key.startsWith("tiles") || key.startsWith("distance"))
+			{
+				return "On foot";
+			}
+			if (isGp(key))
+			{
+				return "The purse";
+			}
+			return "Odds & ends";
+		}
+		return "";
+	}
+
+	/** The floor keys whose sum heads a section (empty for floorless ones). */
+	public static List<String> floorKeys(String subgroup)
+	{
+		for (SkillSpec s : SKILLS)
+		{
+			if (s.name.equals(subgroup))
+			{
+				return Arrays.asList(s.floors);
+			}
+		}
+		switch (subgroup)
+		{
+			case "Teleports":
+				return Arrays.asList("teleportsTotal", "teleports");
+			case "Food":
+				return java.util.Collections.singletonList("foodEaten");
+			case "Potions":
+				return java.util.Collections.singletonList("potionDoses");
+			default:
+				return java.util.Collections.emptyList();
+		}
 	}
 
 	/** Human label for a counter key. Never null; unknown keys prettify. */
@@ -89,172 +359,98 @@ public final class StatRegistry
 		}
 		if (key.startsWith("teleports") && key.length() > "teleports".length())
 		{
-			// Destination name, bare — the client's pixel font has no arrow
-			// glyph, and the Travel family already supplies the context.
-			return prettify(key.substring("teleports".length()));
+			return teleName(key);
 		}
 		return prettify(key);
 	}
 
-	/** True when a key belongs to the Prayer craft: offerings in every form. */
-	private static boolean isPrayer(String key)
+	/**
+	 * The label a key takes as a ROW inside its section: typed keys shed
+	 * their verb ("willowLogsChopped" reads "Willow logs" under WOODCUTTING),
+	 * destinations read as place names, everything else falls to label().
+	 */
+	public static String rowLabel(String key)
 	{
-		return key.contains("Buried") || key.contains("Offered")
-			|| key.contains("Offering") || key.contains("offering")
-			|| key.contains("Scattered") || key.contains("Sacrificed")
-			|| key.contains("Reanimated") || key.equals("prayersActivated")
-			|| key.equals("headsReanimated");
+		String skill = skillOf(key);
+		if (skill != null && !KEY_SKILL.containsKey(key))
+		{
+			// matched by suffix — find it (longest wins within the owning craft)
+			for (SkillSpec s : SKILLS)
+			{
+				if (!s.name.equals(skill))
+				{
+					continue;
+				}
+				for (String suf : s.suffixes)
+				{
+					if (key.endsWith(suf) && !key.equals(suf))
+					{
+						return typedName(key, suf);
+					}
+				}
+			}
+		}
+		if (family(key).equals("Living") && !LIVING_FLAT.contains(key))
+		{
+			if (key.endsWith("Eaten"))
+			{
+				return typedName(key, "Eaten");
+			}
+			if (key.endsWith("Doses"))
+			{
+				return typedName(key, "Doses");
+			}
+		}
+		return label(key);
 	}
 
-	/** The family a key files under, one of {@link #FAMILIES}. */
-	public static String family(String key)
+	/** Title-Case place name for a destination key, punctuation restored. */
+	private static String teleName(String key)
 	{
-		if (key.equals("consumedValue"))
+		String fixed = TELE_NAMES.get(key);
+		if (fixed != null)
 		{
-			return "Living";
+			return fixed;
 		}
-		if (COMBAT.contains(key))
+		String s = prettify(key.substring("teleports".length()));
+		// Title Case each word — destinations are proper nouns.
+		StringBuilder out = new StringBuilder(s.length());
+		boolean cap = true;
+		for (char c : s.toCharArray())
 		{
-			return "Combat";
+			out.append(cap && Character.isLetter(c) ? Character.toUpperCase(c) : c);
+			cap = c == ' ';
 		}
-		if (ECONOMY.contains(key) || key.endsWith("Value") || key.startsWith("coins"))
-		{
-			return "Economy";
-		}
-		if (isPrayer(key) || key.equals("totalXpGained"))
-		{
-			return "Skilling";
-		}
-		if (key.startsWith("teleports") || key.startsWith("tiles")
-			|| key.startsWith("distance")
-			|| key.contains("Fairy") || key.contains("Spirit"))
-		{
-			return "Travel";
-		}
-		if (key.endsWith("Doses") || key.startsWith("food") || key.startsWith("potion")
-			|| key.startsWith("vials") || key.contains("Eaten") || key.contains("Drunk"))
-		{
-			return "Living";
-		}
-		if (key.endsWith("Chopped") || key.endsWith("Caught") || key.endsWith("Cooked")
-			|| key.endsWith("Mined") || key.endsWith("Fished") || key.endsWith("Crafted")
-			|| key.endsWith("Burned") || key.endsWith("Trapped") || key.endsWith("Plucked")
-			|| key.endsWith("Harvested") || key.endsWith("Thieved")
-			|| key.endsWith("Smithed") || key.endsWith("Fletched") || key.endsWith("Runecrafted")
-			|| key.toLowerCase(Locale.ROOT).contains("pickpocket")
-			|| key.startsWith("agility") || key.endsWith("Smelted"))
-		{
-			return "Skilling";
-		}
-		// Unrecognised keys land somewhere visible, not in a junk tab.
-		return "Living";
+		return out.toString();
+	}
+
+	/** Strip a typed key's verb suffix: "willowLogsChopped" → "Willow logs". */
+	private static String typedName(String key, String suffix)
+	{
+		String base = key.substring(0, key.length() - suffix.length());
+		String s = prettify(base).replaceAll("(?i)\\(?level\\s*\\d+\\)?", " ")
+			.replaceAll("[()]", " ").replaceAll("\\s+", " ").trim();
+		return s.isEmpty() ? label(key) : s;
 	}
 
 	/**
-	 * A sub-header within a family — the craft or the method — so big families
-	 * read as clustered sections rather than one interleaved list. Empty means
-	 * "no sub-header" (small families render flat).
+	 * Typed keys are the per-resource ones matched by suffix ("willowLogsChopped",
+	 * "sharkEaten") — the rows a floor reconciles against. Explicit extras
+	 * (foodBurned, implingsCaught) ride in their section but stay out of the
+	 * ghost-"Other" arithmetic, exactly as on the site.
 	 */
-	public static String subgroup(String key)
+	public static boolean typed(String key)
 	{
-		String fam = family(key);
-		if (fam.equals("Skilling"))
+		if (KEY_SKILL.containsKey(key))
 		{
-			if (key.equals("totalXpGained"))
-			{
-				return "";   // headerless, tops the tab by value
-			}
-			if (isPrayer(key))
-			{
-				return "Prayer";
-			}
-			String kl = key.toLowerCase(Locale.ROOT);
-			if (kl.contains("impling") || kl.contains("moth") || kl.contains("salamander")
-				|| kl.contains("chompy") || key.endsWith("Trapped") || key.endsWith("Plucked")
-				|| kl.contains("lizard"))
-			{
-				return "Hunter";
-			}
-			if (key.endsWith("Cooked"))
-			{
-				return "Cooking";
-			}
-			if (key.endsWith("Chopped"))
-			{
-				return "Woodcutting";
-			}
-			if (key.endsWith("Burned"))
-			{
-				return "Firemaking";
-			}
-			if (key.endsWith("Mined"))
-			{
-				return "Mining";
-			}
-			if (key.endsWith("Caught") || key.endsWith("Fished"))
-			{
-				return "Fishing";
-			}
-			if (key.endsWith("Thieved") || kl.contains("pickpocket"))
-			{
-				return "Thieving";
-			}
-			if (key.endsWith("Harvested"))
-			{
-				return "Farming";
-			}
-			if (key.endsWith("Smithed") || key.endsWith("Smelted"))
-			{
-				return "Smithing";
-			}
-			if (key.endsWith("Fletched"))
-			{
-				return "Fletching";
-			}
-			if (key.startsWith("agility"))
-			{
-				return "Agility";
-			}
-			if (key.endsWith("Crafted") || key.endsWith("Runecrafted"))
-			{
-				return "Runecraft";
-			}
-			return "Elsewhere";
+			return false;
 		}
-		if (fam.equals("Travel"))
+		if (skillOf(key) != null)
 		{
-			if (key.startsWith("tiles") || key.startsWith("distance"))
-			{
-				return "On foot";
-			}
-			if (key.startsWith("teleportsVia") || key.equals("teleportsTotal") || key.equals("teleports"))
-			{
-				return "Teleports";
-			}
-			if (key.startsWith("teleports"))
-			{
-				return "Destinations";
-			}
-			return "";
+			return true;
 		}
-		if (fam.equals("Living"))
-		{
-			if (key.contains("Eaten") || key.startsWith("food"))
-			{
-				return "Food";
-			}
-			if (key.endsWith("Doses") || key.startsWith("potion") || key.startsWith("vials")
-				|| key.contains("Drunk"))
-			{
-				return "Potions";
-			}
-			if (key.equals("consumedValue"))
-			{
-				return "";
-			}
-			return "Elsewhere";
-		}
-		return "";
+		return family(key).equals("Living") && !LIVING_FLAT.contains(key)
+			&& (key.endsWith("Eaten") || key.endsWith("Doses"));
 	}
 
 	/** Whether a value renders as gp. */
@@ -313,5 +509,39 @@ public final class StatRegistry
 			prev = w;
 		}
 		return out.toString();
+	}
+
+	/** The site's row order: count desc, then name — deterministic ties. */
+	public static int compareRows(Map.Entry<String, Long> a, Map.Entry<String, Long> b)
+	{
+		int byValue = Long.compare(b.getValue(), a.getValue());
+		return byValue != 0 ? byValue
+			: rowLabel(a.getKey()).compareToIgnoreCase(rowLabel(b.getKey()));
+	}
+
+	/** Convenience: all section names a facet renders, in display order.
+	 *  Skilling's crafts order dynamically by total; the rest are fixed. */
+	public static List<String> fixedSections(String family)
+	{
+		switch (family)
+		{
+			case "Living":
+				return Arrays.asList("", "Food", "Potions");
+			case "Ledger & Roads":
+				return Arrays.asList("The purse", "On foot", "Teleports", "Destinations", "Odds & ends");
+			default:
+				return new ArrayList<>(java.util.Collections.singletonList(""));
+		}
+	}
+
+	/** Skill sections in canonical order (panel ranks by total at render). */
+	public static List<String> skillNames()
+	{
+		List<String> out = new ArrayList<>(SKILLS.size());
+		for (SkillSpec s : SKILLS)
+		{
+			out.add(s.name);
+		}
+		return out;
 	}
 }

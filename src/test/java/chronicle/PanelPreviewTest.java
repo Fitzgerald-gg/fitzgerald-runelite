@@ -103,6 +103,10 @@ public class PanelPreviewTest
 		shoot(panel, out, prefix + "-home-session", "HOME", "SESSION");
 		shoot(panel, out, prefix + "-drops-lifetime", "DROPS", "LIFETIME");
 		shoot(panel, out, prefix + "-drops-session", "DROPS", "SESSION");
+		// slayer's journey lands via invokeLater after the first paint — the
+		// second shot renders the settled view over the same file
+		shoot(panel, out, prefix + "-slayer", "SLAYER", "LIFETIME");
+		shoot(panel, out, prefix + "-slayer", "SLAYER", "LIFETIME");
 
 		// drops with the top source expanded
 		List<LocalStore.SourceRow> src = stub.dropSources();
@@ -127,8 +131,15 @@ public class PanelPreviewTest
 		for (String fam : chronicle.panel.StatRegistry.FAMILIES)
 		{
 			set(panel, "statsFamily", fam);
-			shoot(panel, out, prefix + "-stats-" + fam.toLowerCase(), "STATS", "LIFETIME");
+			String slug = fam.toLowerCase().replaceAll("[^a-z]+", "-");
+			shoot(panel, out, prefix + "-stats-" + slug, "STATS", "LIFETIME");
 		}
+		// one craft opened, to see rows + the ghost "Other" reconciliation
+		set(panel, "statsFamily", "Skilling");
+		expandSection(panel, "Skilling:Cooking");
+		expandSection(panel, "Skilling:Prayer");
+		shoot(panel, out, prefix + "-stats-skilling-open", "STATS", "LIFETIME");
+		collapseAll(panel);
 		set(panel, "statsFamily", chronicle.panel.StatRegistry.FAMILIES[0]);
 		shoot(panel, out, prefix + "-stats-session", "STATS", "SESSION");
 
@@ -236,7 +247,25 @@ public class PanelPreviewTest
 		kcs.addProperty("abyssal sire", 214);
 		kcs.addProperty("zulrah", 502);
 		clog.add("kcs", kcs);
+		JsonObject skcs = new JsonObject();
+		skcs.addProperty("Abyssal demon", 4112);
+		skcs.addProperty("Nechryael", 2204);
+		skcs.addProperty("Dust devil", 928);
+		skcs.addProperty("Gargoyle", 661);
+		clog.add("slayer_kcs", skcs);
 		s.clog = clog;
+
+		// a cloud journey, so the Slayer tab renders its full dress
+		s.cloud = true;
+		List<ChronicleApiClient.SlayerTask> tasks = new ArrayList<>();
+		tasks.add(new ChronicleApiClient.SlayerTask("Abyssal demons", 121, 184, 4,
+			System.currentTimeMillis() / 1000.0, 1_112_400L, true));
+		tasks.add(new ChronicleApiClient.SlayerTask("Nechryael", 167, 0, 0,
+			System.currentTimeMillis() / 1000.0 - 400_000, 812_113L, false));
+		tasks.add(new ChronicleApiClient.SlayerTask("Thermonuclear smoke devils", 233, 0, 12,
+			System.currentTimeMillis() / 1000.0 - 900_000, 2_012_113L, false));
+		s.journey = new ChronicleApiClient.SlayerJourney(214, 48_231, 61_204_113L,
+			8_204_113L, tasks);
 		s.clogFinished = 412;
 		s.clogAvailable = 1_568;
 
@@ -347,6 +376,8 @@ public class PanelPreviewTest
 		int clogAvailable;
 		TreeMap<LocalDate, HistoryLog.Baseline> history = new TreeMap<>();
 		LocalStore store;   // set for the real-journal variant
+		boolean cloud;
+		ChronicleApiClient.SlayerJourney journey;
 		private final ItemManager itemManager;
 
 		StubPlugin(ItemManager im)
@@ -475,13 +506,20 @@ public class PanelPreviewTest
 		@Override
 		boolean cloudActive()
 		{
-			return false;
+			return cloud;
 		}
 
 		@Override
 		String serverBaseUrl()
 		{
-			return "";
+			return cloud ? "https://example.invalid" : "";
+		}
+
+		@Override
+		void fetchSlayerJourney(
+			java.util.function.Consumer<ChronicleApiClient.SlayerJourney> onDone)
+		{
+			onDone.accept(journey);
 		}
 
 		@Override
@@ -607,6 +645,24 @@ public class PanelPreviewTest
 		Field f = ChroniclePanel.class.getDeclaredField(field);
 		f.setAccessible(true);
 		f.set(panel, val);
+	}
+
+	@SuppressWarnings("unchecked")
+	private static java.util.Set<String> expandedSet(ChroniclePanel panel) throws Exception
+	{
+		Field f = ChroniclePanel.class.getDeclaredField("statsExpanded");
+		f.setAccessible(true);
+		return (java.util.Set<String>) f.get(panel);
+	}
+
+	private static void expandSection(ChroniclePanel panel, String key) throws Exception
+	{
+		expandedSet(panel).add(key);
+	}
+
+	private static void collapseAll(ChroniclePanel panel) throws Exception
+	{
+		expandedSet(panel).clear();
 	}
 
 	@SuppressWarnings({"unchecked", "rawtypes"})

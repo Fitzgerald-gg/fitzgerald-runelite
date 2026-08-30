@@ -80,7 +80,7 @@ class ChroniclePanel extends PluginPanel
 
 	private enum View
 	{
-		HOME, DROPS, LOG, STATS, HISTORY, JOURNAL
+		HOME, DROPS, SLAYER, LOG, STATS, HISTORY, JOURNAL
 	}
 
 	private final ChroniclePlugin plugin;
@@ -166,9 +166,10 @@ class ChroniclePanel extends PluginPanel
 			}
 		});
 		// ── tabs first (the mock's order), then search, then the scope chip ──
-		tabGroup.setLayout(new GridLayout(1, 6, 2, 0));
+		tabGroup.setLayout(new GridLayout(1, 7, 2, 0));
 		addTab("tab_home.png", "Home", View.HOME);
 		addTab("tab_drops.png", "Drops", View.DROPS);
+		addTab("tab_slayer.png", "Slayer", View.SLAYER);
 		addTab("tab_log.png", "Collection log", View.LOG);
 		addTab("tab_stats.png", "Stats", View.STATS);
 		addTab("tab_history.png", "History", View.HISTORY);
@@ -209,6 +210,7 @@ class ChroniclePanel extends PluginPanel
 			view = target;
 			expandedSource = null;
 			dropsShown = ROW_CAP;
+			slayerShown = ROW_CAP;
 			searchField.setText("");
 			rebuild();
 			return true;
@@ -275,6 +277,9 @@ class ChroniclePanel extends PluginPanel
 			{
 				case DROPS:
 					body = buildDrops();
+					break;
+				case SLAYER:
+					body = buildSlayer();
 					break;
 				case LOG:
 					body = buildLog();
@@ -525,6 +530,153 @@ class ChroniclePanel extends PluginPanel
 		return p;
 	}
 
+	// The journey fetches once per session on first open; null = not yet asked.
+	private ChronicleApiClient.SlayerJourney journeyCache;
+	private boolean journeyFetching;
+	private int slayerShown = ROW_CAP;
+	private static final DateTimeFormatter TASK_DAY =
+		DateTimeFormatter.ofPattern("d MMM yy").withZone(ZoneId.systemDefault());
+
+	/** The Slayer chapter: current task, the cloud's task-by-task journey,
+	 *  and the Kill Log the journal scraped from the in-game widget. */
+	private JPanel buildSlayer()
+	{
+		JPanel p = column();
+		ChronicleEventCapture.SlayerView task = plugin.slayerView();
+		if (task != null)
+		{
+			JPanel card = card("Current task");
+			card.add(row(task.task, task.remaining + " left", accent()));
+			if (task.initial > 0)
+			{
+				card.add(progress(1f - (float) task.remaining / task.initial));
+			}
+			p.add(card);
+			p.add(vgap(6));
+		}
+
+		if (plugin.cloudActive())
+		{
+			if (journeyCache != null)
+			{
+				addJourney(p, journeyCache);
+			}
+			else if (journeyFetching)
+			{
+				p.add(note("Fetching the task journey from your cloud record…"));
+			}
+			else
+			{
+				journeyFetching = true;
+				plugin.fetchSlayerJourney(j -> SwingUtilities.invokeLater(() ->
+				{
+					journeyFetching = false;
+					journeyCache = j;
+					if (view == View.SLAYER)
+					{
+						rebuild();
+					}
+				}));
+				p.add(note("Fetching the task journey from your cloud record…"));
+			}
+		}
+		else
+		{
+			p.add(note("The task-by-task journey rides with cloud sync — the "
+				+ "journal keeps your Kill Log and completions meanwhile."));
+		}
+		p.add(vgap(6));
+
+		// The Kill Log, as last scraped from the in-game widget.
+		JsonObject cl = plugin.clogSnapshot();
+		if (cl.has("slayer_kcs") && cl.get("slayer_kcs").isJsonObject())
+		{
+			List<Map.Entry<String, Long>> kcs = new ArrayList<>();
+			for (Map.Entry<String, com.google.gson.JsonElement> e
+				: cl.getAsJsonObject("slayer_kcs").entrySet())
+			{
+				long v = safeLong(e.getValue());
+				if (v > 0)
+				{
+					kcs.add(new java.util.AbstractMap.SimpleEntry<>(e.getKey(), v));
+				}
+			}
+			if (!kcs.isEmpty())
+			{
+				kcs.sort(Map.Entry.<String, Long>comparingByValue().reversed());
+				JPanel card = card("Kill log");
+				int mounted = 0;
+				for (Map.Entry<String, Long> e : kcs)
+				{
+					if (mounted++ >= 20)
+					{
+						break;
+					}
+					card.add(row(e.getKey(), fmt(e.getValue()), null));
+				}
+				if (kcs.size() > 20)
+				{
+					card.add(ghostRow("and " + fmt(kcs.size() - 20) + " more — search finds them", ""));
+				}
+				p.add(card);
+			}
+		}
+		return p;
+	}
+
+	private void addJourney(JPanel p, ChronicleApiClient.SlayerJourney j)
+	{
+		if (j.tasks.isEmpty() && j.completedTasks == 0)
+		{
+			p.add(note("No tasks on the cloud record yet — they collect as "
+				+ "you play with the Slayer plugin on."));
+			return;
+		}
+		JPanel head = card("The journey");
+		head.add(row("Tasks done", fmt(j.completedTasks), accent()));
+		head.add(row("Kills on task", fmt(j.totalKills), null));
+		head.add(row("On-task loot", gp(j.totalValueGp) + " gp", null));
+		head.add(row("Slayer xp (est.)", gp(j.totalXpEst), null));
+		p.add(head);
+		p.add(vgap(6));
+		int mounted = 0;
+		for (ChronicleApiClient.SlayerTask t : j.tasks)
+		{
+			if (mounted++ >= slayerShown)
+			{
+				break;
+			}
+			JPanel card = cardPlain();
+			// In-progress is a colour cue (the accent lights the NAME too),
+			// not a suffix — text ate the card's width.
+			card.add(row(t.task, t.totalValue > 0 ? gp(t.totalValue) + " gp" : "",
+				accent(), t.inProgress));
+			String kills = t.inProgress && t.assignment > t.kills
+				? fmt(t.kills) + " / " + fmt(t.assignment)
+				: fmt(t.kills) + " kills";
+			if (t.noLootKills > 0)
+			{
+				kills += " · " + fmt(t.noLootKills) + " no-drop";
+			}
+			card.add(row(kills, t.ts > 0
+				? TASK_DAY.format(Instant.ofEpochMilli((long) (t.ts * 1000))) : "", null));
+			p.add(card);
+			p.add(vgap(4));
+		}
+		if (j.tasks.size() > slayerShown)
+		{
+			JButton more = new JButton("Show " + Math.min(ROW_CAP, j.tasks.size() - slayerShown)
+				+ " more of " + fmt(j.tasks.size()) + " tasks");
+			more.addActionListener(e ->
+			{
+				slayerShown += ROW_CAP;
+				rebuild();
+			});
+			p.add(more);
+			p.add(vgap(4));
+		}
+	}
+
 	/** The per-source drill: local bag as sprites; the cloud ledger's item
 	 *  rows fetched on first expand when the bag holds less than the cloud. */
 	private void addSourceDrill(JPanel card, LocalStore.SourceRow r)
@@ -635,7 +787,9 @@ class ChroniclePanel extends PluginPanel
 		p.add(vgap(6));
 
 		Map<String, Map<String, List<String>>> tax = taxonomy();
-		JPanel pills = new JPanel(new GridLayout(1, tax.size(), 3, 3));
+		// Three per row: five across clipped the names AND made the column's
+		// preferred width overflow the viewport (the min-size clip trigger).
+		JPanel pills = new JPanel(new GridLayout(0, 3, 3, 3));
 		pills.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		for (String tab : tax.keySet())
 		{
@@ -823,15 +977,14 @@ class ChroniclePanel extends PluginPanel
 		return out;
 	}
 
-	// Rows a sub-group shows before folding its tail behind search — long
-	// tails of one-offs (destinations, snack foods) are what made the tab
-	// feel like an inventory dump.
-	private static final int SUBGROUP_CAP = 10;
+	// Sections the player has clicked open this session; everything foldable
+	// starts folded, the clog browser's own idiom. Keyed family:section.
+	private final java.util.Set<String> statsExpanded = new java.util.HashSet<>();
 
 	private JPanel buildStats()
 	{
 		JPanel p = column();
-		JPanel pills = new JPanel(new GridLayout(0, 3, 3, 3));
+		JPanel pills = new JPanel(new GridLayout(0, 2, 3, 3));
 		pills.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		for (String fam : StatRegistry.FAMILIES)
 		{
@@ -852,57 +1005,191 @@ class ChroniclePanel extends PluginPanel
 		p.add(pills);
 		p.add(vgap(4));
 
+		// The site's model, ported: rows file into sections; generic floor
+		// totals (logsChopped, teleportsTotal) head their section instead of
+		// appearing as rows, and the unresolved remainder reconciles as a
+		// ghost "Other" row. Every row shows — big sections fold like the
+		// clog's pages rather than being capped.
 		Map<String, Long> counters = counters();
-		// Cluster the family's rows under sub-headers (the craft, the method)
-		// instead of one value-sorted free-for-all; sub-groups rank by their
-		// totals, rows rank within their group, tails fold behind search.
-		Map<String, List<Map.Entry<String, Long>>> groups = new LinkedHashMap<>();
+		Map<String, List<Map.Entry<String, Long>>> rowsBySection = new LinkedHashMap<>();
+		Map<String, Long> floorTotals = new LinkedHashMap<>();
 		for (Map.Entry<String, Long> e : counters.entrySet())
 		{
-			if (e.getValue() != 0 && !StatRegistry.hidden(e.getKey())
-				&& StatRegistry.family(e.getKey()).equals(statsFamily))
+			if (e.getValue() == 0 || StatRegistry.hidden(e.getKey())
+				|| !StatRegistry.family(e.getKey()).equals(statsFamily))
 			{
-				groups.computeIfAbsent(StatRegistry.subgroup(e.getKey()), k -> new ArrayList<>()).add(e);
+				continue;
 			}
+			String sec = StatRegistry.subgroup(e.getKey());
+			if (StatRegistry.isFloor(e.getKey()))
+			{
+				floorTotals.merge(sec, e.getValue(), Long::sum);
+				continue;
+			}
+			rowsBySection.computeIfAbsent(sec, k -> new ArrayList<>()).add(e);
 		}
-		if (groups.isEmpty())
+		if (rowsBySection.isEmpty() && floorTotals.isEmpty())
 		{
 			p.add(note(scope == Scope.SESSION
-				? "Nothing in this family yet this session."
-				: "Nothing tracked in this family yet."));
+				? "Nothing in this facet yet this session."
+				: "Nothing tracked in this facet yet."));
 			return p;
 		}
-		List<Map.Entry<String, List<Map.Entry<String, Long>>>> ordered = new ArrayList<>(groups.entrySet());
-		ordered.sort(Comparator.comparingLong((Map.Entry<String, List<Map.Entry<String, Long>>> g)
-			-> g.getValue().stream().mapToLong(Map.Entry::getValue).max().orElse(0)).reversed());
-		for (Map.Entry<String, List<Map.Entry<String, Long>>> g : ordered)
+
+		List<String> order = sectionOrder(rowsBySection, floorTotals);
+		for (String sec : order)
 		{
-			if (!g.getKey().isEmpty() && ordered.size() > 1)
+			List<Map.Entry<String, Long>> rows =
+				rowsBySection.getOrDefault(sec, new ArrayList<>());
+			rows.sort(StatRegistry::compareRows);
+			long floor = floorTotals.getOrDefault(sec, 0L);
+
+			if (sec.isEmpty())
 			{
-				p.add(group(g.getKey()));
-			}
-			g.getValue().sort(Map.Entry.<String, Long>comparingByValue().reversed());
-			int mounted = 0;
-			for (Map.Entry<String, Long> e : g.getValue())
-			{
-				if (mounted++ >= SUBGROUP_CAP)
+				for (Map.Entry<String, Long> e : rows)
 				{
-					break;
+					p.add(row(StatRegistry.rowLabel(e.getKey()), value(e), null));
 				}
-				String v = StatRegistry.isGp(e.getKey()) ? gp(e.getValue()) + " gp" : fmt(e.getValue());
-				p.add(row(StatRegistry.label(e.getKey()), v, null));
+				continue;
 			}
-			int rest = g.getValue().size() - SUBGROUP_CAP;
-			if (rest > 0)
+
+			if (rows.isEmpty() && floor == 0)
 			{
-				JLabel more = new JLabel("+ " + fmt(rest) + " more — search finds them");
-				more.setFont(FontManager.getRunescapeSmallFont());
-				more.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker().darker());
-				more.setBorder(BorderFactory.createEmptyBorder(1, 2, 1, 2));
-				p.add(more);
+				continue;
+			}
+
+			long typedSum = 0;
+			boolean anyTyped = false;
+			long shown = 0;
+			for (Map.Entry<String, Long> e : rows)
+			{
+				shown += e.getValue();
+				if (StatRegistry.typed(e.getKey()))
+				{
+					anyTyped = true;
+					typedSum += e.getValue();
+				}
+			}
+			long ghost = anyTyped && floor - typedSum >= 1 ? floor - typedSum : 0;
+			long total = Math.max(shown + ghost, floor);
+
+			boolean foldable = statsFamily.equals("Skilling")
+				|| sec.equals("Food") || sec.equals("Potions")
+				|| sec.equals("Teleports") || sec.equals("Destinations");
+			if (!foldable)
+			{
+				p.add(group(sec));
+				for (Map.Entry<String, Long> e : rows)
+				{
+					p.add(row(StatRegistry.rowLabel(e.getKey()), value(e), null));
+				}
+				continue;
+			}
+
+			String stateKey = statsFamily + ":" + sec;
+			boolean open = statsExpanded.contains(stateKey);
+			JPanel head = row(sec.toUpperCase(Locale.ROOT), fmt(total),
+				open ? accent() : null);
+			JLabel headName = (JLabel) ((BorderLayout) head.getLayout())
+				.getLayoutComponent(BorderLayout.CENTER);
+			headName.setFont(FontManager.getRunescapeSmallFont());
+			headName.setForeground(open ? accent() : ColorScheme.LIGHT_GRAY_COLOR.darker());
+			head.setBorder(BorderFactory.createEmptyBorder(6, 2, 2, 2));
+			head.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+			head.addMouseListener(clicker(() ->
+			{
+				if (!statsExpanded.remove(stateKey))
+				{
+					statsExpanded.add(stateKey);
+				}
+				rebuild();
+			}));
+			p.add(head);
+			if (open)
+			{
+				for (Map.Entry<String, Long> e : rows)
+				{
+					p.add(row(StatRegistry.rowLabel(e.getKey()), value(e), null));
+				}
+				if (ghost > 0)
+				{
+					p.add(ghostRow(sec.equals("Teleports") ? "Other means" : "Other",
+						fmt(ghost)));
+				}
+				// A floor-only section (Agility) opens to its single total row.
+				if (rows.isEmpty() && floor > 0)
+				{
+					p.add(row(sectionFloorLabel(sec), fmt(floor), null));
+				}
 			}
 		}
 		return p;
+	}
+
+	/** Sections in display order: Skilling's crafts rank by weight; the other
+	 *  facets keep the site's fixed order, with strays appended. */
+	private List<String> sectionOrder(Map<String, List<Map.Entry<String, Long>>> rowsBySection,
+		Map<String, Long> floorTotals)
+	{
+		java.util.LinkedHashSet<String> present = new java.util.LinkedHashSet<>();
+		present.addAll(rowsBySection.keySet());
+		present.addAll(floorTotals.keySet());
+		List<String> order = new ArrayList<>();
+		if (statsFamily.equals("Skilling"))
+		{
+			List<String> crafts = new ArrayList<>(present);
+			// A craft weighs its floor total when it has one (that IS the
+			// headline count), otherwise the sum of its rows — site rule.
+			crafts.sort(Comparator.comparingLong((String s) ->
+			{
+				long floor = floorTotals.getOrDefault(s, 0L);
+				if (floor > 0)
+				{
+					return floor;
+				}
+				long sum = 0;
+				for (Map.Entry<String, Long> e
+					: rowsBySection.getOrDefault(s, new ArrayList<>()))
+				{
+					sum += e.getValue();
+				}
+				return sum;
+			}).reversed());
+			order.addAll(crafts);
+		}
+		else
+		{
+			for (String sec : StatRegistry.fixedSections(statsFamily))
+			{
+				if (present.remove(sec))
+				{
+					order.add(sec);
+				}
+			}
+			order.addAll(present);
+		}
+		return order;
+	}
+
+	private static String value(Map.Entry<String, Long> e)
+	{
+		return StatRegistry.isGp(e.getKey()) ? gp(e.getValue()) + " gp" : fmt(e.getValue());
+	}
+
+	/** The row label a floor takes when it stands alone for its section. */
+	private static String sectionFloorLabel(String sec)
+	{
+		List<String> keys = StatRegistry.floorKeys(sec);
+		return keys.isEmpty() ? sec : StatRegistry.label(keys.get(0));
+	}
+
+	/** The reconciliation remainder: present, quiet, never the headline. */
+	private static JPanel ghostRow(String left, String right)
+	{
+		JPanel r = row(left, right, null);
+		((JLabel) ((BorderLayout) r.getLayout()).getLayoutComponent(BorderLayout.CENTER))
+			.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker().darker());
+		return r;
 	}
 
 	private JPanel buildHistory()
@@ -1479,8 +1766,10 @@ class ChroniclePanel extends PluginPanel
 			}
 			case "SLAYER":
 			{
-				String t = str(d, "slayerTask", "");
-				String kc = str(d, "killCount", "");
+				// Cloud-adopted entries carry the server's field names; the
+				// plugin's own chat-driven emits use the short ones.
+				String t = str(d, "slayerTask", str(d, "task", ""));
+				String kc = str(d, "killCount", str(d, "count", ""));
 				return "Task complete" + (t.isEmpty() ? "" : " — " + t)
 					+ (kc.isEmpty() ? "" : ", " + kc + " killed");
 			}
@@ -1658,6 +1947,7 @@ class ChroniclePanel extends PluginPanel
 		JPanel outer = new JPanel(new BorderLayout());
 		outer.setBackground(ColorScheme.SCROLL_TRACK_COLOR);
 		outer.setPreferredSize(new Dimension(10, 4));
+		outer.setMinimumSize(new Dimension(10, 4));   // see vgap(): min > pref clips rows
 		outer.setMaximumSize(new Dimension(Integer.MAX_VALUE, 4));
 		outer.setAlignmentX(Component.LEFT_ALIGNMENT);
 		JPanel inner = new JPanel();
@@ -1732,6 +2022,11 @@ class ChroniclePanel extends PluginPanel
 		JPanel p = new JPanel();
 		p.setOpaque(false);
 		p.setPreferredSize(new Dimension(1, h));
+		// Min must never exceed preferred: when any child is wider than the
+		// viewport, GridBagLayout silently recomputes ROW HEIGHTS from minimum
+		// sizes — and a childless panel's default minimum is 10px, inflating
+		// the grid past the reported height and clipping the last row.
+		p.setMinimumSize(new Dimension(1, h));
 		p.setMaximumSize(new Dimension(Integer.MAX_VALUE, h));
 		p.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return p;

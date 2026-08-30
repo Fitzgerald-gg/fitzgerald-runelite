@@ -148,6 +148,12 @@ public class ChroniclePlugin extends Plugin
 	// Server absolutes waiting to be floored into the journal (see the seed
 	// callback) once the journal's own load has finished.
 	private volatile Map<String, Integer> pendingServerFloor;
+	// The 4th adoption: month-end xp baselines from the cloud's snapshot
+	// archive, one-shot (flag cloudHistoryImported). Stash→apply like the rest.
+	private volatile java.util.List<ChronicleApiClient.WomSnapshot> pendingHistoryAdopt;
+	// True while the stashed feed adoption is the one-shot DEEP import —
+	// its config flag is only written once the adopt actually applies.
+	private volatile boolean pendingFeedDeep;
 	// The cloud ledger's per-source rollup, same lifecycle as the counter floor.
 	private volatile java.util.List<ChronicleApiClient.LedgerSource> pendingDropsAdopt;
 	private volatile java.util.List<ChronicleApiClient.FeedEvent> pendingFeedAdopt;
@@ -680,11 +686,31 @@ public class ChroniclePlugin extends Plugin
 				pendingDropsAdopt = ledger;
 				clientThread.invoke(this::refreshLocal);
 			});
-			api.fetchFeed(config.serverBaseUrl(), name, events ->
+			// The feed's first cloud adoption goes DEEP — the server holds
+			// milestones back to its first sync (2023 on the reference
+			// instance) and one 300-row window would orphan the early years.
+			boolean deepFeed = !"true".equals(
+				configManager.getConfiguration(GROUP, "cloudFeedDeepImported"));
+			api.fetchFeed(config.serverBaseUrl(), name, deepFeed ? 5000 : 300, events ->
 			{
+				pendingFeedDeep = deepFeed && events != null;
 				pendingFeedAdopt = events;
 				clientThread.invoke(this::refreshLocal);
 			});
+			// The xp archive adopts once too: month-end baselines back to the
+			// server's first snapshot, walked via the public gains endpoint —
+			// History answers for 2023, not just since this build.
+			if (!"true".equals(configManager.getConfiguration(GROUP, "cloudHistoryImported")))
+			{
+				api.fetchServerHistory(config.serverBaseUrl(), name, snaps ->
+				{
+					if (snaps != null && !snaps.isEmpty())
+					{
+						pendingHistoryAdopt = snaps;
+						clientThread.invoke(this::refreshLocal);
+					}
+				});
+			}
 			clientThread.invoke(this::refreshLocal);   // the counter floor, likewise
 			countersSeeded = true;
 			resetSeedBackoff();
@@ -733,6 +759,8 @@ public class ChroniclePlugin extends Plugin
 		pendingServerFloor = null;   // account boundary — never floor the next login's journal
 		pendingDropsAdopt = null;
 		pendingFeedAdopt = null;
+		pendingHistoryAdopt = null;
+		pendingFeedDeep = false;
 		// Re-seed from the server on the next login (another device may have
 		// advanced the totals). The final push below still uses the in-memory
 		// snapshot we accumulated this session.
@@ -965,6 +993,19 @@ public class ChroniclePlugin extends Plugin
 		api.fetchSourceItems(config.serverBaseUrl(), rsn, source, onDone);
 	}
 
+	/** The cloud's task-by-task slayer journey (panel fetches on first open). */
+	void fetchSlayerJourney(
+		java.util.function.Consumer<ChronicleApiClient.SlayerJourney> onDone)
+	{
+		String rsn = displayRsn();
+		if (!cloudActive() || rsn == null || rsn.isEmpty())
+		{
+			onDone.accept(null);
+			return;
+		}
+		api.fetchSlayerJourney(config.serverBaseUrl(), rsn, onDone);
+	}
+
 	java.util.List<JsonObject> feedNewest(int n)
 	{
 		return localStore.feedNewest(n);
@@ -1191,7 +1232,6 @@ public class ChroniclePlugin extends Plugin
 		if (adopt != null && localName != null && localStore.isReadyFor(localName))
 		{
 			pendingDropsAdopt = null;
-		pendingFeedAdopt = null;
 			localStore.floorDropSources(adopt, localName);
 		}
 		java.util.List<ChronicleApiClient.FeedEvent> feed = pendingFeedAdopt;
@@ -1199,7 +1239,40 @@ public class ChroniclePlugin extends Plugin
 		{
 			pendingFeedAdopt = null;
 			localStore.adoptFeed(feed, localName);
+			if (pendingFeedDeep)
+			{
+				pendingFeedDeep = false;
+				configManager.setConfiguration(GROUP, "cloudFeedDeepImported", true);
+			}
 			refreshPanel();
+		}
+		java.util.List<ChronicleApiClient.WomSnapshot> histAdopt = pendingHistoryAdopt;
+		if (histAdopt != null && localName != null)
+		{
+			pendingHistoryAdopt = null;
+			final String rsn = localName;
+			executor.submit(() ->
+			{
+				// The archive walk returns month-end absolutes oldest-first;
+				// collapse to one line per date through the same door the WOM
+				// import uses (readers take last-per-date, so the streams merge).
+				java.util.TreeMap<String, Map<String, Long>> byDate = new java.util.TreeMap<>();
+				for (ChronicleApiClient.WomSnapshot snap : histAdopt)
+				{
+					byDate.put(snap.date, snap.skills);
+				}
+				for (Map.Entry<String, Map<String, Long>> e : byDate.entrySet())
+				{
+					historyLog.appendImported(localDir(), rsn, e.getKey(), e.getValue());
+				}
+				configManager.setConfiguration(GROUP, "cloudHistoryImported", true);
+				if (!byDate.isEmpty())
+				{
+					chat("Chronicle: adopted " + byDate.size()
+						+ " months of history from your cloud record.");
+				}
+				clientThread.invoke(this::refreshPanel);
+			});
 		}
 		if (localName != null)
 		{

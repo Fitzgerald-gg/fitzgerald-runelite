@@ -716,6 +716,254 @@ public class ChronicleApiClient
 		});
 	}
 
+	/**
+	 * One-shot import of the cloud's own snapshot archive: the server keeps a
+	 * daily xp file per player back to its first sync (2023 for the reference
+	 * instance) but serves only window DIFFS — so this walks the archive month
+	 * by month through the public gains endpoint and returns each month's
+	 * closing absolutes as {@link WomSnapshot}s, ready for the history stream.
+	 * One probe (period=all) finds the true first month; empty months skip.
+	 */
+	public void fetchServerHistory(String baseUrl, String rsn,
+		Consumer<java.util.List<WomSnapshot>> onDone)
+	{
+		HttpUrl probe = resolve(baseUrl, "api/osrs/gains/" + rsn);
+		if (probe == null)
+		{
+			onDone.accept(null);
+			return;
+		}
+		HttpUrl url = probe.newBuilder().addQueryParameter("period", "all").build();
+		Request request = new Request.Builder().url(url).get().build();
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("server history probe failed", e);
+				onDone.accept(null);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				String from = null;
+				try (Response r = response)
+				{
+					if (r.code() == 200)
+					{
+						JsonObject o = gson.fromJson(r.body().charStream(), JsonObject.class);
+						from = o != null ? str(o, "from") : null;
+					}
+				}
+				catch (RuntimeException e)
+				{
+					log.debug("server history probe parse failed", e);
+				}
+				if (from == null || from.length() < 7)
+				{
+					onDone.accept(new java.util.ArrayList<>());   // no archive: empty, not error
+					return;
+				}
+				// month windows from the first snapshot's month to now
+				java.util.List<String[]> windows = new java.util.ArrayList<>();
+				java.time.YearMonth start = java.time.YearMonth.parse(from.substring(0, 7));
+				java.time.YearMonth now = java.time.YearMonth.now();
+				for (java.time.YearMonth m = start; !m.isAfter(now); m = m.plusMonths(1))
+				{
+					windows.add(new String[]{
+						m.atDay(1).toString(), m.atEndOfMonth().toString()});
+				}
+				fetchServerHistoryWindow(baseUrl, rsn, windows, 0,
+					new java.util.ArrayList<>(), onDone);
+			}
+		});
+	}
+
+	private void fetchServerHistoryWindow(String baseUrl, String rsn,
+		java.util.List<String[]> windows, int idx, java.util.List<WomSnapshot> acc,
+		Consumer<java.util.List<WomSnapshot>> onDone)
+	{
+		if (idx >= windows.size())
+		{
+			onDone.accept(acc);
+			return;
+		}
+		HttpUrl base = resolve(baseUrl, "api/osrs/gains/" + rsn);
+		if (base == null)
+		{
+			onDone.accept(acc);
+			return;
+		}
+		String[] w = windows.get(idx);
+		HttpUrl url = base.newBuilder().addQueryParameter("from", w[0])
+			.addQueryParameter("to", w[1]).build();
+		Request request = new Request.Builder().url(url).get().build();
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("server history window {} failed", w[0], e);
+				// a mid-walk failure still delivers what was gathered
+				onDone.accept(acc);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try (Response r = response)
+				{
+					if (r.code() == 200)
+					{
+						JsonObject o = gson.fromJson(r.body().charStream(), JsonObject.class);
+						Map<String, Long> xp = new HashMap<>();
+						if (o != null && o.has("skills") && o.get("skills").isJsonArray())
+						{
+							for (JsonElement el : o.getAsJsonArray("skills"))
+							{
+								if (!el.isJsonObject())
+								{
+									continue;
+								}
+								JsonObject sk = el.getAsJsonObject();
+								String name = str(sk, "skill")
+									.toLowerCase(java.util.Locale.ROOT);
+								long end = num(sk, "end_xp").longValue();
+								if (!name.isEmpty() && end > 0)
+								{
+									xp.put("runecrafting".equals(name) ? "runecraft" : name, end);
+								}
+							}
+						}
+						if (!xp.isEmpty())
+						{
+							String today = java.time.LocalDate.now().toString();
+							String date = w[1].compareTo(today) > 0 ? today : w[1];
+							acc.add(new WomSnapshot(date, xp));
+						}
+					}
+				}
+				catch (RuntimeException e)
+				{
+					log.debug("server history parse failed", e);
+				}
+				fetchServerHistoryWindow(baseUrl, rsn, windows, idx + 1, acc, onDone);
+			}
+		});
+	}
+
+	/** The cloud's slayer journey, as the site's Slayer chapter reads it. */
+	public static final class SlayerJourney
+	{
+		public final int completedTasks;
+		public final long totalKills;
+		public final long totalValueGp;
+		public final long totalXpEst;
+		public final java.util.List<SlayerTask> tasks;
+
+		SlayerJourney(int completedTasks, long totalKills, long totalValueGp,
+			long totalXpEst, java.util.List<SlayerTask> tasks)
+		{
+			this.completedTasks = completedTasks;
+			this.totalKills = totalKills;
+			this.totalValueGp = totalValueGp;
+			this.totalXpEst = totalXpEst;
+			this.tasks = tasks;
+		}
+	}
+
+	/** One task segment of the journey, newest first. */
+	public static final class SlayerTask
+	{
+		public final String task;
+		public final long kills;
+		public final long assignment;
+		public final long noLootKills;
+		public final double ts;          // epoch seconds
+		public final long totalValue;
+		public final boolean inProgress;
+
+		SlayerTask(String task, long kills, long assignment, long noLootKills,
+			double ts, long totalValue, boolean inProgress)
+		{
+			this.task = task;
+			this.kills = kills;
+			this.assignment = assignment;
+			this.noLootKills = noLootKills;
+			this.ts = ts;
+			this.totalValue = totalValue;
+			this.inProgress = inProgress;
+		}
+	}
+
+	/** Fetch the slayer journey the server derives from on-task loot. */
+	public void fetchSlayerJourney(String baseUrl, String rsn,
+		Consumer<SlayerJourney> onDone)
+	{
+		HttpUrl url = resolve(baseUrl, "api/slayer/journey/" + rsn);
+		if (url == null)
+		{
+			onDone.accept(null);
+			return;
+		}
+		Request request = new Request.Builder().url(url).get().build();
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("slayer journey fetch failed", e);
+				onDone.accept(null);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				SlayerJourney out = null;
+				try (Response r = response)
+				{
+					if (r.code() == 200)
+					{
+						JsonObject o = gson.fromJson(r.body().charStream(), JsonObject.class);
+						java.util.List<SlayerTask> tasks = new java.util.ArrayList<>();
+						if (o.has("tasks") && o.get("tasks").isJsonArray())
+						{
+							for (JsonElement el : o.getAsJsonArray("tasks"))
+							{
+								if (!el.isJsonObject())
+								{
+									continue;
+								}
+								JsonObject t = el.getAsJsonObject();
+								// the site's kill figure: total_kills, else the target
+								long kills = t.has("total_kills") && !t.get("total_kills").isJsonNull()
+									? num(t, "total_kills").longValue()
+									: num(t, "count_target").longValue();
+								tasks.add(new SlayerTask(str(t, "task"), kills,
+									num(t, "assignment").longValue(),
+									num(t, "no_loot_kills").longValue(),
+									num(t, "ts").doubleValue(),
+									num(t, "total_value").longValue(),
+									t.has("in_progress") && !t.get("in_progress").isJsonNull()
+										&& t.get("in_progress").getAsBoolean()));
+							}
+						}
+						out = new SlayerJourney(num(o, "completed_tasks_count").intValue(),
+							num(o, "total_kills").longValue(),
+							num(o, "total_value_gp").longValue(),
+							num(o, "total_xp_est").longValue(), tasks);
+					}
+				}
+				catch (RuntimeException e)
+				{
+					log.debug("slayer journey parse failed", e);
+				}
+				onDone.accept(out);
+			}
+		});
+	}
+
 	/** One adopted milestone from the cloud feed. */
 	public static final class FeedEvent
 	{
@@ -738,6 +986,14 @@ public class ChronicleApiClient
 	/** Fetch the cloud feed's milestones for one-shot journal adoption. */
 	public void fetchFeed(String baseUrl, String rsn, Consumer<java.util.List<FeedEvent>> onDone)
 	{
+		fetchFeed(baseUrl, rsn, 300, onDone);
+	}
+
+	/** As above with an explicit window — the deep one-shot import asks for
+	 *  the server's maximum so the whole recorded past reaches the journal. */
+	public void fetchFeed(String baseUrl, String rsn, int limit,
+		Consumer<java.util.List<FeedEvent>> onDone)
+	{
 		HttpUrl url = resolve(baseUrl, "api/activity/events");
 		if (url == null)
 		{
@@ -748,7 +1004,7 @@ public class ChronicleApiClient
 			return;
 		}
 		url = url.newBuilder().addQueryParameter("player", rsn)
-			.addQueryParameter("limit", "300").build();
+			.addQueryParameter("limit", String.valueOf(limit)).build();
 		Request request = new Request.Builder().url(url).get().build();
 		http.newCall(request).enqueue(new Callback()
 		{

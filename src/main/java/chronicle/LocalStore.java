@@ -48,7 +48,10 @@ import net.runelite.client.game.ItemManager;
 class LocalStore
 {
 	static final int SCHEMA = 1;
-	private static final int FEED_CAP = 2000;
+	// The journal keeps milestones indefinitely by design; this cap is a
+	// runaway guard, sized far above a decade of play (and above the deep
+	// cloud import's 5,000-event window), not a retention policy.
+	private static final int FEED_CAP = 20000;
 	// Counters that track a peak, not a running total — merged across sessions with
 	// max() rather than a sum (matches CombatStatTracker's setStat semantics).
 	static final java.util.Set<String> MAX_KEYS = new java.util.HashSet<>(
