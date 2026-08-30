@@ -89,6 +89,16 @@ public class ClogCapture
 	private final Map<String, Integer> slayerKcs = new HashMap<>();
 	private int finished;
 	private int available;
+
+	int finishedCount()
+	{
+		return finished;
+	}
+
+	int availableCount()
+	{
+		return available;
+	}
 	private volatile boolean dirty;
 	// Ticks since the kill log opened; -1 = idle. The row widgets can be built a
 	// tick or two after WidgetLoaded, so we retry the scrape briefly once open.

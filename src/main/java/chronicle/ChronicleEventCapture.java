@@ -614,6 +614,44 @@ public class ChronicleEventCapture
 	 * is no task, in which case nothing is attached. The server decides on-task
 	 * from the task + npc id via its authoritative matcher.
 	 */
+	/** The live slayer task for the panel's Home card, or null when none/unavailable. */
+	SlayerView slayerView()
+	{
+		if (slayerService == null)
+		{
+			return null;
+		}
+		try
+		{
+			String task = slayerService.getTask();
+			if (task == null || task.isEmpty())
+			{
+				return null;
+			}
+			return new SlayerView(task, slayerService.getRemainingAmount(),
+				slayerService.getInitialAmount());
+		}
+		catch (RuntimeException ignored)
+		{
+			return null;
+		}
+	}
+
+	/** Immutable slayer-task snapshot for the panel. */
+	static final class SlayerView
+	{
+		final String task;
+		final int remaining;
+		final int initial;
+
+		SlayerView(String task, int remaining, int initial)
+		{
+			this.task = task;
+			this.remaining = remaining;
+			this.initial = initial;
+		}
+	}
+
 	private void stampSlayer(JsonObject data)
 	{
 		if (slayerService == null)

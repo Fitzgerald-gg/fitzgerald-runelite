@@ -116,6 +116,8 @@ public class ChroniclePlugin extends Plugin
 	@Inject
 	private LocalStore localStore;
 
+	private final HistoryLog historyLog = new HistoryLog();
+
 	private ChroniclePanel panel;
 	private NavigationButton navButton;
 
@@ -699,6 +701,7 @@ public class ChroniclePlugin extends Plugin
 		if (localName != null)
 		{
 			localStore.setTrackers(sessionView(), localName);
+			appendHistoryBaseline();
 		}
 		executor.submit(() -> localStore.flush(localDir()));
 		localStore.endSession();
@@ -899,6 +902,70 @@ public class ChroniclePlugin extends Plugin
 		return config.cloudSync() && !config.serverBaseUrl().trim().isEmpty();
 	}
 
+	// ── Panel-facing reads ─────────────────────────────────────────────
+
+	/** Lifetime counters as the journal knows them (base + session, floored). */
+	Map<String, Long> lifetimeCounters()
+	{
+		return localStore.trackersSnapshot();
+	}
+
+	/** This session's own increments (max-type keys as absolutes). */
+	Map<String, Integer> sessionCounters()
+	{
+		return sessionView();
+	}
+
+	java.util.List<LocalStore.SourceRow> dropSources()
+	{
+		return localStore.dropSources();
+	}
+
+	java.util.List<JsonObject> feedNewest(int n)
+	{
+		return localStore.feedNewest(n);
+	}
+
+	int sessionLoots()
+	{
+		return localStore.sessionLoots();
+	}
+
+	long sessionLootValue()
+	{
+		return localStore.sessionLootValue();
+	}
+
+	java.util.List<LocalStore.RecentDrop> recentDrops()
+	{
+		return localStore.recentDrops();
+	}
+
+	ChronicleEventCapture.SlayerView slayerView()
+	{
+		return eventCapture.slayerView();
+	}
+
+	java.util.List<LocalStore.ClogPage> clogPages()
+	{
+		return localStore.clogPages();
+	}
+
+	int clogFinished()
+	{
+		return clogCapture.finishedCount();
+	}
+
+	int clogAvailable()
+	{
+		return clogCapture.availableCount();
+	}
+
+	net.runelite.client.game.ItemManager items()
+	{
+		return localStore.items();
+	}
+
 	/** RSN to show in the panel: the enrolled name when syncing, else the local one. */
 	String displayRsn()
 	{
@@ -911,7 +978,7 @@ public class ChroniclePlugin extends Plugin
 	 * Max-type keys pass through as absolutes (the journal takes their max).
 	 * With cloud off nothing is ever seeded, so this IS the plain harvest.
 	 */
-	private Map<String, Integer> sessionView()
+	Map<String, Integer> sessionView()
 	{
 		Map<String, Integer> abs = harvest();
 		Map<String, Integer> seeded = statStore.seededBaseline();
@@ -980,8 +1047,38 @@ public class ChroniclePlugin extends Plugin
 		if (localName != null)
 		{
 			localStore.setTrackers(sessionView(), localName);
+			// The calendar spine: one closing baseline per day, appended — the
+			// History tab and the year cards are subtractions over this stream.
+			if (historyLog.dayRolledOver())
+			{
+				appendHistoryBaseline();
+			}
 		}
 		executor.submit(() -> localStore.flush(localDir()));
+	}
+
+	/** Client thread. Appends today's closing skills+counters baseline. */
+	private void appendHistoryBaseline()
+	{
+		final String rsn = localName;
+		if (rsn == null)
+		{
+			return;
+		}
+		final Map<String, Integer> skills = new java.util.HashMap<>();
+		JsonObject sk = harvestSkills();
+		if (sk != null)
+		{
+			for (Map.Entry<String, com.google.gson.JsonElement> e : sk.entrySet())
+			{
+				if (e.getValue().isJsonObject() && e.getValue().getAsJsonObject().has("xp"))
+				{
+					skills.put(e.getKey(), e.getValue().getAsJsonObject().get("xp").getAsInt());
+				}
+			}
+		}
+		final Map<String, Long> counters = localStore.trackersSnapshot();
+		executor.submit(() -> historyLog.append(localDir(), rsn, skills, counters));
 	}
 
 	String statusLine()

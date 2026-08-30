@@ -67,6 +67,27 @@ class LocalStore
 	private String currentRsn;        // whose model root holds
 	private volatile boolean ready;   // true once an account's file has been loaded
 
+	// Session-scope tallies for the panel's strip + recent-drop icon row —
+	// in-memory only, reset at the account boundary. Guarded by lock.
+	private int sessionLoots;
+	private long sessionLootValue;
+	private final java.util.ArrayDeque<RecentDrop> recentDrops = new java.util.ArrayDeque<>();
+
+	/** One recent drop, panel-facing (immutable copy). */
+	static final class RecentDrop
+	{
+		final int itemId;
+		final int quantity;
+		final String name;
+
+		RecentDrop(int itemId, int quantity, String name)
+		{
+			this.itemId = itemId;
+			this.quantity = quantity;
+			this.name = name;
+		}
+	}
+
 
 	@Inject
 	LocalStore(ItemManager itemManager, Gson gson)
@@ -122,6 +143,12 @@ class LocalStore
 	void endSession()
 	{
 		ready = false;
+		synchronized (lock)
+		{
+			sessionLoots = 0;
+			sessionLootValue = 0;
+			recentDrops.clear();
+		}
 	}
 
 	boolean isReadyFor(String rsn)
@@ -248,6 +275,18 @@ class LocalStore
 			}
 			src.addProperty("loots", src.get("loots").getAsInt() + 1);
 			src.addProperty("value", src.get("value").getAsLong() + batchValue);
+			sessionLoots++;
+			sessionLootValue += batchValue;
+			for (JsonElement pe : priced)
+			{
+				JsonObject p = pe.getAsJsonObject();
+				recentDrops.addFirst(new RecentDrop(p.get("id").getAsInt(),
+					p.get("qty").getAsInt(), p.get("name").getAsString()));
+			}
+			while (recentDrops.size() > 10)
+			{
+				recentDrops.removeLast();
+			}
 			if (pbCand != null && pbCand > 0
 				&& (!src.has("pb") || pbCand < src.get("pb").getAsDouble()))
 			{
@@ -499,6 +538,172 @@ class LocalStore
 	private static long nowSec()
 	{
 		return System.currentTimeMillis() / 1000L;
+	}
+
+	// ------------------------------------------------------------------
+	// Panel-facing reads (copies only; safe to call from the EDT)
+	// ------------------------------------------------------------------
+
+	net.runelite.client.game.ItemManager items()
+	{
+		return itemManager;
+	}
+
+	/** Lifetime counters as the journal knows them (base + this session). */
+	java.util.Map<String, Long> trackersSnapshot()
+	{
+		java.util.Map<String, Long> out = new java.util.HashMap<>();
+		synchronized (lock)
+		{
+			if (root != null && root.has("trackers") && root.get("trackers").isJsonObject())
+			{
+				for (java.util.Map.Entry<String, JsonElement> e
+					: root.getAsJsonObject("trackers").entrySet())
+				{
+					if (!e.getValue().isJsonNull())
+					{
+						out.put(e.getKey(), e.getValue().getAsLong());
+					}
+				}
+			}
+		}
+		return out;
+	}
+
+	/** One ranked drop source. */
+	static final class SourceRow
+	{
+		final String name;
+		final int kc;
+		final int loots;
+		final long value;
+		final Double pb;
+
+		SourceRow(String name, int kc, int loots, long value, Double pb)
+		{
+			this.name = name;
+			this.kc = kc;
+			this.loots = loots;
+			this.value = value;
+			this.pb = pb;
+		}
+	}
+
+	/** Every drop source, unsorted (the panel ranks). */
+	java.util.List<SourceRow> dropSources()
+	{
+		java.util.List<SourceRow> out = new java.util.ArrayList<>();
+		synchronized (lock)
+		{
+			if (root == null || !root.has("drops"))
+			{
+				return out;
+			}
+			for (java.util.Map.Entry<String, JsonElement> e
+				: root.getAsJsonObject("drops").entrySet())
+			{
+				if (!e.getValue().isJsonObject())
+				{
+					continue;
+				}
+				JsonObject src = e.getValue().getAsJsonObject();
+				out.add(new SourceRow(e.getKey(),
+					src.has("kc") ? src.get("kc").getAsInt() : 0,
+					src.has("loots") ? src.get("loots").getAsInt() : 0,
+					src.has("value") ? src.get("value").getAsLong() : 0,
+					src.has("pb") ? src.get("pb").getAsDouble() : null));
+			}
+		}
+		return out;
+	}
+
+	/** Newest feed entries, newest first (deep copies). */
+	java.util.List<JsonObject> feedNewest(int n)
+	{
+		java.util.List<JsonObject> out = new java.util.ArrayList<>();
+		synchronized (lock)
+		{
+			if (root == null || !root.has("feed") || !root.get("feed").isJsonArray())
+			{
+				return out;
+			}
+			com.google.gson.JsonArray feed = root.getAsJsonArray("feed");
+			for (int i = feed.size() - 1; i >= 0 && out.size() < n; i--)
+			{
+				if (feed.get(i).isJsonObject())
+				{
+					out.add(feed.get(i).getAsJsonObject().deepCopy());
+				}
+			}
+		}
+		return out;
+	}
+
+	int sessionLoots()
+	{
+		synchronized (lock)
+		{
+			return sessionLoots;
+		}
+	}
+
+	long sessionLootValue()
+	{
+		synchronized (lock)
+		{
+			return sessionLootValue;
+		}
+	}
+
+	java.util.List<RecentDrop> recentDrops()
+	{
+		synchronized (lock)
+		{
+			return new java.util.ArrayList<>(recentDrops);
+		}
+	}
+
+	/** One collection-log page the journal holds. */
+	static final class ClogPage
+	{
+		final String page;
+		final int held;
+		final Integer kc;
+
+		ClogPage(String page, int held, Integer kc)
+		{
+			this.page = page;
+			this.held = held;
+			this.kc = kc;
+		}
+	}
+
+	/** Pages of the stored collection log (this session's capture), unsorted. */
+	java.util.List<ClogPage> clogPages()
+	{
+		java.util.List<ClogPage> out = new java.util.ArrayList<>();
+		synchronized (lock)
+		{
+			if (root == null || !root.has("collection_log")
+				|| !root.get("collection_log").isJsonObject())
+			{
+				return out;
+			}
+			JsonObject cl = root.getAsJsonObject("collection_log");
+			JsonObject byCat = cl.has("by_cat") && cl.get("by_cat").isJsonObject()
+				? cl.getAsJsonObject("by_cat") : new JsonObject();
+			JsonObject kcs = cl.has("kcs") && cl.get("kcs").isJsonObject()
+				? cl.getAsJsonObject("kcs") : new JsonObject();
+			for (java.util.Map.Entry<String, JsonElement> e : byCat.entrySet())
+			{
+				int held = e.getValue().isJsonObject()
+					? e.getValue().getAsJsonObject().size() : 0;
+				Integer kc = kcs.has(e.getKey()) && !kcs.get(e.getKey()).isJsonNull()
+					? kcs.get(e.getKey()).getAsInt() : null;
+				out.add(new ClogPage(e.getKey(), held, kc));
+			}
+		}
+		return out;
 	}
 
 	static String slug(String rsn)
