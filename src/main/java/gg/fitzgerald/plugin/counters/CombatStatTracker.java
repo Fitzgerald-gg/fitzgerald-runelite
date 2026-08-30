@@ -118,7 +118,7 @@ public class CombatStatTracker implements StatTracker
 				}
 				else
 				{
-					recordDamageDealt(amount);
+					recordDamageDealt(event.getActor(), amount);
 				}
 				break;
 
@@ -200,7 +200,7 @@ public class CombatStatTracker implements StatTracker
 	}
 
 	/** Add outgoing damage to the running total and promote it if it is a new best hit. */
-	private void recordDamageDealt(int amount)
+	private void recordDamageDealt(Actor target, int amount)
 	{
 		store.incrementStatBy(DAMAGE_DEALT, amount);
 		// Attribute to the style whose XP drop is fresh (within 2 ticks) — a
@@ -210,7 +210,10 @@ public class CombatStatTracker implements StatTracker
 		{
 			store.incrementStatBy(lastStyleKey, amount);
 		}
-		if (amount > store.getStat(HIGHEST_HIT))
+		// The heaviest blow only counts against something that fights back: raid
+		// puzzle props have no combat level but can credit the player with
+		// multi-thousand hitsplats (ToA's Het's Seal light beam).
+		if (amount > store.getStat(HIGHEST_HIT) && target != null && target.getCombatLevel() > 0)
 		{
 			store.setStat(HIGHEST_HIT, amount);
 		}
