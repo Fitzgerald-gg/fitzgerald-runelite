@@ -596,8 +596,23 @@ public class ChronicleApiClient
 	 * The one-shot "import your past" fetch: the player's public Wise Old Man
 	 * snapshots, a year back. STRICTLY user-initiated (a labelled button) —
 	 * Chronicle's default behaviour makes no network calls at all.
+	 *
+	 * <p>WOM pages this endpoint at 50 rows and silently serves the first 20
+	 * when unasked — one bare request would "import" only the last few days.
+	 * Pages chain until a short page or the safety cap; a mid-chain failure
+	 * still delivers what was gathered (the reader keeps last-per-date, so a
+	 * partial past is simply a shorter past).
 	 */
 	public void fetchWomSnapshots(String rsn, Consumer<java.util.List<WomSnapshot>> onDone)
+	{
+		fetchWomPage(rsn, 0, new java.util.ArrayList<>(), onDone);
+	}
+
+	private static final int WOM_PAGE = 50;
+	private static final int WOM_MAX_SNAPSHOTS = 1500;   // ~a year at a few per day
+
+	private void fetchWomPage(String rsn, int offset, java.util.List<WomSnapshot> acc,
+		Consumer<java.util.List<WomSnapshot>> onDone)
 	{
 		HttpUrl base = HttpUrl.parse("https://api.wiseoldman.net/v2/players/x/snapshots");
 		if (base == null)
@@ -606,28 +621,30 @@ public class ChronicleApiClient
 			return;
 		}
 		HttpUrl url = base.newBuilder().setPathSegment(3, rsn)
-			.addQueryParameter("period", "year").build();
+			.addQueryParameter("period", "year")
+			.addQueryParameter("limit", String.valueOf(WOM_PAGE))
+			.addQueryParameter("offset", String.valueOf(offset)).build();
 		Request request = new Request.Builder().url(url).get().build();
 		http.newCall(request).enqueue(new Callback()
 		{
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
-				log.debug("wom fetch failed", e);
-				onDone.accept(null);
+				log.debug("wom fetch failed at offset {}", offset, e);
+				onDone.accept(offset == 0 ? null : acc);
 			}
 
 			@Override
 			public void onResponse(Call call, Response response)
 			{
-				java.util.List<WomSnapshot> out = null;
+				int pageRows = -1;
 				try (Response r = response)
 				{
 					if (r.code() == 200)
 					{
 						com.google.gson.JsonArray arr = gson.fromJson(r.body().charStream(),
 							com.google.gson.JsonArray.class);
-						out = new java.util.ArrayList<>();
+						pageRows = arr.size();
 						for (JsonElement el : arr)
 						{
 							if (!el.isJsonObject())
@@ -666,19 +683,35 @@ public class ChronicleApiClient
 									xp.put(key, exp);
 								}
 							}
-							out.add(new WomSnapshot(created.substring(0, 10), xp));
+							acc.add(new WomSnapshot(created.substring(0, 10), xp));
 						}
 					}
-					else if (r.code() == 404)
+					else if (r.code() == 404 && offset == 0)
 					{
-						out = new java.util.ArrayList<>();   // no profile: empty, not error
+						onDone.accept(new java.util.ArrayList<>());   // no profile: empty, not error
+						return;
+					}
+					else
+					{
+						log.debug("wom fetch code {} at offset {}", r.code(), offset);
+						onDone.accept(offset == 0 ? null : acc);
+						return;
 					}
 				}
 				catch (RuntimeException e)
 				{
 					log.debug("wom parse failed", e);
+					onDone.accept(offset == 0 ? null : acc);
+					return;
 				}
-				onDone.accept(out);
+				if (pageRows == WOM_PAGE && offset + WOM_PAGE < WOM_MAX_SNAPSHOTS)
+				{
+					fetchWomPage(rsn, offset + WOM_PAGE, acc, onDone);
+				}
+				else
+				{
+					onDone.accept(acc);
+				}
 			}
 		});
 	}

@@ -823,10 +823,15 @@ class ChroniclePanel extends PluginPanel
 		return out;
 	}
 
+	// Rows a sub-group shows before folding its tail behind search — long
+	// tails of one-offs (destinations, snack foods) are what made the tab
+	// feel like an inventory dump.
+	private static final int SUBGROUP_CAP = 10;
+
 	private JPanel buildStats()
 	{
 		JPanel p = column();
-		JPanel pills = new JPanel(new GridLayout(0, 4, 3, 3));
+		JPanel pills = new JPanel(new GridLayout(0, 3, 3, 3));
 		pills.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		for (String fam : StatRegistry.FAMILIES)
 		{
@@ -850,11 +855,12 @@ class ChroniclePanel extends PluginPanel
 		Map<String, Long> counters = counters();
 		// Cluster the family's rows under sub-headers (the craft, the method)
 		// instead of one value-sorted free-for-all; sub-groups rank by their
-		// totals, rows rank within their group.
+		// totals, rows rank within their group, tails fold behind search.
 		Map<String, List<Map.Entry<String, Long>>> groups = new LinkedHashMap<>();
 		for (Map.Entry<String, Long> e : counters.entrySet())
 		{
-			if (e.getValue() != 0 && StatRegistry.family(e.getKey()).equals(statsFamily))
+			if (e.getValue() != 0 && !StatRegistry.hidden(e.getKey())
+				&& StatRegistry.family(e.getKey()).equals(statsFamily))
 			{
 				groups.computeIfAbsent(StatRegistry.subgroup(e.getKey()), k -> new ArrayList<>()).add(e);
 			}
@@ -869,8 +875,6 @@ class ChroniclePanel extends PluginPanel
 		List<Map.Entry<String, List<Map.Entry<String, Long>>>> ordered = new ArrayList<>(groups.entrySet());
 		ordered.sort(Comparator.comparingLong((Map.Entry<String, List<Map.Entry<String, Long>>> g)
 			-> g.getValue().stream().mapToLong(Map.Entry::getValue).max().orElse(0)).reversed());
-		int shown = 0;
-		outer:
 		for (Map.Entry<String, List<Map.Entry<String, Long>>> g : ordered)
 		{
 			if (!g.getKey().isEmpty() && ordered.size() > 1)
@@ -878,15 +882,24 @@ class ChroniclePanel extends PluginPanel
 				p.add(group(g.getKey()));
 			}
 			g.getValue().sort(Map.Entry.<String, Long>comparingByValue().reversed());
+			int mounted = 0;
 			for (Map.Entry<String, Long> e : g.getValue())
 			{
-				if (shown++ >= ROW_CAP * 2)
+				if (mounted++ >= SUBGROUP_CAP)
 				{
-					p.add(note("more — search to find one"));
-					break outer;
+					break;
 				}
 				String v = StatRegistry.isGp(e.getKey()) ? gp(e.getValue()) + " gp" : fmt(e.getValue());
 				p.add(row(StatRegistry.label(e.getKey()), v, null));
+			}
+			int rest = g.getValue().size() - SUBGROUP_CAP;
+			if (rest > 0)
+			{
+				JLabel more = new JLabel("+ " + fmt(rest) + " more — search finds them");
+				more.setFont(FontManager.getRunescapeSmallFont());
+				more.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker().darker());
+				more.setBorder(BorderFactory.createEmptyBorder(1, 2, 1, 2));
+				p.add(more);
 			}
 		}
 		return p;
@@ -978,6 +991,15 @@ class ChroniclePanel extends PluginPanel
 		p.add(stepper);
 		p.add(vgap(6));
 
+		// A thin record answers with the import, not a footnote: until the
+		// journal holds a few days (or the import has run), the button leads.
+		boolean thin = !plugin.womImported() && hist.size() < 3;
+		if (thin)
+		{
+			p.add(womImportButton());
+			p.add(vgap(6));
+		}
+
 		// baselines bounding the period: closing state the day before it began,
 		// and the last close inside it
 		Map.Entry<java.time.LocalDate, HistoryLog.Baseline> before =
@@ -987,7 +1009,7 @@ class ChroniclePanel extends PluginPanel
 		{
 			p.add(note(hist.isEmpty()
 				? "The record starts today — baselines close at each login, day "
-				+ "rollover and logout. Import your deeper past below."
+				+ "rollover and logout. Import your deeper past above."
 				: "Nothing recorded in this period."));
 		}
 		else
@@ -1104,31 +1126,40 @@ class ChroniclePanel extends PluginPanel
 			}
 		}
 
-		if (!plugin.womImported())
+		if (!plugin.womImported() && !thin)
 		{
-			JButton importBtn = new JButton(womImportRunning
-				? "Importing…" : "Import your past — Wise Old Man");
-			importBtn.setEnabled(!womImportRunning);
-			importBtn.addActionListener(e ->
-			{
-				int ok = JOptionPane.showConfirmDialog(this,
-					"Fetch your public Wise Old Man snapshots (one request, one time)\n"
-						+ "and write them into your local history?",
-					"Import your past", JOptionPane.OK_CANCEL_OPTION);
-				if (ok == JOptionPane.OK_OPTION)
-				{
-					womImportRunning = true;
-					rebuild();
-					plugin.actionImportWom(() -> SwingUtilities.invokeLater(() ->
-					{
-						womImportRunning = false;
-						rebuild();
-					}));
-				}
-			});
-			p.add(importBtn);
+			p.add(womImportButton());
 		}
 		return p;
+	}
+
+	private JButton womImportButton()
+	{
+		// Label stays narrow: a child wider than the viewport flips the whole
+		// GridBag column into minimum-size mode and squashes every row (the
+		// clipped-pills bug). The consent dialog names Wise Old Man in full.
+		JButton importBtn = new JButton(womImportRunning
+			? "Importing…" : "Import your past…");
+		importBtn.setToolTipText("Fetches your public Wise Old Man history — asks first");
+		importBtn.setEnabled(!womImportRunning);
+		importBtn.addActionListener(e ->
+		{
+			int ok = JOptionPane.showConfirmDialog(this,
+				"Fetch your public Wise Old Man snapshots (a one-time import)\n"
+					+ "and write them into your local history?",
+				"Import your past", JOptionPane.OK_CANCEL_OPTION);
+			if (ok == JOptionPane.OK_OPTION)
+			{
+				womImportRunning = true;
+				rebuild();
+				plugin.actionImportWom(() -> SwingUtilities.invokeLater(() ->
+				{
+					womImportRunning = false;
+					rebuild();
+				}));
+			}
+		});
+		return importBtn;
 	}
 
 	private java.time.LocalDate stepBack(java.time.LocalDate d)
@@ -1281,7 +1312,7 @@ class ChroniclePanel extends PluginPanel
 		List<Map.Entry<String, Long>> statHits = new ArrayList<>();
 		for (Map.Entry<String, Long> e : counters().entrySet())
 		{
-			if (e.getValue() != 0
+			if (e.getValue() != 0 && !StatRegistry.hidden(e.getKey())
 				&& (e.getKey().toLowerCase(Locale.ROOT).contains(ql)
 				|| StatRegistry.label(e.getKey()).toLowerCase(Locale.ROOT).contains(ql)))
 			{
@@ -1650,17 +1681,50 @@ class ChroniclePanel extends PluginPanel
 		return g;
 	}
 
-	private static JLabel note(String text)
+	// Wrap width that fits every context a note appears in: the panel is 242,
+	// minus its 16px border, the scrollbar, and a card's own 16px insets.
+	private static final int NOTE_WIDTH = 190;
+
+	private static JPanel note(String text)
 	{
-		// The fixed width inside the html is what makes the label REPORT its
-		// wrapped height — a bare html JLabel measures single-line and the
-		// last lines clip when the layout squeezes it to panel width.
-		JLabel n = new JLabel("<html><div style='width:190px'><i>"
-			+ escape(text) + "</i></div></html>");
-		n.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker());
-		n.setFont(FontManager.getRunescapeSmallFont());
-		n.setAlignmentX(Component.LEFT_ALIGNMENT);
-		return n;
+		// Deterministic wrap: Swing's html JLabel measures at one width and can
+		// paint at another, which clipped note tails all over the panel. A
+		// greedy FontMetrics wrap into plain one-line labels reports an exact
+		// preferred height by construction.
+		JPanel p = new JPanel();
+		p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+		p.setOpaque(false);
+		p.setAlignmentX(Component.LEFT_ALIGNMENT);
+		Font f = FontManager.getRunescapeSmallFont();
+		java.awt.FontMetrics fm = p.getFontMetrics(f);
+		List<String> lines = new ArrayList<>();
+		StringBuilder line = new StringBuilder();
+		for (String word : text.split(" "))
+		{
+			String candidate = line.length() == 0 ? word : line + " " + word;
+			if (fm.stringWidth(candidate) > NOTE_WIDTH && line.length() > 0)
+			{
+				lines.add(line.toString());
+				line = new StringBuilder(word);
+			}
+			else
+			{
+				line = new StringBuilder(candidate);
+			}
+		}
+		if (line.length() > 0)
+		{
+			lines.add(line.toString());
+		}
+		for (String l : lines)
+		{
+			JLabel lab = new JLabel(l);
+			lab.setFont(f);
+			lab.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker());
+			lab.setAlignmentX(Component.LEFT_ALIGNMENT);
+			p.add(lab);
+		}
+		return p;
 	}
 
 	private static Component vgap(int h)
@@ -1764,10 +1828,5 @@ class ChroniclePanel extends PluginPanel
 		long m = (s % 3600) / 60;
 		long sec = s % 60;
 		return h > 0 ? String.format("%d:%02d:%02d", h, m, sec) : String.format("%d:%02d", m, sec);
-	}
-
-	private static String escape(String s)
-	{
-		return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
 	}
 }

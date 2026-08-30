@@ -1029,12 +1029,19 @@ public class ChroniclePlugin extends Plugin
 			}
 			else
 			{
+				// Snapshots arrive newest-first with several per day — keep each
+				// date's latest close (first seen), write in calendar order.
+				java.util.TreeMap<String, Map<String, Long>> byDate = new java.util.TreeMap<>();
 				for (ChronicleApiClient.WomSnapshot snap : snaps)
 				{
-					historyLog.appendImported(localDir(), rsn, snap.date, snap.skills);
+					byDate.putIfAbsent(snap.date, snap.skills);
+				}
+				for (Map.Entry<String, Map<String, Long>> e : byDate.entrySet())
+				{
+					historyLog.appendImported(localDir(), rsn, e.getKey(), e.getValue());
 				}
 				configManager.setConfiguration(GROUP, "womImported", true);
-				chat("Chronicle: imported " + snaps.size()
+				chat("Chronicle: imported " + byDate.size()
 					+ " days of history from Wise Old Man.");
 			}
 			onDone.run();

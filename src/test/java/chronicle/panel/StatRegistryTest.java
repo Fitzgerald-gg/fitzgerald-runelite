@@ -29,13 +29,42 @@ public class StatRegistryTest
 	public void familiesFileSensibly()
 	{
 		assertEquals("Combat", StatRegistry.family("damageDealt"));
+		assertEquals("Combat", StatRegistry.family("ammoConsumed"));
 		assertEquals("Travel", StatRegistry.family("teleportsViaSpell"));
 		assertEquals("Travel", StatRegistry.family("tilesRan"));
+		assertEquals("Travel", StatRegistry.family("distanceWalked"));
 		assertEquals("Living", StatRegistry.family("potionDoses"));
 		assertEquals("Skilling", StatRegistry.family("creaturesTrapped"));
 		assertEquals("Economy", StatRegistry.family("coinsFromAlchemy"));
-		assertEquals("Offerings", StatRegistry.family("bonesBuried"));
-		assertEquals("Other", StatRegistry.family("clueScrollsCompleted"));
+		assertEquals("Economy", StatRegistry.family("untakenLootCount"));
+		// offerings ARE the Prayer craft — they file under Skilling now
+		assertEquals("Skilling", StatRegistry.family("bonesBuried"));
+		assertEquals("Prayer", StatRegistry.subgroup("bonesBuried"));
+		assertEquals("Skilling", StatRegistry.family("demonicOfferingXp"));
+		assertEquals("Prayer", StatRegistry.subgroup("demonicOfferingXp"));
+		assertEquals("Skilling", StatRegistry.family("bloodveldHeadsReanimated"));
+		assertEquals("Smithing", StatRegistry.subgroup("steelItemsSmithed"));
+		assertEquals("Runecraft", StatRegistry.subgroup("wrathRunecrafted"));
+		// unknown keys land visibly, not in a junk tab
+		assertEquals("Living", StatRegistry.family("clueScrollsCompleted"));
+		assertEquals("Elsewhere", StatRegistry.subgroup("clueScrollsCompleted"));
+	}
+
+	@Test
+	public void labelsPolish()
+	{
+		// item-plus-action keys stutter; polish collapses the doubled word
+		assertEquals("Logs chopped", StatRegistry.prettify("logsLogsChopped"));
+		assertEquals("Bones buried", StatRegistry.prettify("bonesBonesBuried"));
+		assertEquals("Guard (lvl 21) pickpockets",
+			StatRegistry.prettify("guard(level21)Pickpockets"));
+	}
+
+	@Test
+	public void diagnosticKeysHide()
+	{
+		assertEquals(true, StatRegistry.hidden("__probe"));
+		assertEquals(false, StatRegistry.hidden("damageDealt"));
 	}
 
 	@Test

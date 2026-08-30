@@ -6,6 +6,7 @@ package chronicle.panel;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -18,25 +19,29 @@ import java.util.Set;
  * added. Labels fall back to a camelCase→words prettifier, so even a key this
  * class has never heard of renders acceptably; explicit entries exist only
  * where the prettifier would read wrong.
+ *
+ * <p>Five families, everything filed: offerings live under Skilling as the
+ * Prayer craft (that is what they are in game), travel takes the distance
+ * counters, economy takes every gp figure, and anything unrecognised lands
+ * visibly in Living → Elsewhere rather than in a dumping-ground tab.
  */
 public final class StatRegistry
 {
 	/** Display families, in tab-pill order. */
 	public static final String[] FAMILIES = {
-		"Combat", "Travel", "Living", "Skilling", "Economy", "Offerings", "Other"
+		"Combat", "Skilling", "Travel", "Living", "Economy"
 	};
 
 	private static final Map<String, String> LABELS = new HashMap<>();
 	private static final Set<String> COMBAT = new HashSet<>(Arrays.asList(
 		"damageDealt", "damageDealtMelee", "damageDealtRanged", "damageDealtMagic",
 		"damageTaken", "highestHit", "highestHitTaken", "deaths", "hitsMissed",
-		"hitsBlocked", "specialAttacksUsed", "poisonDamageTaken", "venomDamageTaken"));
+		"hitsBlocked", "specialAttacksUsed", "poisonDamageTaken", "venomDamageTaken",
+		"ammoConsumed", "hitpointsRegenerated", "divinePotionDamage"));
 	private static final Set<String> ECONOMY = new HashSet<>(Arrays.asList(
 		"coinsFromAlchemy", "coinsSpentAtShops", "coinsEarnedAtShops",
-		"itemsDroppedValue", "highAlchemyCasts", "lowAlchemyCasts"));
-	private static final Set<String> OFFERINGS = new HashSet<>(Arrays.asList(
-		"bonesBuried", "bonesOffered", "ashesScattered", "prayersActivated",
-		"headsReanimated"));
+		"itemsDroppedValue", "highAlchemyCasts", "lowAlchemyCasts",
+		"itemsDiscarded", "untakenLootCount"));
 
 	static
 	{
@@ -48,13 +53,22 @@ public final class StatRegistry
 		LABELS.put("highestHitTaken", "Highest hit taken");
 		LABELS.put("tilesWalked", "Tiles walked");
 		LABELS.put("tilesRan", "Tiles run");
+		LABELS.put("distanceRan", "Distance run");
 		LABELS.put("coinsFromAlchemy", "Coins from alchemy");
 		LABELS.put("specialAttacksUsed", "Specials spent");
 		LABELS.put("consumedValue", "Consumed value");
+		LABELS.put("totalXpGained", "Total xp gained");
+		LABELS.put("untakenLootCount", "Loot left behind");
 	}
 
 	private StatRegistry()
 	{
+	}
+
+	/** Diagnostic keys the panel never shows (leading underscore convention). */
+	public static boolean hidden(String key)
+	{
+		return key.startsWith("_");
 	}
 
 	/** Human label for a counter key. Never null; unknown keys prettify. */
@@ -82,6 +96,16 @@ public final class StatRegistry
 		return prettify(key);
 	}
 
+	/** True when a key belongs to the Prayer craft: offerings in every form. */
+	private static boolean isPrayer(String key)
+	{
+		return key.contains("Buried") || key.contains("Offered")
+			|| key.contains("Offering") || key.contains("offering")
+			|| key.contains("Scattered") || key.contains("Sacrificed")
+			|| key.contains("Reanimated") || key.equals("prayersActivated")
+			|| key.equals("headsReanimated");
+	}
+
 	/** The family a key files under, one of {@link #FAMILIES}. */
 	public static String family(String key)
 	{
@@ -97,11 +121,12 @@ public final class StatRegistry
 		{
 			return "Economy";
 		}
-		if (OFFERINGS.contains(key))
+		if (isPrayer(key) || key.equals("totalXpGained"))
 		{
-			return "Offerings";
+			return "Skilling";
 		}
 		if (key.startsWith("teleports") || key.startsWith("tiles")
+			|| key.startsWith("distance")
 			|| key.contains("Fairy") || key.contains("Spirit"))
 		{
 			return "Travel";
@@ -114,11 +139,15 @@ public final class StatRegistry
 		if (key.endsWith("Chopped") || key.endsWith("Caught") || key.endsWith("Cooked")
 			|| key.endsWith("Mined") || key.endsWith("Fished") || key.endsWith("Crafted")
 			|| key.endsWith("Burned") || key.endsWith("Trapped") || key.endsWith("Plucked")
-			|| key.endsWith("Harvested") || key.endsWith("Pickpockets") || key.endsWith("Thieved"))
+			|| key.endsWith("Harvested") || key.endsWith("Thieved")
+			|| key.endsWith("Smithed") || key.endsWith("Fletched") || key.endsWith("Runecrafted")
+			|| key.toLowerCase(Locale.ROOT).contains("pickpocket")
+			|| key.startsWith("agility") || key.endsWith("Smelted"))
 		{
 			return "Skilling";
 		}
-		return "Other";
+		// Unrecognised keys land somewhere visible, not in a junk tab.
+		return "Living";
 	}
 
 	/**
@@ -131,7 +160,15 @@ public final class StatRegistry
 		String fam = family(key);
 		if (fam.equals("Skilling"))
 		{
-			String kl = key.toLowerCase(java.util.Locale.ROOT);
+			if (key.equals("totalXpGained"))
+			{
+				return "";   // headerless, tops the tab by value
+			}
+			if (isPrayer(key))
+			{
+				return "Prayer";
+			}
+			String kl = key.toLowerCase(Locale.ROOT);
 			if (kl.contains("impling") || kl.contains("moth") || kl.contains("salamander")
 				|| kl.contains("chompy") || key.endsWith("Trapped") || key.endsWith("Plucked")
 				|| kl.contains("lizard"))
@@ -158,7 +195,7 @@ public final class StatRegistry
 			{
 				return "Fishing";
 			}
-			if (key.endsWith("Pickpockets") || key.endsWith("Thieved") || kl.contains("pickpocket"))
+			if (key.endsWith("Thieved") || kl.contains("pickpocket"))
 			{
 				return "Thieving";
 			}
@@ -166,7 +203,19 @@ public final class StatRegistry
 			{
 				return "Farming";
 			}
-			if (key.endsWith("Crafted"))
+			if (key.endsWith("Smithed") || key.endsWith("Smelted"))
+			{
+				return "Smithing";
+			}
+			if (key.endsWith("Fletched"))
+			{
+				return "Fletching";
+			}
+			if (key.startsWith("agility"))
+			{
+				return "Agility";
+			}
+			if (key.endsWith("Crafted") || key.endsWith("Runecrafted"))
 			{
 				return "Runecraft";
 			}
@@ -174,7 +223,7 @@ public final class StatRegistry
 		}
 		if (fam.equals("Travel"))
 		{
-			if (key.startsWith("tiles"))
+			if (key.startsWith("tiles") || key.startsWith("distance"))
 			{
 				return "On foot";
 			}
@@ -187,6 +236,23 @@ public final class StatRegistry
 				return "Destinations";
 			}
 			return "";
+		}
+		if (fam.equals("Living"))
+		{
+			if (key.contains("Eaten") || key.startsWith("food"))
+			{
+				return "Food";
+			}
+			if (key.endsWith("Doses") || key.startsWith("potion") || key.startsWith("vials")
+				|| key.contains("Drunk"))
+			{
+				return "Potions";
+			}
+			if (key.equals("consumedValue"))
+			{
+				return "";
+			}
+			return "Elsewhere";
 		}
 		return "";
 	}
@@ -216,6 +282,35 @@ public final class StatRegistry
 			{
 				out.append(c);
 			}
+		}
+		return polish(out.toString());
+	}
+
+	/**
+	 * Reads-well pass over a prettified label: collapse stuttered words
+	 * ("Logs logs chopped" — item-plus-action keys double up), space out
+	 * parenthesised levels from NPC-name keys ("Guard(level21)" reads as
+	 * "Guard (lvl 21)").
+	 */
+	private static String polish(String label)
+	{
+		String s = label.replaceAll("(?<=\\S)\\(", " (")
+			.replaceAll("\\(level ?(\\d+)\\)", "(lvl $1)");
+		String[] words = s.split(" ");
+		StringBuilder out = new StringBuilder(s.length());
+		String prev = null;
+		for (String w : words)
+		{
+			if (prev != null && w.equalsIgnoreCase(prev))
+			{
+				continue;
+			}
+			if (out.length() > 0)
+			{
+				out.append(' ');
+			}
+			out.append(w);
+			prev = w;
 		}
 		return out.toString();
 	}
