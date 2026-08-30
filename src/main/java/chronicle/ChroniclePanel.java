@@ -84,7 +84,10 @@ class ChroniclePanel extends PluginPanel
 	private final ChroniclePlugin plugin;
 
 	private final JPanel display = new JPanel(new BorderLayout());
-	private final MaterialTabGroup tabGroup = new MaterialTabGroup(display);
+	// No display panel handed to the group: view swapping is ours (rebuild()),
+	// driven from onSelectEvent — handing it `display` makes the group swap in
+	// each tab's content component itself, which NPEs on our contentless tabs.
+	private final MaterialTabGroup tabGroup = new MaterialTabGroup();
 	private final IconTextField searchField = new IconTextField();
 	private final JLabel scopeLifetime = new JLabel("Lifetime", JLabel.CENTER);
 	private final JLabel scopeSession = new JLabel("Session", JLabel.CENTER);
@@ -184,7 +187,7 @@ class ChroniclePanel extends PluginPanel
 	{
 		MaterialTab tab = new MaterialTab(
 			new ImageIcon(ImageUtil.loadImageResource(ChroniclePanel.class, icon)),
-			tabGroup, null);
+			tabGroup, new JPanel());
 		tab.setToolTipText(tooltip);
 		tab.setOnSelectEvent(() ->
 		{
