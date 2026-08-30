@@ -189,14 +189,18 @@ public class ChroniclePlugin extends Plugin
 		// syncMode shape maps onto journal-always + opt-in cloud — an install
 		// that was enabled in CLOUD mode keeps syncing to the same server
 		// without re-consenting; everyone else lands on the local-only default.
+		// NB: the client persists every config item's DEFAULT at plugin
+		// registration, before startUp — so "is the new key unset?" is never a
+		// valid guard here. The one-shot flag gates the whole block; inside it,
+		// old-group values OVERWRITE whatever defaults were just written.
 		final String legacyGroup = "fitzgerald";
 		if (configManager.getConfiguration(GROUP, "migrated") == null)
 		{
-			for (String key : new String[]{"cloudSync", "serverBaseUrl", "manualToken",
+			for (String key : new String[]{"serverBaseUrl", "manualToken",
 				"captureScreenshots", "pushIntervalMinutes"})
 			{
 				String v = configManager.getConfiguration(legacyGroup, key);
-				if (v != null && configManager.getConfiguration(GROUP, key) == null)
+				if (v != null)
 				{
 					configManager.setConfiguration(GROUP, key, v);
 				}
@@ -205,10 +209,11 @@ public class ChroniclePlugin extends Plugin
 			String oldMode = configManager.getConfiguration(legacyGroup, "syncMode");
 			boolean wasCloud = "true".equals(oldEnabled)
 				&& (oldMode == null || "CLOUD".equals(oldMode));
-			if (wasCloud && configManager.getConfiguration(GROUP, "cloudSync") == null)
+			if (wasCloud)
 			{
 				configManager.setConfiguration(GROUP, "cloudSync", true);
-				if (configManager.getConfiguration(GROUP, "serverBaseUrl") == null)
+				String base = configManager.getConfiguration(GROUP, "serverBaseUrl");
+				if (base == null || base.trim().isEmpty())
 				{
 					configManager.setConfiguration(GROUP, "serverBaseUrl", "https://fitzgerald.gg");
 				}

@@ -20,7 +20,9 @@ public class StatRegistryTest
 	public void teleportFamiliesLabelAsAnnotations()
 	{
 		assertEquals("— by jewellery", StatRegistry.label("teleportsViaJewellery"));
-		assertEquals("→ Varrock", StatRegistry.label("teleportsVarrock"));
+		// destinations are bare names — the pixel font has no arrow glyph
+		assertEquals("Varrock", StatRegistry.label("teleportsVarrock"));
+		assertEquals("Teleports", StatRegistry.label("teleportsTotal"));
 	}
 
 	@Test

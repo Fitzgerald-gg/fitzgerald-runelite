@@ -44,6 +44,7 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import net.runelite.client.util.AsyncBufferedImage;
 import net.runelite.client.ui.ColorScheme;
+import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.ui.components.IconTextField;
 import net.runelite.client.ui.components.materialtabs.MaterialTab;
@@ -303,10 +304,10 @@ class ChroniclePanel extends PluginPanel
 		JPanel hdr = new JPanel(new BorderLayout());
 		hdr.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		JLabel name = new JLabel(rsn != null && !rsn.isEmpty() ? rsn : "Chronicle");
-		name.setFont(name.getFont().deriveFont(Font.BOLD, 14f));
+		name.setFont(FontManager.getRunescapeBoldFont());
 		JLabel state = new JLabel(scope == Scope.SESSION ? "session" : "journaling");
 		state.setForeground(accent());
-		state.setFont(state.getFont().deriveFont(10f));
+		state.setFont(FontManager.getRunescapeSmallFont());
 		hdr.add(name, BorderLayout.WEST);
 		hdr.add(state, BorderLayout.EAST);
 		hdr.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
@@ -457,14 +458,14 @@ class ChroniclePanel extends PluginPanel
 	private JPanel buildStats()
 	{
 		JPanel p = column();
-		JPanel pills = new JPanel(new FlowLayout(FlowLayout.LEFT, 3, 2));
+		JPanel pills = new JPanel(new GridLayout(0, 4, 3, 3));
 		pills.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		for (String fam : StatRegistry.FAMILIES)
 		{
-			JLabel pill = new JLabel(fam);
+			JLabel pill = new JLabel(fam, JLabel.CENTER);
 			pill.setOpaque(true);
 			pill.setBorder(BorderFactory.createEmptyBorder(2, 7, 2, 7));
-			pill.setFont(pill.getFont().deriveFont(10f));
+			pill.setFont(FontManager.getRunescapeSmallFont());
 			boolean on = fam.equals(statsFamily);
 			pill.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 			pill.setForeground(on ? accent() : ColorScheme.LIGHT_GRAY_COLOR.darker());
@@ -475,8 +476,6 @@ class ChroniclePanel extends PluginPanel
 			}));
 			pills.add(pill);
 		}
-		pills.setAlignmentX(Component.LEFT_ALIGNMENT);
-		pills.setMaximumSize(new Dimension(Integer.MAX_VALUE, 52));
 		p.add(pills);
 		p.add(vgap(4));
 
@@ -546,7 +545,7 @@ class ChroniclePanel extends PluginPanel
 				lastDay = day;
 				JLabel g = new JLabel(day.toUpperCase(Locale.ROOT));
 				g.setForeground(accent());
-				g.setFont(g.getFont().deriveFont(Font.BOLD, 10f));
+				g.setFont(FontManager.getRunescapeSmallFont());
 				g.setAlignmentX(Component.LEFT_ALIGNMENT);
 				g.setBorder(BorderFactory.createEmptyBorder(7, 2, 3, 0));
 				p.add(g);
@@ -581,7 +580,7 @@ class ChroniclePanel extends PluginPanel
 	{
 		JPanel s = column();
 		JLabel t = new JLabel("Cloud");
-		t.setFont(t.getFont().deriveFont(Font.BOLD, 12f));
+		t.setFont(FontManager.getRunescapeBoldFont());
 		t.setForeground(accent());
 		t.setAlignmentX(Component.LEFT_ALIGNMENT);
 		s.add(t);
@@ -790,7 +789,7 @@ class ChroniclePanel extends PluginPanel
 	private void styleScopeHalf(JLabel l)
 	{
 		l.setOpaque(true);
-		l.setFont(l.getFont().deriveFont(10f));
+		l.setFont(FontManager.getRunescapeSmallFont());
 		l.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		l.setBorder(BorderFactory.createEmptyBorder(3, 0, 3, 0));
 	}
@@ -833,10 +832,51 @@ class ChroniclePanel extends PluginPanel
 
 	private static JPanel wrapTop(JPanel body)
 	{
-		JPanel wrap = new JPanel(new BorderLayout());
+		// Scrollable that tracks the viewport width: long labels and html notes
+		// can never widen the view past the panel — labels ellipsise, html
+		// wraps — while height stays free for vertical scrolling.
+		JPanel wrap = new ScrollColumn();
 		wrap.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		wrap.add(body, BorderLayout.NORTH);
 		return wrap;
+	}
+
+	private static final class ScrollColumn extends JPanel implements javax.swing.Scrollable
+	{
+		private ScrollColumn()
+		{
+			super(new BorderLayout());
+		}
+
+		@Override
+		public Dimension getPreferredScrollableViewportSize()
+		{
+			return getPreferredSize();
+		}
+
+		@Override
+		public int getScrollableUnitIncrement(java.awt.Rectangle r, int o, int d)
+		{
+			return 16;
+		}
+
+		@Override
+		public int getScrollableBlockIncrement(java.awt.Rectangle r, int o, int d)
+		{
+			return 80;
+		}
+
+		@Override
+		public boolean getScrollableTracksViewportWidth()
+		{
+			return true;
+		}
+
+		@Override
+		public boolean getScrollableTracksViewportHeight()
+		{
+			return false;
+		}
 	}
 
 	private static JPanel card(String caption)
@@ -844,7 +884,7 @@ class ChroniclePanel extends PluginPanel
 		JPanel c = cardPlain();
 		JLabel cap = new JLabel(caption.toUpperCase(Locale.ROOT));
 		cap.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker());
-		cap.setFont(cap.getFont().deriveFont(9.5f));
+		cap.setFont(FontManager.getRunescapeSmallFont());
 		cap.setAlignmentX(Component.LEFT_ALIGNMENT);
 		c.add(cap);
 		c.add(vgap(3));
@@ -878,12 +918,12 @@ class ChroniclePanel extends PluginPanel
 		r.setAlignmentX(Component.LEFT_ALIGNMENT);
 		r.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
 		JLabel l = new JLabel(left);
-		l.setFont(l.getFont().deriveFont(11.5f));
+		l.setFont(FontManager.getRunescapeFont());
 		r.add(l, BorderLayout.CENTER);
 		if (right != null && !right.isEmpty())
 		{
 			JLabel v = new JLabel(right);
-			v.setFont(v.getFont().deriveFont(11.5f));
+			v.setFont(FontManager.getRunescapeFont());
 			v.setForeground(rightColor != null ? rightColor : ColorScheme.LIGHT_GRAY_COLOR.darker());
 			r.add(v, BorderLayout.EAST);
 		}
@@ -912,7 +952,7 @@ class ChroniclePanel extends PluginPanel
 	{
 		JLabel g = new JLabel(name.toUpperCase(Locale.ROOT));
 		g.setForeground(accent());
-		g.setFont(g.getFont().deriveFont(Font.BOLD, 10f));
+		g.setFont(FontManager.getRunescapeSmallFont());
 		g.setAlignmentX(Component.LEFT_ALIGNMENT);
 		g.setBorder(BorderFactory.createEmptyBorder(8, 2, 3, 0));
 		return g;
@@ -929,7 +969,7 @@ class ChroniclePanel extends PluginPanel
 			}
 		};
 		n.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker());
-		n.setFont(n.getFont().deriveFont(10.5f));
+		n.setFont(FontManager.getRunescapeSmallFont());
 		n.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return n;
 	}

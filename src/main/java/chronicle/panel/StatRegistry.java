@@ -68,9 +68,15 @@ public final class StatRegistry
 		{
 			return "— by " + key.substring("teleportsVia".length()).toLowerCase();
 		}
+		if (key.equals("teleportsTotal") || key.equals("teleports"))
+		{
+			return "Teleports";
+		}
 		if (key.startsWith("teleports") && key.length() > "teleports".length())
 		{
-			return "→ " + prettify(key.substring("teleports".length()));
+			// Destination name, bare — the client's pixel font has no arrow
+			// glyph, and the Travel family already supplies the context.
+			return prettify(key.substring("teleports".length()));
 		}
 		return prettify(key);
 	}
