@@ -805,8 +805,28 @@ class ChroniclePanel extends PluginPanel
 
 	private static JPanel column()
 	{
-		JPanel p = new JPanel();
-		p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+		// A vertical stack whose children ALWAYS span the full column width.
+		// BoxLayout can't be trusted with that (it widens children to the
+		// widest sibling's preferred width and drifts mixed alignments), so
+		// this is a single-column GridBag that applies the constraint to every
+		// child as it is added — call sites just add().
+		JPanel p = new JPanel(new java.awt.GridBagLayout())
+		{
+			private final java.awt.GridBagConstraints gbc = new java.awt.GridBagConstraints();
+
+			{
+				gbc.gridx = 0;
+				gbc.gridwidth = java.awt.GridBagConstraints.REMAINDER;
+				gbc.weightx = 1;
+				gbc.fill = java.awt.GridBagConstraints.HORIZONTAL;
+			}
+
+			@Override
+			protected void addImpl(Component comp, Object constraints, int index)
+			{
+				super.addImpl(comp, constraints == null ? gbc : constraints, index);
+			}
+		};
 		p.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		return p;
 	}
