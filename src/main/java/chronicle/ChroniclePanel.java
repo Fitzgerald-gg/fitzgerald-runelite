@@ -833,7 +833,17 @@ class ChroniclePanel extends PluginPanel
 
 	private static JPanel cardPlain()
 	{
-		JPanel c = new JPanel();
+		// Max width unbounded so BoxLayout stretches the card to the column
+		// instead of centring it at preferred width; height stays preferred
+		// because the column sits in a NORTH slot.
+		JPanel c = new JPanel()
+		{
+			@Override
+			public Dimension getMaximumSize()
+			{
+				return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+			}
+		};
 		c.setLayout(new BoxLayout(c, BoxLayout.Y_AXIS));
 		c.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		c.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
@@ -890,7 +900,14 @@ class ChroniclePanel extends PluginPanel
 
 	private static JLabel note(String text)
 	{
-		JLabel n = new JLabel("<html><i>" + escape(text) + "</i></html>");
+		JLabel n = new JLabel("<html><i>" + escape(text) + "</i></html>")
+		{
+			@Override
+			public Dimension getMaximumSize()
+			{
+				return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+			}
+		};
 		n.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker());
 		n.setFont(n.getFont().deriveFont(10.5f));
 		n.setAlignmentX(Component.LEFT_ALIGNMENT);

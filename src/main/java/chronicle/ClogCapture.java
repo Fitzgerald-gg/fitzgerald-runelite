@@ -90,6 +90,24 @@ public class ClogCapture
 	private int finished;
 	private int available;
 
+	/** Read the login-synced fraction + per-tab varps now — for a plugin that
+	 *  starts mid-session, where no LOGGED_IN transition will ever fire. */
+	void primeFromVarps(net.runelite.api.Client c)
+	{
+		int total = c.getVarpValue(VARP_CLOG_TOTAL);
+		int obtained = c.getVarpValue(VARP_CLOG_OBTAINED);
+		if (total > 0)
+		{
+			finished = obtained;
+			available = total;
+			dirty = true;
+		}
+		if (readCategoryCounts())
+		{
+			dirty = true;
+		}
+	}
+
 	int finishedCount()
 	{
 		return finished;

@@ -247,6 +247,9 @@ public class ChroniclePlugin extends Plugin
 		if (lastState == GameState.LOGGED_IN)
 		{
 			pendingEnrolCheck = true;
+			// The clog fraction varps normally arrive with the LOGGED_IN
+			// transition, which has already happened — read them now.
+			clientThread.invoke(() -> clogCapture.primeFromVarps(client));
 		}
 	}
 
