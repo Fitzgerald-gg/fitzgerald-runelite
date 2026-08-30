@@ -124,19 +124,19 @@
 .clpage{border-bottom:1px solid var(--line,#3a352c)}
 .clpage summary{display:flex;justify-content:space-between;gap:14px;padding:9px 2px;cursor:pointer;list-style:none}
 .clpage summary::-webkit-details-marker{display:none}
-.clname{color:var(--ink,#e8d9b9)}
+.clname{color:var(--parchment)}
 .clmeta{color:var(--faint,#98876e);font-variant-numeric:tabular-nums;white-space:nowrap}
 .clmeta.done{color:var(--gold,#d6b58a)}
 .clitems{padding:2px 0 12px}
 .clitem{display:flex;justify-content:space-between;gap:12px;padding:3px 12px;color:var(--faint,#98876e);font-size:13px}
-.clitem.got{color:var(--ink,#e8d9b9)}
+.clitem.got{color:var(--parchment)}
 .srcrow{cursor:pointer}
 .srcrow:hover .src{color:var(--gold,#d6b58a)}
 .drill{padding:4px 0 14px}
 .drill-head{padding:6px 12px 10px;color:var(--faint,#98876e);font-size:13px}
 .drill-head b,.drill-head span{color:var(--gold,#d6b58a)}
 .drill-head span{color:var(--faint,#98876e)}
-.drill-item{display:flex;justify-content:space-between;gap:14px;padding:4px 12px;font-size:13px;color:var(--ink,#e8d9b9)}
+.drill-item{display:flex;justify-content:space-between;gap:14px;padding:4px 12px;font-size:13px;color:var(--parchment)}
 .drill-item.dim{color:var(--faint,#98876e)}
 .drill-item .tnum{color:var(--faint,#98876e)}
 .drill-empty{padding:8px 12px;color:var(--faint,#98876e);font-style:italic;font-size:13px}
@@ -509,7 +509,7 @@ const CLOG_TAX = {"Bosses":{"Abyssal Sire":["Abyssal orphan","Unsired","Abyssal 
       case 'DIARY': return {g:'❧', t:`${esc(cap((d.difficulty||'').toLowerCase()))} diary — <b>${esc(d.area||'')}</b>`};
       case 'CLUE': return {g:'✧', t:`${esc(cap((d.clueType||'').toLowerCase()))} clue${d.clueCount?` <span style="color:var(--faint)">(#${commas(d.clueCount)})</span>`:''}`};
       case 'DEATH': return {g:'†', t:`Died${d.killerName?` to <b>${esc(d.killerName)}</b>`:''}`};
-      case 'SLAYER': return {g:'✦', t:`Slayer milestone${d.count?` — <b>${commas(d.count)}</b> tasks`:''}`};
+      case 'SLAYER': return {g:'✦', t:`Slayer task complete${d.slayerTask?` — <b>${esc(d.slayerTask)}</b>`:''}${d.killCount?`, ${commas(d.killCount)} killed`:''}`};
       default: return {g:'·', t:esc(cap((e.type||'').toLowerCase()))};
     }
   }
