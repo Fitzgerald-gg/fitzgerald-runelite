@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2026, Fitzgerald.gg
+ * Copyright (c) 2026, Chronicle
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -13,8 +13,6 @@ import com.google.inject.Provides;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
-import java.awt.Toolkit;
-import java.awt.datatransfer.StringSelection;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -53,13 +51,13 @@ import net.runelite.client.ui.NavigationButton;
 
 @Slf4j
 @PluginDescriptor(
-	name = "Fitzgerald.gg",
-	description = "Tracks your OSRS activity — loot, levels, kill counts, collection log, "
-		+ "clues, quests, diaries, combat achievements, slayer, pets, deaths and lifetime "
-		+ "counters. Cloud mode (the default) sends it to your profile on fitzgerald.gg, a "
-		+ "third-party server operated by the plugin author; Local mode keeps everything on your "
-		+ "own computer and sends nothing. Off until you enable it; screenshots are a separate opt-in.",
-	tags = {"fitzgerald", "stats", "tracker", "loot", "slayer", "external", "collection", "osrs"}
+	name = "Chronicle",
+	description = "A local journal of your OSRS activity — loot, levels, kill counts, "
+		+ "collection log, clues, quests, diaries, combat achievements, slayer, pets, "
+		+ "deaths and lifetime counters — kept on your own computer. Optional cloud sync "
+		+ "(off by default, server field blank) can additionally send it to a "
+		+ "Chronicle-compatible server you configure; screenshots are a separate opt-in.",
+	tags = {"chronicle", "journal", "stats", "tracker", "loot", "slayer", "collection", "osrs"}
 )
 // The Slayer plugin's service supplies the active task so we can tag on-task
 // drops at the kill. Declaring it a dependency guarantees it's loaded (and its
@@ -173,13 +171,33 @@ public class FitzgeraldPlugin extends Plugin
 	{
 		panel = new FitzgeraldPanel(this);
 		navButton = NavigationButton.builder()
-			.tooltip("Fitzgerald.gg")
+			.tooltip("Chronicle")
 			.icon(buildIcon())
 			.priority(9)
 			.panel(panel)
 			.build();
 		clientToolbar.addNavigation(navButton);
 		refreshPanel();
+
+		// One-shot migration from the pre-Chronicle config shape (enabled +
+		// syncMode) to journal-always + opt-in cloud: an install that was enabled
+		// in CLOUD mode keeps syncing to the same server without re-consenting;
+		// everyone else lands on the local-only default.
+		if (configManager.getConfiguration(GROUP, "cloudSync") == null)
+		{
+			String oldEnabled = configManager.getConfiguration(GROUP, "enabled");
+			String oldMode = configManager.getConfiguration(GROUP, "syncMode");
+			boolean wasCloud = "true".equals(oldEnabled)
+				&& (oldMode == null || "CLOUD".equals(oldMode));
+			if (wasCloud)
+			{
+				configManager.setConfiguration(GROUP, "cloudSync", true);
+				if (configManager.getConfiguration(GROUP, "serverBaseUrl") == null)
+				{
+					configManager.setConfiguration(GROUP, "serverBaseUrl", "https://fitzgerald.gg");
+				}
+			}
+		}
 
 		// The raw-event capture taps (loot/level/kc → /api/events) live in their
 		// own eventbus-registered object so this class stays focused on enrol +
@@ -204,7 +222,7 @@ public class FitzgeraldPlugin extends Plugin
 
 		reschedulePushLoop();
 		warnIfSlayerDisabled();
-		log.debug("Fitzgerald.gg v2 started — slayer service: {}",
+		log.debug("Chronicle started — slayer service: {}",
 			eventCapture.hasSlayerService() ? "AVAILABLE" : "MISSING");
 
 		// If the plugin is toggled on mid-session, catch the already-logged-in case.
@@ -250,10 +268,6 @@ public class FitzgeraldPlugin extends Plugin
 		{
 			pushTask.cancel(false);
 			pushTask = null;
-		}
-		if (!config.enabled())
-		{
-			return;
 		}
 		long minutes = Math.max(1, config.pushIntervalMinutes());
 		pushTask = executor.scheduleWithFixedDelay(
@@ -317,7 +331,7 @@ public class FitzgeraldPlugin extends Plugin
 	@Subscribe
 	public void onGameTick(GameTick tick)
 	{
-		if (!config.enabled() || !pendingEnrolCheck)
+		if (!pendingEnrolCheck)
 		{
 			return;
 		}
@@ -332,24 +346,24 @@ public class FitzgeraldPlugin extends Plugin
 			return; // wait for the name to populate
 		}
 		pendingEnrolCheck = false;
+		// The journal always runs: remember whose account this is and load its
+		// on-disk record so the record keeps accumulating across sessions. No
+		// enrolment, no network — cloud sync below is additive when configured.
+		localName = name;
+		if (!cloudActive())
+		{
+			statusLine = "Journaling locally — nothing leaves this computer.";
+		}
+		refreshPanel();
+		final String who = name;
+		executor.submit(() ->
+		{
+			localStore.load(localDir(), who);
+			clientThread.invoke(this::refreshLocal);
+		});
 		if (cloudActive())
 		{
 			ensureEnrolled(name);
-		}
-		else if (localMode())
-		{
-			// No enrolment, no network. Remember whose account this is, load their
-			// on-disk record so drops keep accumulating across sessions, then write
-			// the first page for this login.
-			localName = name;
-			statusLine = "Local mode — your data stays on this computer.";
-			refreshPanel();
-			final String who = name;
-			executor.submit(() ->
-			{
-				localStore.load(localDir(), who);
-				clientThread.invoke(this::refreshLocal);
-			});
 		}
 	}
 
@@ -361,27 +375,24 @@ public class FitzgeraldPlugin extends Plugin
 			return;
 		}
 		String key = e.getKey();
-		if ("pushIntervalMinutes".equals(key) || "enabled".equals(key) || "syncMode".equals(key))
+		if ("pushIntervalMinutes".equals(key) || "cloudSync".equals(key)
+			|| "serverBaseUrl".equals(key) || "manualToken".equals(key))
 		{
 			reschedulePushLoop();
-			if ("syncMode".equals(key))
+			if ("cloudSync".equals(key) || "serverBaseUrl".equals(key))
 			{
-				// The session-counter baseline means different things per mode (a cloud
-				// session is seeded to server absolutes; a local one counts from zero).
-				// Reset it so a switch can't carry one mode's baseline into the other.
+				// The counter baseline means different things with cloud on or off (a
+				// cloud session is seeded to server absolutes; a purely local one
+				// counts from zero). Reset so a toggle can't carry one into the other.
 				countersSeeded = false;
 				statStore.clear();
 				counters.reset();
 			}
-			// Turning on, or switching mode, re-runs the per-login branch (cloud enrol
-			// vs. local name-capture) for the newly-selected mode.
-			if (("enabled".equals(key) || "syncMode".equals(key)) && config.enabled()
-				&& client.getGameState() == GameState.LOGGED_IN)
+			// Turning cloud on re-runs the per-login branch so enrolment happens now.
+			if (cloudActive() && client.getGameState() == GameState.LOGGED_IN)
 			{
 				pendingEnrolCheck = true;
 			}
-			// Reflect the change immediately: the off prompt, the cloud UI, and the
-			// pared-back local UI are all driven by the panel's mode read.
 			refreshPanel();
 		}
 	}
@@ -436,7 +447,7 @@ public class FitzgeraldPlugin extends Plugin
 				cachedToken = token;
 				cachedName = rsn;
 				statusLine = "Enrolled as " + rsn + ".";
-				chat("Fitzgerald.gg: enrolled " + rsn + " — your page is unlisted (reachable by "
+				chat("Chronicle: enrolled " + rsn + " — your page is unlisted (reachable by "
 					+ "its link, not in the public directory). Manage privacy in the side panel.");
 				refreshPanel();
 				refreshSelfServiceState();
@@ -446,13 +457,13 @@ public class FitzgeraldPlugin extends Plugin
 		else if (result.code == 409)
 		{
 			statusLine = "Already enrolled elsewhere — ask an admin to reissue the token.";
-			chat("Fitzgerald.gg: " + rsn + " is already enrolled. Ask an admin to reissue the token to move it here.");
+			chat("Chronicle: " + rsn + " is already enrolled. Ask an admin to reissue the token to move it here.");
 			refreshPanel();
 		}
 		else if (result.code == 403)
 		{
 			statusLine = "Blocked from enrolment.";
-			chat("Fitzgerald.gg: enrolment for " + rsn + " was blocked.");
+			chat("Chronicle: enrolment for " + rsn + " was blocked.");
 			refreshPanel();
 		}
 		else
@@ -471,14 +482,12 @@ public class FitzgeraldPlugin extends Plugin
 	/** Scheduled on the executor; hops to the client thread to read config. */
 	private void scheduledPush()
 	{
+		// The journal refreshes every cycle; cloud pushes ride the same cadence
+		// when configured. Order matters not — different sinks, same harvest.
+		clientThread.invoke(this::refreshLocal);
 		if (cloudActive())
 		{
 			clientThread.invoke(this::pushCurrent);
-		}
-		else if (localMode())
-		{
-			// Same cadence, different sink: refresh the on-disk page instead of pushing.
-			clientThread.invoke(this::refreshLocal);
 		}
 	}
 
@@ -642,20 +651,16 @@ public class FitzgeraldPlugin extends Plugin
 	/** Runs on the client thread (GameStateChanged). Best-effort final push. */
 	private void onLogout()
 	{
-		if (localMode())
+		// The journal always closes out the session: capture the final counters
+		// (session view — the cloud-seeded share is subtracted so the journal's
+		// additive lifetime base can't double-count), write, end the session so a
+		// different account logging in next can't record onto this model.
+		if (localName != null)
 		{
-			// Capture this session's final counters (statStore is cleared further down),
-			// write, then close the session so a different account logging in next can't
-			// record onto this model.
-			if (localName != null)
-			{
-				localStore.setTrackers(harvest(), localName);
-			}
-			executor.submit(() -> localStore.flush(localDir()));
-			localStore.endSession();
-			// Fall through: the cloud bookkeeping below clears the (unused-in-local)
-			// counter stores too, and its final push is already gated on cloudActive.
+			localStore.setTrackers(sessionView(), localName);
 		}
+		executor.submit(() -> localStore.flush(localDir()));
+		localStore.endSession();
 		// Re-seed from the server on the next login (another device may have
 		// advanced the totals). The final push below still uses the in-memory
 		// snapshot we accumulated this session.
@@ -804,7 +809,7 @@ public class FitzgeraldPlugin extends Plugin
 		{
 			if (client.getGameState() != GameState.LOGGED_IN)
 			{
-				chat("Fitzgerald.gg: log in first, then re-enrol.");
+				chat("Chronicle: log in first, then re-enrol.");
 				return;
 			}
 			Player lp = client.getLocalPlayer();
@@ -816,7 +821,7 @@ public class FitzgeraldPlugin extends Plugin
 			String token = trimToNull(configManager.getRSProfileConfiguration(GROUP, KEY_TOKEN));
 			if (token != null)
 			{
-				chat("Fitzgerald.gg: " + name + " already has a token on this client. "
+				chat("Chronicle: " + name + " already has a token on this client. "
 					+ "Ask an admin to reissue if you need to move it.");
 				return;
 			}
@@ -827,11 +832,9 @@ public class FitzgeraldPlugin extends Plugin
 
 	void actionPushNow()
 	{
-		// The config text promises that nothing is pushed while the master switch is
-		// off. A panel button that transmits anyway would make that a lie.
-		if (!config.enabled())
+		if (!cloudActive())
 		{
-			chat("Fitzgerald.gg: turn on Enabled in the plugin settings first.");
+			chat("Chronicle: enable cloud sync (and set a server) under Advanced in the plugin settings first.");
 			return;
 		}
 		clientThread.invoke(this::pushCurrent);
@@ -847,83 +850,44 @@ public class FitzgeraldPlugin extends Plugin
 		return enrolledRsn;
 	}
 
-	/** Whether the master "Enabled" switch is on — nothing enrols or pushes until it is. */
-	boolean syncEnabled()
-	{
-		return config.enabled();
-	}
-
-	/** Cloud mode active: enabled AND configured to push to the server. */
+	/** Cloud sync active: opted in AND pointed at a server. The journal itself
+	 *  always runs while the plugin is on — only the network needs a gate. */
 	boolean cloudActive()
 	{
-		return config.enabled() && config.syncMode() == SyncMode.CLOUD;
+		return config.cloudSync() && !config.serverBaseUrl().trim().isEmpty();
 	}
 
-	/** Local mode active: enabled AND keeping everything on this computer. */
-	boolean localMode()
-	{
-		return config.enabled() && config.syncMode() == SyncMode.LOCAL;
-	}
-
-	/** RSN to show in the panel: the enrolled name in cloud mode, the logged-in name in local. */
+	/** RSN to show in the panel: the enrolled name when syncing, else the local one. */
 	String displayRsn()
 	{
-		return localMode() ? localName : enrolledRsn;
+		return cloudActive() && enrolledRsn != null && !enrolledRsn.isEmpty() ? enrolledRsn : localName;
 	}
 
 	/**
-	 * Panel "Copy my page link" in local mode: freshen the self-contained page the
-	 * plugin maintains under {@code .runelite/fitzgerald/}, then copy its file link to
-	 * the clipboard so the player can paste it into their own browser (a Hub plugin
-	 * can't open a local file itself). Nothing is fetched from the network — the page
-	 * carries its own data inline. When logged out we use the last copy written.
+	 * This session's own counter increments — the totals snapshot minus the
+	 * server-seeded share — for the local journal's additive lifetime base.
+	 * Max-type keys pass through as absolutes (the journal takes their max).
+	 * With cloud off nothing is ever seeded, so this IS the plain harvest.
 	 */
-	void openLocalPage()
+	private Map<String, Integer> sessionView()
 	{
-		final String rsn = localName;
-		if (rsn == null || rsn.isEmpty())
+		Map<String, Integer> abs = harvest();
+		Map<String, Integer> seeded = statStore.seededBaseline();
+		Map<String, Integer> out = new java.util.HashMap<>(abs.size());
+		for (Map.Entry<String, Integer> en : abs.entrySet())
 		{
-			chat("Fitzgerald.gg: log in on the account you want to view, then open your page.");
-			return;
-		}
-		if (client.getGameState() == GameState.LOGGED_IN && localStore.isReadyFor(rsn))
-		{
-			clientThread.invoke(() ->
+			if (LocalStore.MAX_KEYS.contains(en.getKey()))
 			{
-				gatherCharacter();
-				executor.submit(() ->
-				{
-					File page = localStore.flush(localDir());
-					copyLocalPageLink(page != null ? page : localStore.pageFor(localDir(), rsn));
-				});
-			});
-			return;
+				out.put(en.getKey(), en.getValue());
+				continue;
+			}
+			int sess = en.getValue() - seeded.getOrDefault(en.getKey(), 0);
+			if (sess > 0)
+			{
+				out.put(en.getKey(), sess);
+			}
 		}
-		copyLocalPageLink(localStore.pageFor(localDir(), rsn));
-	}
-
-	private void copyLocalPageLink(File page)
-	{
-		if (page == null || !page.isFile())
-		{
-			chat("Fitzgerald.gg: your local page is still being built — play for a moment, then try again.");
-			return;
-		}
-		// A Hub plugin can't open a local file itself, so copy the page's link to the
-		// clipboard and let the player paste it into their own browser — the same
-		// clipboard pattern LinkBrowser falls back to when it can't open a URL.
-		final String link = page.toURI().toString();   // file:///…/<slug>.html
-		try
-		{
-			Toolkit.getDefaultToolkit().getSystemClipboard()
-				.setContents(new StringSelection(link), null);
-			chat("Fitzgerald.gg: your page link is copied — paste it into your browser's address bar.");
-		}
-		catch (RuntimeException ex)   // headless / clipboard unavailable
-		{
-			log.debug("clipboard copy failed", ex);
-			chat("Fitzgerald.gg: your page is at " + page.getAbsolutePath());
-		}
+		return out;
 	}
 
 	private static File localDir()
@@ -934,7 +898,7 @@ public class FitzgeraldPlugin extends Plugin
 	/** Copy the always-current character sheet into the local store. Client thread. */
 	private void gatherCharacter()
 	{
-		if (!localMode() || client.getGameState() != GameState.LOGGED_IN)
+		if (client.getGameState() != GameState.LOGGED_IN)
 		{
 			return;
 		}
@@ -956,6 +920,10 @@ public class FitzgeraldPlugin extends Plugin
 	private void refreshLocal()
 	{
 		gatherCharacter();
+		if (localName != null)
+		{
+			localStore.setTrackers(sessionView(), localName);
+		}
 		executor.submit(() -> localStore.flush(localDir()));
 	}
 
@@ -992,7 +960,7 @@ public class FitzgeraldPlugin extends Plugin
 		{
 			if (client.getGameState() != GameState.LOGGED_IN)
 			{
-				chat("Fitzgerald.gg: log in first.");
+				chat("Chronicle: log in first.");
 				return;
 			}
 			Player lp = client.getLocalPlayer();
@@ -1000,7 +968,7 @@ public class FitzgeraldPlugin extends Plugin
 			String token = trimToNull(configManager.getRSProfileConfiguration(GROUP, KEY_TOKEN));
 			if (name == null || name.isEmpty() || token == null)
 			{
-				chat("Fitzgerald.gg: this account isn't enrolled yet.");
+				chat("Chronicle: this account isn't enrolled yet.");
 				return;
 			}
 			action.accept(token, name);
@@ -1043,13 +1011,13 @@ public class FitzgeraldPlugin extends Plugin
 			{
 				if (reply == null)
 				{
-					chat("Fitzgerald.gg: couldn't reach the server — lock unchanged.");
+					chat("Chronicle: couldn't reach the server — lock unchanged.");
 					return;
 				}
 				pageLocked = reply.has("locked") && reply.get("locked").getAsBoolean();
 				chat(pageLocked
-					? "Fitzgerald.gg: your page is now locked — viewers need the password."
-					: "Fitzgerald.gg: page lock removed.");
+					? "Chronicle: your page is now locked — viewers need the password."
+					: "Chronicle: page lock removed.");
 				refreshPanel();
 			})));
 	}
@@ -1061,13 +1029,13 @@ public class FitzgeraldPlugin extends Plugin
 			{
 				if (reply == null)
 				{
-					chat("Fitzgerald.gg: couldn't reach the server — listing unchanged.");
+					chat("Chronicle: couldn't reach the server — listing unchanged.");
 					return;
 				}
 				publicListed = reply.has("public") && reply.get("public").getAsBoolean();
 				chat(publicListed
-					? "Fitzgerald.gg: your page is now listed in the public directory."
-					: "Fitzgerald.gg: your page is unlisted (reachable by direct link only).");
+					? "Chronicle: your page is now listed in the public directory."
+					: "Chronicle: your page is unlisted (reachable by direct link only).");
 				refreshPanel();
 			})));
 	}
@@ -1079,14 +1047,14 @@ public class FitzgeraldPlugin extends Plugin
 			{
 				if (reply == null)
 				{
-					chat("Fitzgerald.gg: couldn't reach the server — nothing changed.");
+					chat("Chronicle: couldn't reach the server — nothing changed.");
 					return;
 				}
 				boolean scheduled = reply.has("scheduled") && reply.get("scheduled").getAsBoolean();
 				deletePendingTs = scheduled && reply.has("delete_ts") ? reply.get("delete_ts").getAsLong() : null;
 				chat(scheduled
-					? "Fitzgerald.gg: deletion scheduled. Your data is removed in 7 days unless you cancel."
-					: "Fitzgerald.gg: scheduled deletion cancelled — your data stays.");
+					? "Chronicle: deletion scheduled. Your data is removed in 7 days unless you cancel."
+					: "Chronicle: scheduled deletion cancelled — your data stays.");
 				refreshPanel();
 			})));
 	}
@@ -1100,7 +1068,7 @@ public class FitzgeraldPlugin extends Plugin
 			// disk write OFF the client/game thread so it can't stutter a frame.
 			if (json == null)
 			{
-				chat("Fitzgerald.gg: export failed — couldn't reach the server.");
+				chat("Chronicle: export failed — couldn't reach the server.");
 				return;
 			}
 			try
@@ -1113,12 +1081,12 @@ public class FitzgeraldPlugin extends Plugin
 					"export-" + name.replaceAll("[^A-Za-z0-9]", "_")
 						+ "-" + System.currentTimeMillis() + ".json");
 				Files.write(out.toPath(), json.getBytes(StandardCharsets.UTF_8));
-				chat("Fitzgerald.gg: data exported to " + out.getAbsolutePath());
+				chat("Chronicle: data exported to " + out.getAbsolutePath());
 			}
 			catch (Exception e)
 			{
 				log.debug("export write failed", e);
-				chat("Fitzgerald.gg: export downloaded but couldn't be saved to disk.");
+				chat("Chronicle: export downloaded but couldn't be saved to disk.");
 			}
 		}));
 	}

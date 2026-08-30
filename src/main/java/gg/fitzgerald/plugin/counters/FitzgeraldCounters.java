@@ -79,7 +79,8 @@ public class FitzgeraldCounters
 
 	private boolean active()
 	{
-		return config.enabled();
+		// The journal always counts while the plugin is on (local-first).
+		return true;
 	}
 
 	/**

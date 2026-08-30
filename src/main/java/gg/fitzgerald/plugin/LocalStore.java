@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2026, Fitzgerald.gg
+ * Copyright (c) 2026, Chronicle
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,9 +32,8 @@ import net.runelite.client.game.ItemManager;
  * <ul>
  *   <li>{@code <slug>.json} — the durable, accumulating record. Loaded on login
  *       so drops and kill counts build across sessions; rewritten as you play.</li>
- *   <li>{@code <slug>.html} — a self-contained page (the bundled template with the
- *       record spliced in inline) that "Open my page" launches. Nothing is fetched;
- *       the data travels inside the file, so it works fully offline.</li>
+ *   The record is what the Chronicle side panel reads and presents — it never
+ *   leaves this computer.
  * </ul>
  *
  * <p>Threading: {@link #record} and {@link #setCharacter} run on the client thread
@@ -52,7 +51,7 @@ class LocalStore
 	private static final int FEED_CAP = 2000;
 	// Counters that track a peak, not a running total — merged across sessions with
 	// max() rather than a sum (matches CombatStatTracker's setStat semantics).
-	private static final java.util.Set<String> MAX_KEYS = new java.util.HashSet<>(
+	static final java.util.Set<String> MAX_KEYS = new java.util.HashSet<>(
 		java.util.Arrays.asList("highestHit", "highestHitTaken"));
 	// Notable one-off events that belong in the dated feed (LOOT is aggregated
 	// into drops instead; GROUP_STORAGE / LOOT_UNTAKEN are cloud-only niceties).
@@ -68,7 +67,6 @@ class LocalStore
 	private String currentRsn;        // whose model root holds
 	private volatile boolean ready;   // true once an account's file has been loaded
 
-	private volatile String template; // cached page template (loaded once)
 
 	@Inject
 	LocalStore(ItemManager itemManager, Gson gson)
@@ -357,7 +355,7 @@ class LocalStore
 	 * page file (for opening), or null if there's nothing to write yet. The lock
 	 * is held only to serialise the model; both disk writes happen outside it.
 	 */
-	File flush(File dir)
+	void flush(File dir)
 	{
 		String json;
 		String rsn;
@@ -365,7 +363,7 @@ class LocalStore
 		{
 			if (root == null || currentRsn == null)
 			{
-				return null;
+				return;
 			}
 			json = gson.toJson(root);
 			rsn = currentRsn;
@@ -377,48 +375,12 @@ class LocalStore
 				log.debug("could not create local dir {}", dir);
 			}
 			writeAtomic(jsonPath(dir, rsn), json);
-			String page = renderPage(json);
-			File html = htmlPath(dir, rsn);
-			writeAtomic(html, page);
-			return html;
 		}
 		catch (Exception e)   // noqa: best-effort; a failed write just retries next tick
 		{
 			log.debug("local flush failed", e);
-			return null;
 		}
 	}
-
-	/** The page file for an account, without writing anything (for opening a stale copy). */
-	File pageFor(File dir, String rsn)
-	{
-		return htmlPath(dir, rsn);
-	}
-
-	private String renderPage(String json) throws IOException
-	{
-		String tpl = template;
-		if (tpl == null)
-		{
-			try (InputStream in = LocalStore.class.getResourceAsStream("dashboard.html"))
-			{
-				if (in == null)
-				{
-					throw new IOException("dashboard.html template missing from plugin resources");
-				}
-				tpl = new String(readAll(in), StandardCharsets.UTF_8);
-				template = tpl;
-			}
-		}
-		// The template carries the literal token __FITZ_DATA__ where the record goes.
-		// Escape '<' so a game string like "</script>" in an item/boss name can never
-		// break out of the inline <script> (valid JSON: only affects string contents).
-		return tpl.replace("__FITZ_DATA__", json.replace("<", "\\u003c"));
-	}
-
-	// ------------------------------------------------------------------
-	// Helpers
-	// ------------------------------------------------------------------
 
 	private JsonObject skeleton(String rsn)
 	{
@@ -489,11 +451,6 @@ class LocalStore
 	private static File jsonPath(File dir, String rsn)
 	{
 		return new File(dir, slug(rsn) + ".json");
-	}
-
-	private static File htmlPath(File dir, String rsn)
-	{
-		return new File(dir, slug(rsn) + ".html");
 	}
 
 	private static void writeAtomic(File dest, String content) throws IOException

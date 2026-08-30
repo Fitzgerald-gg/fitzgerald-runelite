@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2026, Fitzgerald.gg
+ * Copyright (c) 2026, Chronicle
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -18,68 +18,86 @@ import net.runelite.client.config.Units;
 @ConfigGroup(FitzgeraldConfig.GROUP)
 public interface FitzgeraldConfig extends Config
 {
+	// The config group (and the plugin's internal id) predate the Chronicle
+	// rename — they stay "fitzgerald" so existing installs keep their settings
+	// and enrolment. Only the display surfaces carry the new name.
 	String GROUP = "fitzgerald";
 
 	@ConfigSection(
-		name = "General",
-		description = "Core Fitzgerald.gg sync settings",
-		position = 0
-	)
-	String generalSection = "general";
-
-	@ConfigSection(
 		name = "Advanced",
-		description = "Server + integration settings (change only if you know why)",
+		description = "Cloud sync + screenshots. Everything here is OFF/blank by default — "
+			+ "Chronicle is a local journal unless you point it somewhere.",
 		position = 1,
 		closedByDefault = true
 	)
 	String advancedSection = "advanced";
 
+	// ── Local journal ────────────────────────────────────────────────────
+	// There is deliberately no master switch: installing Chronicle IS the
+	// consent for a local, on-device journal (nothing leaves this computer),
+	// and the RuneLite plugin toggle turns the whole thing off. Only the
+	// network features below need explicit opt-in.
+
+	// ── Advanced: cloud sync ─────────────────────────────────────────────
+
 	@ConfigItem(
-		keyName = "enabled",
-		name = "Enabled",
-		description = "Master switch. When on, this plugin captures your in-game activity "
-			+ "(loot, levels, kill counts, collection log, clues, quests, achievement "
-			+ "diaries, combat achievements, slayer tasks, pets, deaths, group-storage "
-			+ "movements, and — for notable moments — a screenshot). In Cloud mode (the default) "
-			+ "it sends this to the Fitzgerald.gg server (fitzgerald.gg), a third-party server not "
-			+ "operated by RuneLite, so it can appear on your profile; in Local mode it keeps "
-			+ "everything on your own computer and sends nothing. When off, nothing is enrolled, "
-			+ "captured, pushed, or written.",
-		warning = "This feature submits your IP address to a 3rd-party server not controlled or verified by the RuneLite developers",
-		position = 0,
-		section = generalSection
+		keyName = "cloudSync",
+		name = "Enable cloud sync",
+		description = "ALSO send your captured activity (loot, levels, kill counts, "
+			+ "collection log, clues, quests, diaries, combat achievements, slayer "
+			+ "tasks, pets, deaths, group-storage movements) to the server below, so "
+			+ "it can appear on a profile page there. Off by default: without this, "
+			+ "Chronicle never touches the network. Requires a server URL.",
+		warning = "This feature submits your IP address, and your own account's activity, "
+			+ "to the 3rd-party server you configure below — a server not controlled or "
+			+ "verified by the RuneLite developers",
+		position = 10,
+		section = advancedSection
 	)
-	default boolean enabled()
+	default boolean cloudSync()
 	{
 		return false;
 	}
 
 	@ConfigItem(
-		keyName = "syncMode",
-		name = "Mode",
-		description = "Cloud sends your captured activity to your fitzgerald.gg profile so it "
-			+ "appears online. Local keeps everything on this computer only — nothing is sent "
-			+ "to the server — and builds a self-contained page whose link the side panel "
-			+ "copies for you (\"Copy my page link\").",
-		position = 1,
-		section = generalSection
+		keyName = "serverBaseUrl",
+		name = "Cloud server",
+		description = "Base URL of a Chronicle-compatible server to sync to (e.g. a "
+			+ "server you run yourself). Blank by default — cloud sync does nothing "
+			+ "until this is set.",
+		position = 11,
+		section = advancedSection
 	)
-	default SyncMode syncMode()
+	default String serverBaseUrl()
 	{
-		return SyncMode.CLOUD;
+		return "";
+	}
+
+	@ConfigItem(
+		keyName = "manualToken",
+		name = "Cloud token override",
+		description = "Paste an existing token to use this account on the configured "
+			+ "server without self-enrolling (a re-install, or a second device). "
+			+ "Leave blank to enrol normally.",
+		position = 12,
+		section = advancedSection
+	)
+	default String manualToken()
+	{
+		return "";
 	}
 
 	@ConfigItem(
 		keyName = "captureScreenshots",
-		name = "Capture screenshots",
-		description = "Attach a screenshot to notable events (rare/valuable drops, pets, "
-			+ "collection-log unlocks, level 99s, deaths, clues, quests, diaries, combat "
-			+ "achievements). The image is uploaded to Fitzgerald.gg with the event. Turn "
-			+ "off to send metadata only.",
-		warning = "This feature submits your IP address to a 3rd-party server not controlled or verified by the RuneLite developers",
-		position = 3,
-		section = generalSection
+		name = "Upload screenshots",
+		description = "Cloud sync only: attach a screenshot to notable events "
+			+ "(rare/valuable drops, pets, collection-log unlocks, level 99s, deaths, "
+			+ "clues, quests, diaries, combat achievements) and upload it with the "
+			+ "event. Off by default; does nothing without cloud sync.",
+		warning = "This feature submits your IP address to a 3rd-party server not "
+			+ "controlled or verified by the RuneLite developers",
+		position = 13,
+		section = advancedSection
 	)
 	default boolean captureScreenshots()
 	{
@@ -89,10 +107,10 @@ public interface FitzgeraldConfig extends Config
 	@ConfigItem(
 		keyName = "pushIntervalMinutes",
 		name = "Push interval",
-		description = "Cloud mode: how often your lifetime stat counters are pushed to Fitzgerald.gg. "
-			+ "Local mode: how often the on-disk page is refreshed.",
-		position = 2,
-		section = generalSection
+		description = "Cloud sync only: how often lifetime stat counters are pushed "
+			+ "to the configured server.",
+		position = 14,
+		section = advancedSection
 	)
 	@Range(min = 1, max = 60)
 	@Units(Units.MINUTES)
@@ -101,34 +119,6 @@ public interface FitzgeraldConfig extends Config
 		return 5;
 	}
 
-	@ConfigItem(
-		keyName = "serverBaseUrl",
-		name = "Cloud base URL",
-		description = "Cloud mode only: base URL of the Fitzgerald.gg server. Leave as the default "
-			+ "unless you self-host. Has no effect in Local mode.",
-		position = 10,
-		section = advancedSection
-	)
-	default String serverBaseUrl()
-	{
-		return "https://fitzgerald.gg";
-	}
-
-	@ConfigItem(
-		keyName = "manualToken",
-		name = "Cloud token override",
-		description = "Cloud mode only: paste an existing Fitzgerald token to use this account without "
-			+ "self-enrolling (for the site owner, a re-install, or a second device). Leave blank to "
-			+ "enrol normally. Has no effect in Local mode.",
-		position = 11,
-		section = advancedSection
-	)
-	default String manualToken()
-	{
-		return "";
-	}
-
-	// Actions (Re-enrol, Open my page) live in the side panel
-	// (see FitzgeraldPanel) because the RuneLite config UI has no first-class
-	// button widget. The panel also shows live status: enrolled RSN + last push.
+	// Actions (Re-enrol, export) live in the side panel (see FitzgeraldPanel)
+	// because the RuneLite config UI has no first-class button widget.
 }

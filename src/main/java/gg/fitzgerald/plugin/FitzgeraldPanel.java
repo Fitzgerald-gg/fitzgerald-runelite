@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2026, Fitzgerald.gg
+ * Copyright (c) 2026, Chronicle
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -71,7 +71,7 @@ class FitzgeraldPanel extends PluginPanel
 		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
 		content.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-		JLabel title = new JLabel("Fitzgerald.gg");
+		JLabel title = new JLabel("Chronicle");
 		title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD, 15f));
 		title.setAlignmentX(Component.LEFT_ALIGNMENT);
 		content.add(title);
@@ -139,14 +139,9 @@ class FitzgeraldPanel extends PluginPanel
 		update();
 	}
 
-	/** The page button: copy the on-disk page's link in local mode, open the website profile in cloud. */
+	/** The page button: open the cloud profile in a browser (cloud sync only). */
 	private void onOpenPage()
 	{
-		if (plugin.localMode())
-		{
-			plugin.openLocalPage();
-			return;
-		}
 		String rsn = plugin.enrolledRsn();
 		if (rsn != null && !rsn.isEmpty())
 		{
@@ -191,7 +186,7 @@ class FitzgeraldPanel extends PluginPanel
 			return;
 		}
 		int ok = JOptionPane.showConfirmDialog(this,
-			"Schedule deletion of your Fitzgerald.gg profile and all its data?\n"
+			"Schedule deletion of your cloud profile and all its data?\n"
 				+ "It is removed in 7 days. You can cancel any time before then.",
 			"Delete my data", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
 		if (ok == JOptionPane.OK_OPTION)
@@ -205,11 +200,16 @@ class FitzgeraldPanel extends PluginPanel
 	{
 		SwingUtilities.invokeLater(() ->
 		{
-			// State 1 — master switch off. Blank but for the prompt.
-			if (!plugin.syncEnabled())
+			// State 1 — journaling locally (the default). No server controls.
+			if (!plugin.cloudActive())
 			{
-				rsnLabel.setText("Fitzgerald.gg is off");
-				statusLabel.setText("<html>Please enable the plugin in the settings.</html>");
+				String rsn = plugin.displayRsn();
+				rsnLabel.setText(rsn != null && !rsn.isEmpty()
+					? "<html><b>" + escape(rsn) + "</b> · journaling</html>"
+					: "Chronicle");
+				statusLabel.setText("<html>Journaling locally — everything stays on this "
+					+ "computer, nothing is sent anywhere. Cloud sync lives under Advanced "
+					+ "in the plugin settings, off and blank by default.</html>");
 				pushNowButton.setVisible(false);
 				reEnrolButton.setVisible(false);
 				openPageButton.setVisible(false);
@@ -219,28 +219,7 @@ class FitzgeraldPanel extends PluginPanel
 				return;
 			}
 
-			// State 2 — local mode. No enrolment, no server controls; just the page.
-			if (plugin.localMode())
-			{
-				String rsn = plugin.displayRsn();
-				rsnLabel.setText(rsn != null && !rsn.isEmpty()
-					? "<html><b>" + escape(rsn) + "</b> · local</html>"
-					: "Local mode");
-				statusLabel.setText("<html>Everything stays on this computer — nothing is sent to "
-					+ "the server. Your page updates as you play; copy its link below and paste it "
-					+ "into your browser.</html>");
-				pushNowButton.setVisible(false);
-				reEnrolButton.setVisible(false);
-				openPageButton.setText("Copy my page link");
-				openPageButton.setVisible(true);
-				openPageButton.setEnabled(true);
-				privacySection.setVisible(false);
-				revalidate();
-				repaint();
-				return;
-			}
-
-			// State 3 — cloud mode. Full sync + privacy controls.
+			// State 2 — cloud sync on. Full sync + privacy controls.
 			pushNowButton.setVisible(true);
 			reEnrolButton.setVisible(true);
 			openPageButton.setText("Open my page");

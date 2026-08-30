@@ -41,6 +41,14 @@ public class StatStore
 {
 	private final Map<String, Integer> totals = new ConcurrentHashMap<>();
 
+	// What the SERVER contributed to each total via the seed calls below. The
+	// local journal needs pure session increments (it keeps its own lifetime
+	// base and adds), while cloud pushes need absolutes — this ledger is what
+	// lets one store serve both: session delta = totals - seeded. Empty when
+	// cloud sync is off, so deltas equal totals and local-only behaviour is
+	// unchanged.
+	private final Map<String, Integer> seeded = new ConcurrentHashMap<>();
+
 	/**
 	 * Counters the SERVER derives and owns, which this client must never send back.
 	 *
@@ -131,6 +139,7 @@ public class StatStore
 		if (baseline != null)
 		{
 			baseline.forEach((k, v) -> totals.merge(k, v, StatStore::saturatingSum));
+			baseline.forEach((k, v) -> seeded.merge(k, v, StatStore::saturatingSum));
 		}
 	}
 
@@ -144,14 +153,37 @@ public class StatStore
 	{
 		if (baseline != null)
 		{
-			baseline.forEach((k, v) -> totals.merge(k, v, Math::max));
+			// The seed's contribution is only the amount each counter was RAISED —
+			// anything we already held higher was witnessed this session.
+			baseline.forEach((k, v) ->
+			{
+				int before = totals.getOrDefault(k, 0);
+				totals.merge(k, v, Math::max);
+				int raise = Math.max(0, v - before);
+				if (raise > 0)
+				{
+					seeded.merge(k, raise, StatStore::saturatingSum);
+				}
+			});
 		}
+	}
+
+	/**
+	 * The server-seeded share of each counter — subtract from a totals snapshot
+	 * to get this session's own increments (for the local journal's additive
+	 * lifetime base). Callers must NOT subtract for max-type keys (highestHit
+	 * and friends), whose journal semantics are per-key max of absolutes.
+	 */
+	public Map<String, Integer> seededBaseline()
+	{
+		return new java.util.HashMap<>(seeded);
 	}
 
 	/** Forget everything. Used at an account boundary, where the totals stop applying. */
 	public void clear()
 	{
 		totals.clear();
+		seeded.clear();
 	}
 
 	/** Current value, or zero for a counter nothing has touched yet. */

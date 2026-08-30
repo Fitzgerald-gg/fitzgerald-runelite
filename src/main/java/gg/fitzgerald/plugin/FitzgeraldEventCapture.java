@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2026, Fitzgerald.gg
+ * Copyright (c) 2026, Chronicle
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -1297,7 +1297,7 @@ public class FitzgeraldEventCapture
 
 	private void emit(String type, JsonObject data)
 	{
-		if (!config.enabled() || client.getGameState() != GameState.LOGGED_IN)
+		if (client.getGameState() != GameState.LOGGED_IN)
 		{
 			return;
 		}
@@ -1307,12 +1307,12 @@ public class FitzgeraldEventCapture
 		{
 			return;
 		}
-		// Local mode: fold the same captured event into the on-disk record and stop.
-		// Nothing reaches the network — and gating on the MODE (not just token
-		// presence) means a leftover token from a prior cloud enrolment can't leak.
-		if (config.syncMode() == SyncMode.LOCAL)
+		// The journal always gets the event; the cloud path below is additive.
+		// Gating the network on the OPT-IN (not just token presence) means a
+		// leftover token from a prior enrolment can't leak an event.
+		localStore.record(type, data, name);
+		if (!config.cloudSync() || config.serverBaseUrl().trim().isEmpty())
 		{
-			localStore.record(type, data, name);
 			return;
 		}
 		String tokenRaw = configManager.getRSProfileConfiguration(GROUP, KEY_TOKEN);
