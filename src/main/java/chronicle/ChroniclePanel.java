@@ -100,6 +100,15 @@ class ChroniclePanel extends PluginPanel
 	private String statsFamily = StatRegistry.FAMILIES[0];
 	private String expandedSource;
 	private int dropsShown = ROW_CAP;
+	private String clogTab = "Bosses";
+	private String clogPageSel;
+	private String histGranularity = "Week";
+	// The period's END date (inclusive); the stepper moves it by one granule.
+	private java.time.LocalDate histCursor = java.time.LocalDate.now();
+	private boolean womImportRunning;
+	// The bundled 1,921-slot taxonomy: tab -> page -> ordered slot names.
+	// Parsed once on first Log open (~40KB).
+	private static Map<String, Map<String, List<String>>> taxonomy;
 	// Cloud item lists already fetched this session, keyed by source — the
 	// drill fetches each source at most once.
 	private final Map<String, List<ChronicleApiClient.LedgerItem>> cloudBagCache = new LinkedHashMap<>();
@@ -117,7 +126,7 @@ class ChroniclePanel extends PluginPanel
 		north.setLayout(new BoxLayout(north, BoxLayout.Y_AXIS));
 		north.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-		// ── scope chip ────────────────────────────────────────────────────
+		// ── scope chip (built here, added after the tabs — mock order) ────
 		JPanel chip = new JPanel(new GridLayout(1, 2, 4, 0));
 		chip.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		chip.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
@@ -127,8 +136,6 @@ class ChroniclePanel extends PluginPanel
 		scopeSession.addMouseListener(clicker(() -> setScope(Scope.SESSION)));
 		chip.add(scopeLifetime);
 		chip.add(scopeSession);
-		north.add(chip);
-		north.add(vgap(6));
 
 		// ── search ────────────────────────────────────────────────────────
 		searchField.setIcon(IconTextField.Icon.SEARCH);
@@ -157,10 +164,7 @@ class ChroniclePanel extends PluginPanel
 				searchDebounce.restart();
 			}
 		});
-		north.add(searchField);
-		north.add(vgap(6));
-
-		// ── tabs ──────────────────────────────────────────────────────────
+		// ── tabs first (the mock's order), then search, then the scope chip ──
 		tabGroup.setLayout(new GridLayout(1, 6, 2, 0));
 		addTab("tab_home.png", "Home", View.HOME);
 		addTab("tab_drops.png", "Drops", View.DROPS);
@@ -169,6 +173,10 @@ class ChroniclePanel extends PluginPanel
 		addTab("tab_history.png", "History", View.HISTORY);
 		addTab("tab_journal.png", "Journal", View.JOURNAL);
 		north.add(tabGroup);
+		north.add(vgap(7));
+		north.add(searchField);
+		north.add(vgap(6));
+		north.add(chip);
 		north.add(vgap(8));
 
 		add(north, BorderLayout.NORTH);
@@ -533,41 +541,208 @@ class ChroniclePanel extends PluginPanel
 	private JPanel buildLog()
 	{
 		JPanel p = column();
-		int avail = plugin.clogAvailable();
+		int avail = Math.max(plugin.clogAvailable(), 1712);
+		int fin = plugin.clogFinished();
 		JPanel head = card("Collection log");
-		if (avail > 0)
+		if (fin > 0)
 		{
-			int fin = plugin.clogFinished();
 			head.add(row(fmt(fin) + " / " + fmt(avail),
 				Math.round(100f * fin / avail) + "%", accent()));
 			head.add(progress((float) fin / avail));
 		}
 		else
 		{
-			head.add(row("Log in to read your log", "", null));
+			head.add(row("Open your log in game once to fill this in", "", null));
 		}
 		p.add(head);
 		p.add(vgap(6));
-		p.add(note("Open your collection log in game once and every page fills in; "
-			+ "page kill counts arrive as you browse."));
+
+		Map<String, Map<String, List<String>>> tax = taxonomy();
+		JPanel pills = new JPanel(new GridLayout(1, tax.size(), 3, 3));
+		pills.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		for (String tab : tax.keySet())
+		{
+			JLabel pill = new JLabel(tab, JLabel.CENTER);
+			pill.setOpaque(true);
+			pill.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
+			pill.setFont(FontManager.getRunescapeSmallFont());
+			pill.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+			pill.setForeground(tab.equals(clogTab) ? accent() : ColorScheme.LIGHT_GRAY_COLOR.darker());
+			pill.addMouseListener(clicker(() ->
+			{
+				clogTab = tab;
+				clogPageSel = null;
+				rebuild();
+			}));
+			pills.add(pill);
+		}
+		p.add(pills);
 		p.add(vgap(6));
 
-		List<LocalStore.ClogPage> pages = plugin.clogPages();
-		pages.sort(Comparator.comparing(pg -> pg.page.toLowerCase(Locale.ROOT)));
-		int shown = 0;
-		for (LocalStore.ClogPage pg : pages)
+		// The journal's stored log, lower-cased once for the overlay.
+		JsonObject cl = plugin.clogSnapshot();
+		Map<String, Long> owned = new LinkedHashMap<>();
+		if (cl.has("clog_items") && cl.get("clog_items").isJsonObject())
 		{
-			if (shown++ >= ROW_CAP)
+			for (Map.Entry<String, com.google.gson.JsonElement> e
+				: cl.getAsJsonObject("clog_items").entrySet())
 			{
-				break;
+				owned.merge(e.getKey().toLowerCase(Locale.ROOT), safeLong(e.getValue()), Math::max);
 			}
-			p.add(row(pg.page, pg.held + " held" + (pg.kc != null ? " · " + fmt(pg.kc) + " kc" : ""), null));
 		}
-		if (pages.size() > ROW_CAP)
+		Map<String, Map<String, Long>> byCat = new LinkedHashMap<>();
+		if (cl.has("by_cat") && cl.get("by_cat").isJsonObject())
 		{
-			p.add(note(fmt(pages.size() - ROW_CAP) + " more pages"));
+			for (Map.Entry<String, com.google.gson.JsonElement> pg
+				: cl.getAsJsonObject("by_cat").entrySet())
+			{
+				if (!pg.getValue().isJsonObject())
+				{
+					continue;
+				}
+				Map<String, Long> items = new LinkedHashMap<>();
+				for (Map.Entry<String, com.google.gson.JsonElement> it
+					: pg.getValue().getAsJsonObject().entrySet())
+				{
+					items.merge(it.getKey().toLowerCase(Locale.ROOT), safeLong(it.getValue()), Math::max);
+				}
+				byCat.put(pg.getKey().toLowerCase(Locale.ROOT), items);
+			}
+		}
+		Map<String, Long> kcs = new LinkedHashMap<>();
+		if (cl.has("kcs") && cl.get("kcs").isJsonObject())
+		{
+			for (Map.Entry<String, com.google.gson.JsonElement> e
+				: cl.getAsJsonObject("kcs").entrySet())
+			{
+				kcs.merge(e.getKey().toLowerCase(Locale.ROOT), safeLong(e.getValue()), Math::max);
+			}
+		}
+
+		Map<String, List<String>> pages = tax.getOrDefault(clogTab, new LinkedHashMap<>());
+		for (Map.Entry<String, List<String>> pg : pages.entrySet())
+		{
+			String page = pg.getKey();
+			List<String> slots = pg.getValue();
+			boolean[] lit = lightSlots(slots, byCat.get(page.toLowerCase(Locale.ROOT)), owned);
+			int got = 0;
+			for (boolean b : lit)
+			{
+				got += b ? 1 : 0;
+			}
+			Long kc = kcs.get(page.toLowerCase(Locale.ROOT));
+			boolean open = page.equals(clogPageSel);
+			JPanel rowP = row(page, got + "/" + slots.size()
+				+ (kc != null && kc > 0 ? " · " + fmt(kc) + " kc" : ""),
+				got == slots.size() && !slots.isEmpty() ? ACCENT_SESSION : null);
+			rowP.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+			rowP.addMouseListener(clicker(() ->
+			{
+				clogPageSel = open ? null : page;
+				rebuild();
+			}));
+			p.add(rowP);
+			if (open)
+			{
+				JPanel drill = cardPlain();
+				for (int i = 0; i < slots.size(); i++)
+				{
+					drill.add(row(slots.get(i), lit[i] ? "✓" : "—",
+						lit[i] ? ACCENT_SESSION : null));
+				}
+				p.add(drill);
+				p.add(vgap(3));
+			}
 		}
 		return p;
+	}
+
+	/**
+	 * Which slots of a page the player holds: a slot lights when its name is in
+	 * the page's own capture or the whole-log obtained set. Duplicate-named
+	 * slots (My Notes' 26 "Ancient page" entries) light positionally — k copies
+	 * lights the first k — matching the game and the site.
+	 */
+	private static boolean[] lightSlots(List<String> slots, Map<String, Long> pageItems,
+		Map<String, Long> owned)
+	{
+		boolean[] lit = new boolean[slots.size()];
+		Map<String, Integer> dupes = new LinkedHashMap<>();
+		for (String slot : slots)
+		{
+			dupes.merge(slot.toLowerCase(Locale.ROOT), 1, Integer::sum);
+		}
+		Map<String, Integer> seen = new LinkedHashMap<>();
+		for (int i = 0; i < slots.size(); i++)
+		{
+			String key = slots.get(i).toLowerCase(Locale.ROOT);
+			long have = Math.max(pageItems != null ? pageItems.getOrDefault(key, 0L) : 0L,
+				owned.getOrDefault(key, 0L));
+			if (dupes.get(key) > 1)
+			{
+				int idx = seen.merge(key, 1, Integer::sum) - 1;
+				lit[i] = idx < have;
+			}
+			else
+			{
+				lit[i] = have > 0
+					|| (pageItems != null && pageItems.containsKey(key))
+					|| owned.containsKey(key);
+			}
+		}
+		return lit;
+	}
+
+	private static long safeLong(com.google.gson.JsonElement e)
+	{
+		try
+		{
+			return e != null && !e.isJsonNull() ? e.getAsLong() : 0;
+		}
+		catch (RuntimeException ex)
+		{
+			return 0;
+		}
+	}
+
+	/** Parse the bundled taxonomy once; order preserved (tabs and slots). */
+	private static synchronized Map<String, Map<String, List<String>>> taxonomy()
+	{
+		if (taxonomy != null)
+		{
+			return taxonomy;
+		}
+		Map<String, Map<String, List<String>>> out = new LinkedHashMap<>();
+		try (java.io.InputStream in = ChroniclePanel.class.getResourceAsStream("clog_taxonomy.json"))
+		{
+			if (in != null)
+			{
+				JsonObject rootTax = new com.google.gson.Gson().fromJson(
+					new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8),
+					JsonObject.class);
+				for (Map.Entry<String, com.google.gson.JsonElement> tab : rootTax.entrySet())
+				{
+					Map<String, List<String>> pages = new LinkedHashMap<>();
+					for (Map.Entry<String, com.google.gson.JsonElement> pg
+						: tab.getValue().getAsJsonObject().entrySet())
+					{
+						List<String> slots = new ArrayList<>();
+						for (com.google.gson.JsonElement it : pg.getValue().getAsJsonArray())
+						{
+							slots.add(it.getAsString());
+						}
+						pages.put(pg.getKey(), slots);
+					}
+					out.put(tab.getKey(), pages);
+				}
+			}
+		}
+		catch (Exception e)
+		{
+			// A missing/corrupt resource leaves an empty browser, not a crash.
+		}
+		taxonomy = out;
+		return out;
 	}
 
 	private JPanel buildStats()
@@ -595,35 +770,46 @@ class ChroniclePanel extends PluginPanel
 		p.add(vgap(4));
 
 		Map<String, Long> counters = counters();
-		List<Map.Entry<String, Long>> rows = new ArrayList<>();
+		// Cluster the family's rows under sub-headers (the craft, the method)
+		// instead of one value-sorted free-for-all; sub-groups rank by their
+		// totals, rows rank within their group.
+		Map<String, List<Map.Entry<String, Long>>> groups = new LinkedHashMap<>();
 		for (Map.Entry<String, Long> e : counters.entrySet())
 		{
 			if (e.getValue() != 0 && StatRegistry.family(e.getKey()).equals(statsFamily))
 			{
-				rows.add(e);
+				groups.computeIfAbsent(StatRegistry.subgroup(e.getKey()), k -> new ArrayList<>()).add(e);
 			}
 		}
-		rows.sort(Map.Entry.<String, Long>comparingByValue().reversed());
-		if (rows.isEmpty())
+		if (groups.isEmpty())
 		{
 			p.add(note(scope == Scope.SESSION
 				? "Nothing in this family yet this session."
 				: "Nothing tracked in this family yet."));
 			return p;
 		}
+		List<Map.Entry<String, List<Map.Entry<String, Long>>>> ordered = new ArrayList<>(groups.entrySet());
+		ordered.sort(Comparator.comparingLong((Map.Entry<String, List<Map.Entry<String, Long>>> g)
+			-> g.getValue().stream().mapToLong(Map.Entry::getValue).max().orElse(0)).reversed());
 		int shown = 0;
-		for (Map.Entry<String, Long> e : rows)
+		outer:
+		for (Map.Entry<String, List<Map.Entry<String, Long>>> g : ordered)
 		{
-			if (shown++ >= ROW_CAP)
+			if (!g.getKey().isEmpty() && ordered.size() > 1)
 			{
-				break;
+				p.add(group(g.getKey()));
 			}
-			String v = StatRegistry.isGp(e.getKey()) ? gp(e.getValue()) + " gp" : fmt(e.getValue());
-			p.add(row(StatRegistry.label(e.getKey()), v, null));
-		}
-		if (rows.size() > ROW_CAP)
-		{
-			p.add(note(fmt(rows.size() - ROW_CAP) + " more — search to find one"));
+			g.getValue().sort(Map.Entry.<String, Long>comparingByValue().reversed());
+			for (Map.Entry<String, Long> e : g.getValue())
+			{
+				if (shown++ >= ROW_CAP * 2)
+				{
+					p.add(note("more — search to find one"));
+					break outer;
+				}
+				String v = StatRegistry.isGp(e.getKey()) ? gp(e.getValue()) + " gp" : fmt(e.getValue());
+				p.add(row(StatRegistry.label(e.getKey()), v, null));
+			}
 		}
 		return p;
 	}
@@ -631,14 +817,272 @@ class ChroniclePanel extends PluginPanel
 	private JPanel buildHistory()
 	{
 		JPanel p = column();
-		JPanel card = card("History");
-		card.add(row("Recording began", "today", accent()));
-		p.add(card);
+		java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> hist = plugin.historyBaselines();
+
+		// granularity pills
+		JPanel pills = new JPanel(new GridLayout(1, 4, 3, 3));
+		pills.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		for (String g : new String[]{"Day", "Week", "Month", "Year"})
+		{
+			JLabel pill = new JLabel(g, JLabel.CENTER);
+			pill.setOpaque(true);
+			pill.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
+			pill.setFont(FontManager.getRunescapeSmallFont());
+			pill.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+			pill.setForeground(g.equals(histGranularity) ? accent() : ColorScheme.LIGHT_GRAY_COLOR.darker());
+			pill.addMouseListener(clicker(() ->
+			{
+				histGranularity = g;
+				rebuild();
+			}));
+			pills.add(pill);
+		}
+		p.add(pills);
+		p.add(vgap(5));
+
+		// the period under the cursor
+		java.time.LocalDate end = histCursor;
+		java.time.LocalDate start;
+		String label;
+		switch (histGranularity)
+		{
+			case "Day":
+				start = end;
+				label = end.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"));
+				break;
+			case "Month":
+				start = end.withDayOfMonth(1);
+				end = start.plusMonths(1).minusDays(1);
+				label = start.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"));
+				break;
+			case "Year":
+				start = end.withDayOfYear(1);
+				end = start.plusYears(1).minusDays(1);
+				label = String.valueOf(start.getYear());
+				break;
+			case "Week":
+			default:
+				start = end.minusDays(6);
+				label = start.format(java.time.format.DateTimeFormatter.ofPattern("d MMM"))
+					+ " – " + end.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"));
+				break;
+		}
+		final java.time.LocalDate pStart = start;
+
+		JPanel stepper = new JPanel(new BorderLayout());
+		stepper.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		stepper.setBorder(BorderFactory.createEmptyBorder(3, 8, 3, 8));
+		JLabel back = new JLabel("<");
+		JLabel fwd = new JLabel(">");
+		for (JLabel arrow : new JLabel[]{back, fwd})
+		{
+			arrow.setForeground(accent());
+			arrow.setFont(FontManager.getRunescapeBoldFont());
+			arrow.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+			arrow.setBorder(BorderFactory.createEmptyBorder(0, 6, 0, 6));
+		}
+		back.addMouseListener(clicker(() ->
+		{
+			histCursor = stepBack(histCursor);
+			rebuild();
+		}));
+		fwd.addMouseListener(clicker(() ->
+		{
+			java.time.LocalDate next = stepForward(histCursor);
+			histCursor = next.isAfter(java.time.LocalDate.now()) ? java.time.LocalDate.now() : next;
+			rebuild();
+		}));
+		JLabel lbl = new JLabel(label, JLabel.CENTER);
+		lbl.setFont(FontManager.getRunescapeFont());
+		stepper.add(back, BorderLayout.WEST);
+		stepper.add(lbl, BorderLayout.CENTER);
+		stepper.add(fwd, BorderLayout.EAST);
+		p.add(stepper);
 		p.add(vgap(6));
-		p.add(note("Chronicle closes a daily baseline of your skills and counters from "
-			+ "now on — day, week, month and year views arrive here as the record "
-			+ "grows, along with a one-time Wise Old Man import for your deeper past."));
+
+		// baselines bounding the period: closing state the day before it began,
+		// and the last close inside it
+		Map.Entry<java.time.LocalDate, HistoryLog.Baseline> before =
+			hist.floorEntry(pStart.minusDays(1));
+		Map.Entry<java.time.LocalDate, HistoryLog.Baseline> at = hist.floorEntry(end);
+		if (at == null || (before != null && at.getKey().equals(before.getKey())))
+		{
+			p.add(note(hist.isEmpty()
+				? "The record starts today — baselines close at each login, day "
+				+ "rollover and logout. Import your deeper past below."
+				: "Nothing recorded in this period."));
+		}
+		else
+		{
+			Map<String, Long> beforeSk = before != null ? before.getValue().skills
+				: new LinkedHashMap<>();
+			List<Map.Entry<String, Long>> gains = new ArrayList<>();
+			for (Map.Entry<String, Long> e : at.getValue().skills.entrySet())
+			{
+				if ("overall".equals(e.getKey()))
+				{
+					continue;
+				}
+				long d = e.getValue() - beforeSk.getOrDefault(e.getKey(), before == null ? e.getValue() : 0L);
+				if (before == null)
+				{
+					d = 0;   // a single baseline has no delta story
+				}
+				if (d > 0)
+				{
+					gains.add(new java.util.AbstractMap.SimpleEntry<>(e.getKey(), d));
+				}
+			}
+			gains.sort(Map.Entry.<String, Long>comparingByValue().reversed());
+			if (!gains.isEmpty())
+			{
+				JPanel card = card("XP gained");
+				JPanel grid = new JPanel(new GridLayout(0, 2, 3, 3));
+				grid.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+				int mounted = 0;
+				for (Map.Entry<String, Long> g : gains)
+				{
+					if (mounted++ >= 8)
+					{
+						break;
+					}
+					JPanel cell = new JPanel(new BorderLayout());
+					cell.setOpaque(false);
+					JLabel nm = new JLabel(StatRegistry.prettify(g.getKey()));
+					nm.setFont(FontManager.getRunescapeSmallFont());
+					nm.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker());
+					JLabel xp = new JLabel("+" + gp(g.getValue()));
+					xp.setFont(FontManager.getRunescapeFont());
+					xp.setForeground(ACCENT_SESSION);
+					cell.add(nm, BorderLayout.NORTH);
+					cell.add(xp, BorderLayout.CENTER);
+					grid.add(cell);
+				}
+				card.add(grid);
+				p.add(card);
+				p.add(vgap(5));
+			}
+
+			Map<String, Long> beforeCt = before != null ? before.getValue().counters
+				: new LinkedHashMap<>();
+			List<Map.Entry<String, Long>> movers = new ArrayList<>();
+			if (before != null)
+			{
+				for (Map.Entry<String, Long> e : at.getValue().counters.entrySet())
+				{
+					long d = e.getValue() - beforeCt.getOrDefault(e.getKey(), 0L);
+					if (d > 0 && !LocalStore.MAX_KEYS.contains(e.getKey()))
+					{
+						movers.add(new java.util.AbstractMap.SimpleEntry<>(e.getKey(), d));
+					}
+				}
+			}
+			movers.sort(Map.Entry.<String, Long>comparingByValue().reversed());
+			if (!movers.isEmpty())
+			{
+				JPanel card = card("The period's movers");
+				int mounted = 0;
+				for (Map.Entry<String, Long> m : movers)
+				{
+					if (mounted++ >= 8)
+					{
+						break;
+					}
+					String v = "+" + (StatRegistry.isGp(m.getKey())
+						? gp(m.getValue()) + " gp" : fmt(m.getValue()));
+					card.add(row(StatRegistry.label(m.getKey()), v, null));
+				}
+				p.add(card);
+				p.add(vgap(5));
+			}
+
+			// milestones inside the window
+			long fromMs = pStart.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
+			long toMs = end.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
+			List<JsonObject> milestones = new ArrayList<>();
+			for (JsonObject e : plugin.feedNewest(2000))
+			{
+				long ts = e.has("ts") ? e.get("ts").getAsLong() : 0;
+				if (ts >= fromMs && ts < toMs)
+				{
+					milestones.add(e);
+				}
+			}
+			if (!milestones.isEmpty())
+			{
+				JPanel card = card("Milestones · " + fmt(milestones.size()));
+				int mounted = 0;
+				for (JsonObject e : milestones)
+				{
+					if (mounted++ >= 6)
+					{
+						break;
+					}
+					long ts = e.has("ts") ? e.get("ts").getAsLong() : 0;
+					card.add(row(feedLine(e), ts > 0 ? DAY.format(Instant.ofEpochMilli(ts)) : "", null));
+				}
+				p.add(card);
+				p.add(vgap(5));
+			}
+		}
+
+		if (!plugin.womImported())
+		{
+			JButton importBtn = new JButton(womImportRunning
+				? "Importing…" : "Import your past — Wise Old Man");
+			importBtn.setEnabled(!womImportRunning);
+			importBtn.addActionListener(e ->
+			{
+				int ok = JOptionPane.showConfirmDialog(this,
+					"Fetch your public Wise Old Man snapshots (one request, one time)\n"
+						+ "and write them into your local history?",
+					"Import your past", JOptionPane.OK_CANCEL_OPTION);
+				if (ok == JOptionPane.OK_OPTION)
+				{
+					womImportRunning = true;
+					rebuild();
+					plugin.actionImportWom(() -> SwingUtilities.invokeLater(() ->
+					{
+						womImportRunning = false;
+						rebuild();
+					}));
+				}
+			});
+			p.add(importBtn);
+		}
 		return p;
+	}
+
+	private java.time.LocalDate stepBack(java.time.LocalDate d)
+	{
+		switch (histGranularity)
+		{
+			case "Day":
+				return d.minusDays(1);
+			case "Month":
+				return d.withDayOfMonth(1).minusDays(1);
+			case "Year":
+				return d.withDayOfYear(1).minusDays(1);
+			case "Week":
+			default:
+				return d.minusDays(7);
+		}
+	}
+
+	private java.time.LocalDate stepForward(java.time.LocalDate d)
+	{
+		switch (histGranularity)
+		{
+			case "Day":
+				return d.plusDays(1);
+			case "Month":
+				return d.withDayOfMonth(1).plusMonths(1).plusMonths(1).minusDays(1);
+			case "Year":
+				return d.withDayOfYear(1).plusYears(2).minusDays(1);
+			case "Week":
+			default:
+				return d.plusDays(7);
+		}
 	}
 
 	private JPanel buildJournal()
@@ -1031,7 +1475,7 @@ class ChroniclePanel extends PluginPanel
 		JPanel r = new JPanel(new BorderLayout(8, 0));
 		r.setOpaque(false);
 		r.setAlignmentX(Component.LEFT_ALIGNMENT);
-		r.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
+		r.setBorder(BorderFactory.createEmptyBorder(1, 2, 1, 2));
 		JLabel l = new JLabel(left);
 		l.setFont(FontManager.getRunescapeFont());
 		r.add(l, BorderLayout.CENTER);
@@ -1075,14 +1519,11 @@ class ChroniclePanel extends PluginPanel
 
 	private static JLabel note(String text)
 	{
-		JLabel n = new JLabel("<html><i>" + escape(text) + "</i></html>")
-		{
-			@Override
-			public Dimension getMaximumSize()
-			{
-				return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
-			}
-		};
+		// The fixed width inside the html is what makes the label REPORT its
+		// wrapped height — a bare html JLabel measures single-line and the
+		// last lines clip when the layout squeezes it to panel width.
+		JLabel n = new JLabel("<html><div style='width:190px'><i>"
+			+ escape(text) + "</i></div></html>");
 		n.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker());
 		n.setFont(FontManager.getRunescapeSmallFont());
 		n.setAlignmentX(Component.LEFT_ALIGNMENT);

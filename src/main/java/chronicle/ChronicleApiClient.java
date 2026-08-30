@@ -579,6 +579,221 @@ public class ChronicleApiClient
 		});
 	}
 
+	/** One Wise Old Man snapshot: a dated skill-xp baseline. */
+	public static final class WomSnapshot
+	{
+		public final String date;                       // yyyy-mm-dd
+		public final Map<String, Long> skills;          // our skill keys -> xp
+
+		WomSnapshot(String date, Map<String, Long> skills)
+		{
+			this.date = date;
+			this.skills = skills;
+		}
+	}
+
+	/**
+	 * The one-shot "import your past" fetch: the player's public Wise Old Man
+	 * snapshots, a year back. STRICTLY user-initiated (a labelled button) —
+	 * Chronicle's default behaviour makes no network calls at all.
+	 */
+	public void fetchWomSnapshots(String rsn, Consumer<java.util.List<WomSnapshot>> onDone)
+	{
+		HttpUrl base = HttpUrl.parse("https://api.wiseoldman.net/v2/players/x/snapshots");
+		if (base == null)
+		{
+			onDone.accept(null);
+			return;
+		}
+		HttpUrl url = base.newBuilder().setPathSegment(3, rsn)
+			.addQueryParameter("period", "year").build();
+		Request request = new Request.Builder().url(url).get().build();
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("wom fetch failed", e);
+				onDone.accept(null);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				java.util.List<WomSnapshot> out = null;
+				try (Response r = response)
+				{
+					if (r.code() == 200)
+					{
+						com.google.gson.JsonArray arr = gson.fromJson(r.body().charStream(),
+							com.google.gson.JsonArray.class);
+						out = new java.util.ArrayList<>();
+						for (JsonElement el : arr)
+						{
+							if (!el.isJsonObject())
+							{
+								continue;
+							}
+							JsonObject o = el.getAsJsonObject();
+							String created = str(o, "createdAt");
+							if (created.length() < 10 || !o.has("data")
+								|| !o.get("data").isJsonObject())
+							{
+								continue;
+							}
+							JsonObject skills = o.getAsJsonObject("data").has("skills")
+								&& o.getAsJsonObject("data").get("skills").isJsonObject()
+								? o.getAsJsonObject("data").getAsJsonObject("skills") : null;
+							if (skills == null)
+							{
+								continue;
+							}
+							Map<String, Long> xp = new HashMap<>();
+							for (java.util.Map.Entry<String, JsonElement> sk : skills.entrySet())
+							{
+								if (!sk.getValue().isJsonObject())
+								{
+									continue;
+								}
+								JsonObject v = sk.getValue().getAsJsonObject();
+								long exp = v.has("experience") && !v.get("experience").isJsonNull()
+									? v.get("experience").getAsLong() : -1;
+								if (exp >= 0)
+								{
+									// WOM says "runecrafting"; the client says "runecraft"
+									String key = "runecrafting".equals(sk.getKey())
+										? "runecraft" : sk.getKey();
+									xp.put(key, exp);
+								}
+							}
+							out.add(new WomSnapshot(created.substring(0, 10), xp));
+						}
+					}
+					else if (r.code() == 404)
+					{
+						out = new java.util.ArrayList<>();   // no profile: empty, not error
+					}
+				}
+				catch (RuntimeException e)
+				{
+					log.debug("wom parse failed", e);
+				}
+				onDone.accept(out);
+			}
+		});
+	}
+
+	/** One adopted milestone from the cloud feed. */
+	public static final class FeedEvent
+	{
+		public final double ts;      // epoch seconds (server clock)
+		public final String type;    // normalised: PET, COLLECTION, SLAYER, ...
+		public final JsonObject data;
+
+		FeedEvent(double ts, String type, JsonObject data)
+		{
+			this.ts = ts;
+			this.type = type;
+			this.data = data;
+		}
+	}
+
+	private static final String[] FEED_TYPES = {
+		"PET", "COLLECTION", "COMBAT_ACHIEVEMENT", "QUEST", "DIARY", "CLUE", "DEATH", "SLAYER"
+	};
+
+	/** Fetch the cloud feed's milestones for one-shot journal adoption. */
+	public void fetchFeed(String baseUrl, String rsn, Consumer<java.util.List<FeedEvent>> onDone)
+	{
+		HttpUrl url = resolve(baseUrl, "api/activity/events");
+		if (url == null)
+		{
+			if (onDone != null)
+			{
+				onDone.accept(null);
+			}
+			return;
+		}
+		url = url.newBuilder().addQueryParameter("player", rsn)
+			.addQueryParameter("limit", "300").build();
+		Request request = new Request.Builder().url(url).get().build();
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("fetchFeed failed", e);
+				if (onDone != null)
+				{
+					onDone.accept(null);
+				}
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				java.util.List<FeedEvent> out = null;
+				try (Response r = response)
+				{
+					if (r.code() == 200)
+					{
+						com.google.gson.JsonArray arr = gson.fromJson(r.body().charStream(),
+							com.google.gson.JsonArray.class);
+						out = new java.util.ArrayList<>();
+						for (JsonElement el : arr)
+						{
+							if (!el.isJsonObject())
+							{
+								continue;
+							}
+							JsonObject o = el.getAsJsonObject();
+							String raw = str(o, "type").toUpperCase(java.util.Locale.ROOT)
+								.replace(' ', '_');
+							String norm = null;
+							for (String t : FEED_TYPES)
+							{
+								if (raw.startsWith(t))
+								{
+									norm = t;
+									break;
+								}
+							}
+							if (norm == null)
+							{
+								continue;   // loot and misc types stay out of the feed
+							}
+							JsonObject data = new JsonObject();
+							if (o.has("payload") && o.get("payload").isJsonObject())
+							{
+								JsonObject pl = o.getAsJsonObject("payload");
+								if (pl.has("extra") && pl.get("extra").isJsonObject())
+								{
+									for (java.util.Map.Entry<String, JsonElement> e
+										: pl.getAsJsonObject("extra").entrySet())
+									{
+										if (!e.getValue().isJsonNull() && !"type".equals(e.getKey()))
+										{
+											data.add(e.getKey(), e.getValue());
+										}
+									}
+								}
+							}
+							out.add(new FeedEvent(num(o, "ts").doubleValue(), norm, data));
+						}
+					}
+				}
+				catch (RuntimeException e)
+				{
+					log.debug("fetchFeed parse failed", e);
+				}
+				if (onDone != null)
+				{
+					onDone.accept(out);
+				}
+			}
+		});
+	}
+
 	/** Fetch one source's item rows from the cloud ledger (drill-on-demand). */
 	public void fetchSourceItems(String baseUrl, String rsn, String source,
 		Consumer<java.util.List<LedgerItem>> onDone)

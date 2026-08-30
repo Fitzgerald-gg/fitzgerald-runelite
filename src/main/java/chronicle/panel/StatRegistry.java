@@ -116,6 +116,76 @@ public final class StatRegistry
 		return "Other";
 	}
 
+	/**
+	 * A sub-header within a family — the craft or the method — so big families
+	 * read as clustered sections rather than one interleaved list. Empty means
+	 * "no sub-header" (small families render flat).
+	 */
+	public static String subgroup(String key)
+	{
+		String fam = family(key);
+		if (fam.equals("Skilling"))
+		{
+			String kl = key.toLowerCase(java.util.Locale.ROOT);
+			if (kl.contains("impling") || kl.contains("moth") || kl.contains("salamander")
+				|| kl.contains("chompy") || key.endsWith("Trapped") || key.endsWith("Plucked")
+				|| kl.contains("lizard"))
+			{
+				return "Hunter";
+			}
+			if (key.endsWith("Cooked"))
+			{
+				return "Cooking";
+			}
+			if (key.endsWith("Chopped"))
+			{
+				return "Woodcutting";
+			}
+			if (key.endsWith("Burned"))
+			{
+				return "Firemaking";
+			}
+			if (key.endsWith("Mined"))
+			{
+				return "Mining";
+			}
+			if (key.endsWith("Caught") || key.endsWith("Fished"))
+			{
+				return "Fishing";
+			}
+			if (key.endsWith("Pickpockets") || key.endsWith("Thieved") || kl.contains("pickpocket"))
+			{
+				return "Thieving";
+			}
+			if (key.endsWith("Harvested"))
+			{
+				return "Farming";
+			}
+			if (key.endsWith("Crafted"))
+			{
+				return "Runecraft";
+			}
+			return "Elsewhere";
+		}
+		if (fam.equals("Travel"))
+		{
+			if (key.startsWith("tiles"))
+			{
+				return "On foot";
+			}
+			if (key.startsWith("teleportsVia") || key.equals("teleportsTotal") || key.equals("teleports"))
+			{
+				return "Teleports";
+			}
+			if (key.startsWith("teleports"))
+			{
+				return "Destinations";
+			}
+			return "";
+		}
+		return "";
+	}
+
 	/** Whether a value renders as gp. */
 	public static boolean isGp(String key)
 	{

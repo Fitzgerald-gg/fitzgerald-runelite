@@ -339,7 +339,14 @@ class LocalStore
 			}
 			if (collectionLog != null)
 			{
-				root.add("collection_log", gson.toJsonTree(collectionLog));
+				// Max-union into the STORED log rather than replacing it — the
+				// session's capture is partial (pages browsed, varps read), and
+				// clog data only grows, so the union is the whole truth. Port of
+				// the server's _clog_merge.
+				root.add("collection_log", mergeClog(
+					root.has("collection_log") && root.get("collection_log").isJsonObject()
+						? root.getAsJsonObject("collection_log") : new JsonObject(),
+					gson.toJsonTree(collectionLog).getAsJsonObject()));
 			}
 			if (achievements != null)
 			{
@@ -786,6 +793,164 @@ class LocalStore
 			}
 		}
 		return out;
+	}
+
+	/**
+	 * One-shot adoption of the cloud feed's milestones into the journal's own
+	 * feed, deduplicated by (millisecond timestamp, type) — the server's floats
+	 * are stable, so re-adoption on every login is a no-op. Entries land in
+	 * timestamp order; the cap trims oldest, exactly like live recording.
+	 */
+	void adoptFeed(java.util.List<chronicle.ChronicleApiClient.FeedEvent> events, String rsn)
+	{
+		if (!isReadyFor(rsn) || events == null || events.isEmpty())
+		{
+			return;
+		}
+		synchronized (lock)
+		{
+			JsonArray feed = root.has("feed") && root.get("feed").isJsonArray()
+				? root.getAsJsonArray("feed") : new JsonArray();
+			java.util.Set<String> have = new java.util.HashSet<>();
+			for (JsonElement el : feed)
+			{
+				if (el.isJsonObject())
+				{
+					JsonObject o = el.getAsJsonObject();
+					have.add((o.has("ts") ? o.get("ts").getAsLong() : 0)
+						+ "|" + (o.has("type") ? o.get("type").getAsString() : ""));
+				}
+			}
+			java.util.List<JsonObject> merged = new java.util.ArrayList<>();
+			for (JsonElement el : feed)
+			{
+				if (el.isJsonObject())
+				{
+					merged.add(el.getAsJsonObject());
+				}
+			}
+			int added = 0;
+			for (chronicle.ChronicleApiClient.FeedEvent ev : events)
+			{
+				long tsMs = Math.round(ev.ts * 1000.0);
+				if (!have.add(tsMs + "|" + ev.type))
+				{
+					continue;
+				}
+				JsonObject entry = new JsonObject();
+				entry.addProperty("ts", tsMs);
+				entry.addProperty("type", ev.type);
+				entry.add("data", ev.data != null ? ev.data : new JsonObject());
+				merged.add(entry);
+				added++;
+			}
+			if (added == 0)
+			{
+				return;
+			}
+			merged.sort(java.util.Comparator.comparingLong(
+				o -> o.has("ts") ? o.get("ts").getAsLong() : 0));
+			while (merged.size() > FEED_CAP)
+			{
+				merged.remove(0);
+			}
+			JsonArray next = new JsonArray();
+			for (JsonObject o : merged)
+			{
+				next.add(o);
+			}
+			root.add("feed", next);
+			root.addProperty("updated_at", nowSec());
+		}
+	}
+
+	private static JsonObject mergeClog(JsonObject base, JsonObject inc)
+	{
+		JsonObject out = new JsonObject();
+		JsonObject byCat = new JsonObject();
+		for (JsonObject src : new JsonObject[]{base, inc})
+		{
+			if (src.has("by_cat") && src.get("by_cat").isJsonObject())
+			{
+				for (java.util.Map.Entry<String, JsonElement> pg
+					: src.getAsJsonObject("by_cat").entrySet())
+				{
+					if (!pg.getValue().isJsonObject())
+					{
+						continue;
+					}
+					JsonObject tgt = byCat.has(pg.getKey())
+						? byCat.getAsJsonObject(pg.getKey()) : new JsonObject();
+					for (java.util.Map.Entry<String, JsonElement> it
+						: pg.getValue().getAsJsonObject().entrySet())
+					{
+						long n = asLong(it.getValue());
+						if (n > (tgt.has(it.getKey()) ? asLong(tgt.get(it.getKey())) : 0))
+						{
+							tgt.addProperty(it.getKey(), n);
+						}
+					}
+					byCat.add(pg.getKey(), tgt);
+				}
+			}
+		}
+		out.add("by_cat", byCat);
+		for (String mapKey : new String[]{"kcs", "clog_items", "cat_counts", "slayer_kcs"})
+		{
+			JsonObject merged = new JsonObject();
+			for (JsonObject src : new JsonObject[]{base, inc})
+			{
+				if (src.has(mapKey) && src.get(mapKey).isJsonObject())
+				{
+					for (java.util.Map.Entry<String, JsonElement> e
+						: src.getAsJsonObject(mapKey).entrySet())
+					{
+						long n = asLong(e.getValue());
+						if (n > (merged.has(e.getKey()) ? asLong(merged.get(e.getKey())) : 0))
+						{
+							merged.addProperty(e.getKey(), n);
+						}
+					}
+				}
+			}
+			if (merged.size() > 0)
+			{
+				out.add(mapKey, merged);
+			}
+		}
+		for (String numKey : new String[]{"finished", "available"})
+		{
+			long a = base.has(numKey) ? asLong(base.get(numKey)) : 0;
+			long b = inc.has(numKey) ? asLong(inc.get(numKey)) : 0;
+			out.addProperty(numKey, Math.max(a, b));
+		}
+		return out;
+	}
+
+	private static long asLong(JsonElement e)
+	{
+		try
+		{
+			return e != null && !e.isJsonNull() ? e.getAsLong() : 0;
+		}
+		catch (RuntimeException ex)
+		{
+			return 0;
+		}
+	}
+
+	/** The journal's stored collection log, deep-copied for the panel. */
+	JsonObject clogSnapshot()
+	{
+		synchronized (lock)
+		{
+			if (root == null || !root.has("collection_log")
+				|| !root.get("collection_log").isJsonObject())
+			{
+				return new JsonObject();
+			}
+			return root.getAsJsonObject("collection_log").deepCopy();
+		}
 	}
 
 	/** One collection-log page the journal holds. */

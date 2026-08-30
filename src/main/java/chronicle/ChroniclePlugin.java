@@ -150,6 +150,7 @@ public class ChroniclePlugin extends Plugin
 	private volatile Map<String, Integer> pendingServerFloor;
 	// The cloud ledger's per-source rollup, same lifecycle as the counter floor.
 	private volatile java.util.List<ChronicleApiClient.LedgerSource> pendingDropsAdopt;
+	private volatile java.util.List<ChronicleApiClient.FeedEvent> pendingFeedAdopt;
 
 	private static final int SEED_RETRY_MIN_SEC = 5;
 	private static final int SEED_RETRY_MAX_SEC = 60;
@@ -676,6 +677,8 @@ public class ChroniclePlugin extends Plugin
 			// what this install has witnessed.
 			api.fetchDropLedger(config.serverBaseUrl(), name,
 				ledger -> pendingDropsAdopt = ledger);
+			api.fetchFeed(config.serverBaseUrl(), name,
+				events -> pendingFeedAdopt = events);
 			countersSeeded = true;
 			resetSeedBackoff();
 			enrolledRsn = name;
@@ -722,6 +725,7 @@ public class ChroniclePlugin extends Plugin
 		localStore.endSession();
 		pendingServerFloor = null;   // account boundary — never floor the next login's journal
 		pendingDropsAdopt = null;
+		pendingFeedAdopt = null;
 		// Re-seed from the server on the next login (another device may have
 		// advanced the totals). The final push below still uses the in-memory
 		// snapshot we accumulated this session.
@@ -984,6 +988,62 @@ public class ChroniclePlugin extends Plugin
 		return localStore.clogPages();
 	}
 
+	java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> historyBaselines()
+	{
+		String rsn = localName;
+		return rsn != null ? historyLog.read(localDir(), rsn)
+			: new java.util.TreeMap<>();
+	}
+
+	/**
+	 * The one-shot "import your past" action: fetch the account's public Wise
+	 * Old Man snapshots and write them through the history stream's own door.
+	 * User-initiated only; degrades to a plain chat line when no profile exists.
+	 */
+	void actionImportWom(Runnable onDone)
+	{
+		final String rsn = localName != null ? localName : enrolledRsn;
+		if (rsn == null || rsn.isEmpty())
+		{
+			chat("Chronicle: log in first, then import your past.");
+			onDone.run();
+			return;
+		}
+		api.fetchWomSnapshots(rsn, snaps -> executor.submit(() ->
+		{
+			if (snaps == null)
+			{
+				chat("Chronicle: couldn't reach Wise Old Man — try again in a moment.");
+			}
+			else if (snaps.isEmpty())
+			{
+				chat("Chronicle: no Wise Old Man profile found for " + rsn
+					+ " — your history starts today.");
+			}
+			else
+			{
+				for (ChronicleApiClient.WomSnapshot snap : snaps)
+				{
+					historyLog.appendImported(localDir(), rsn, snap.date, snap.skills);
+				}
+				configManager.setConfiguration(GROUP, "womImported", true);
+				chat("Chronicle: imported " + snaps.size()
+					+ " days of history from Wise Old Man.");
+			}
+			onDone.run();
+		}));
+	}
+
+	boolean womImported()
+	{
+		return "true".equals(configManager.getConfiguration(GROUP, "womImported"));
+	}
+
+	JsonObject clogSnapshot()
+	{
+		return localStore.clogSnapshot();
+	}
+
 	int clogFinished()
 	{
 		return clogCapture.finishedCount();
@@ -1081,7 +1141,14 @@ public class ChroniclePlugin extends Plugin
 		if (adopt != null && localName != null && localStore.isReadyFor(localName))
 		{
 			pendingDropsAdopt = null;
+		pendingFeedAdopt = null;
 			localStore.floorDropSources(adopt, localName);
+		}
+		java.util.List<ChronicleApiClient.FeedEvent> feed = pendingFeedAdopt;
+		if (feed != null && localName != null && localStore.isReadyFor(localName))
+		{
+			pendingFeedAdopt = null;
+			localStore.adoptFeed(feed, localName);
 		}
 		if (localName != null)
 		{

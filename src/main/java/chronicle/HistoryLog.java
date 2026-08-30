@@ -79,6 +79,112 @@ class HistoryLog
 		}
 	}
 
+	/** One day's closing baseline, as read back from the stream. */
+	static final class Baseline
+	{
+		final Map<String, Long> skills = new java.util.HashMap<>();
+		final Map<String, Long> counters = new java.util.HashMap<>();
+	}
+
+	/**
+	 * Read the stream back: last line per date wins, torn lines are skipped —
+	 * the whole recovery story an append-only file needs.
+	 */
+	java.util.TreeMap<LocalDate, Baseline> read(File dir, String rsn)
+	{
+		java.util.TreeMap<LocalDate, Baseline> out = new java.util.TreeMap<>();
+		File f = new File(dir, LocalStore.slug(rsn) + ".history.jsonl");
+		if (!f.isFile())
+		{
+			return out;
+		}
+		try (java.io.BufferedReader r = new java.io.BufferedReader(
+			new java.io.InputStreamReader(new java.io.FileInputStream(f), StandardCharsets.UTF_8)))
+		{
+			String line;
+			while ((line = r.readLine()) != null)
+			{
+				try
+				{
+					JsonObject o = gson.fromJson(line, JsonObject.class);
+					if (o == null || !o.has("date"))
+					{
+						continue;
+					}
+					LocalDate date = LocalDate.parse(o.get("date").getAsString());
+					Baseline b = new Baseline();
+					fill(o, "skills", b.skills);
+					fill(o, "counters", b.counters);
+					out.put(date, b);   // later lines for a date overwrite: last wins
+				}
+				catch (RuntimeException torn)
+				{
+					// a torn tail from a crash — skip and carry on
+				}
+			}
+		}
+		catch (Exception e)
+		{
+			log.debug("history read failed", e);
+		}
+		return out;
+	}
+
+	private static void fill(JsonObject o, String key, Map<String, Long> into)
+	{
+		if (o.has(key) && o.get(key).isJsonObject())
+		{
+			for (Map.Entry<String, com.google.gson.JsonElement> e
+				: o.getAsJsonObject(key).entrySet())
+			{
+				try
+				{
+					into.put(e.getKey(), e.getValue().getAsLong());
+				}
+				catch (RuntimeException ignored)
+				{
+					// non-numeric — skip
+				}
+			}
+		}
+	}
+
+	/** Append an imported (historic) baseline for a specific date — the Wise
+	 *  Old Man import writes the past through the same one-line-per-day door. */
+	synchronized void appendImported(File dir, String rsn, String date, Map<String, Long> skills)
+	{
+		if (rsn == null || rsn.isEmpty() || date == null)
+		{
+			return;
+		}
+		JsonObject line = new JsonObject();
+		line.addProperty("date", date);
+		JsonObject sk = new JsonObject();
+		if (skills != null)
+		{
+			skills.forEach(sk::addProperty);
+		}
+		line.add("skills", sk);
+		line.add("counters", new JsonObject());
+		try
+		{
+			if (!dir.isDirectory() && !dir.mkdirs())
+			{
+				return;
+			}
+			File f = new File(dir, LocalStore.slug(rsn) + ".history.jsonl");
+			try (Writer w = new OutputStreamWriter(new FileOutputStream(f, true), StandardCharsets.UTF_8))
+			{
+				w.write(gson.toJson(line));
+				w.write('\n');
+			}
+		}
+		catch (Exception e)
+		{
+			log.debug("history import append failed", e);
+		}
+	}
+
 	/** True once per calendar day: the caller should append a fresh baseline. */
 	boolean dayRolledOver()
 	{
