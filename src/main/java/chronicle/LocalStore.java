@@ -578,14 +578,16 @@ class LocalStore
 		final int loots;
 		final long value;
 		final Double pb;
+		final int cloudItems;
 
-		SourceRow(String name, int kc, int loots, long value, Double pb)
+		SourceRow(String name, int kc, int loots, long value, Double pb, int cloudItems)
 		{
 			this.name = name;
 			this.kc = kc;
 			this.loots = loots;
 			this.value = value;
 			this.pb = pb;
+			this.cloudItems = cloudItems;
 		}
 	}
 
@@ -611,7 +613,8 @@ class LocalStore
 					src.has("kc") ? src.get("kc").getAsInt() : 0,
 					src.has("loots") ? src.get("loots").getAsInt() : 0,
 					src.has("value") ? src.get("value").getAsLong() : 0,
-					src.has("pb") ? src.get("pb").getAsDouble() : null));
+					src.has("pb") ? src.get("pb").getAsDouble() : null,
+					src.has("cloud_items") ? src.get("cloud_items").getAsInt() : 0));
 			}
 		}
 		return out;
@@ -661,6 +664,128 @@ class LocalStore
 		{
 			return new java.util.ArrayList<>(recentDrops);
 		}
+	}
+
+	/**
+	 * Floor the journal's drop sources at the cloud ledger's rollup, per source
+	 * (kc / loot count / value all take the max — the same union philosophy as
+	 * the counter floor, so a journal that predates cloud sync is never wiped
+	 * and a fresh install adopts the server's history whole). Item bags stay
+	 * locally-witnessed: the server's rollup is name-keyed with no item ids,
+	 * so adopted items would render iconless — the drill fetches those on
+	 * demand instead. cloud_items records how many distinct items the cloud
+	 * ledger holds, so the panel can say what the bag is missing.
+	 */
+	void floorDropSources(java.util.List<chronicle.ChronicleApiClient.LedgerSource> ledger, String rsn)
+	{
+		if (!isReadyFor(rsn) || ledger == null)
+		{
+			return;
+		}
+		synchronized (lock)
+		{
+			JsonObject drops = root.has("drops") && root.get("drops").isJsonObject()
+				? root.getAsJsonObject("drops") : new JsonObject();
+			for (chronicle.ChronicleApiClient.LedgerSource ls : ledger)
+			{
+				if (ls.source == null || ls.source.isEmpty())
+				{
+					continue;
+				}
+				JsonObject src = drops.has(ls.source) && drops.get(ls.source).isJsonObject()
+					? drops.getAsJsonObject(ls.source) : new JsonObject();
+				if (!drops.has(ls.source))
+				{
+					src.addProperty("kc", 0);
+					src.addProperty("loots", 0);
+					src.addProperty("value", 0);
+					src.add("items", new JsonObject());
+					drops.add(ls.source, src);
+				}
+				if (ls.kc > src.get("kc").getAsInt())
+				{
+					src.addProperty("kc", ls.kc);
+				}
+				if (ls.loots > src.get("loots").getAsInt())
+				{
+					src.addProperty("loots", ls.loots);
+				}
+				if (ls.value > src.get("value").getAsLong())
+				{
+					src.addProperty("value", ls.value);
+				}
+				int haveItems = src.has("cloud_items") ? src.get("cloud_items").getAsInt() : 0;
+				if (ls.itemsCount > haveItems)
+				{
+					src.addProperty("cloud_items", ls.itemsCount);
+				}
+			}
+			root.add("drops", drops);
+			root.addProperty("updated_at", nowSec());
+		}
+	}
+
+	/** One item held in a source's local bag. */
+	static final class BagItem
+	{
+		final int itemId;
+		final String name;
+		final long qty;
+		final long value;
+
+		BagItem(int itemId, String name, long qty, long value)
+		{
+			this.itemId = itemId;
+			this.name = name;
+			this.qty = qty;
+			this.value = value;
+		}
+	}
+
+	/** The locally-witnessed item bag for one source, unsorted. */
+	java.util.List<BagItem> sourceItems(String source)
+	{
+		java.util.List<BagItem> out = new java.util.ArrayList<>();
+		synchronized (lock)
+		{
+			if (root == null || !root.has("drops") || !root.get("drops").isJsonObject())
+			{
+				return out;
+			}
+			JsonObject drops = root.getAsJsonObject("drops");
+			if (!drops.has(source) || !drops.get(source).isJsonObject())
+			{
+				return out;
+			}
+			JsonObject src = drops.getAsJsonObject(source);
+			if (!src.has("items") || !src.get("items").isJsonObject())
+			{
+				return out;
+			}
+			for (java.util.Map.Entry<String, JsonElement> e
+				: src.getAsJsonObject("items").entrySet())
+			{
+				if (!e.getValue().isJsonObject())
+				{
+					continue;
+				}
+				JsonObject it = e.getValue().getAsJsonObject();
+				int id;
+				try
+				{
+					id = Integer.parseInt(e.getKey());
+				}
+				catch (NumberFormatException ex)
+				{
+					id = -1;
+				}
+				out.add(new BagItem(id,
+					it.has("name") ? it.get("name").getAsString() : e.getKey(),
+					it.has("qty") ? it.get("qty").getAsLong() : 0,
+					it.has("value") ? it.get("value").getAsLong() : 0));
+			}
+		}
+		return out;
 	}
 
 	/** One collection-log page the journal holds. */

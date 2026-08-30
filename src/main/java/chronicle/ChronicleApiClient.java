@@ -472,6 +472,188 @@ public class ChronicleApiClient
 		});
 	}
 
+	/** One adopted drop source from the cloud ledger (read-only snapshot). */
+	public static final class LedgerSource
+	{
+		public final String source;
+		public final int kc;
+		public final int loots;
+		public final long value;
+		public final int itemsCount;
+
+		LedgerSource(String source, int kc, int loots, long value, int itemsCount)
+		{
+			this.source = source;
+			this.kc = kc;
+			this.loots = loots;
+			this.value = value;
+			this.itemsCount = itemsCount;
+		}
+	}
+
+	/** One item row from the cloud ledger (name-keyed; the server holds no ids). */
+	public static final class LedgerItem
+	{
+		public final String name;
+		public final long qty;
+		public final long value;
+
+		LedgerItem(String name, long qty, long value)
+		{
+			this.name = name;
+			this.qty = qty;
+			this.value = value;
+		}
+	}
+
+	/**
+	 * Fetch the cloud ledger's per-source rollup for a player (the public
+	 * drops endpoint's {@code by_source} lens). Used once per login to floor
+	 * the journal's drop history at what the server already knows.
+	 */
+	public void fetchDropLedger(String baseUrl, String rsn, Consumer<java.util.List<LedgerSource>> onDone)
+	{
+		HttpUrl url = resolve(baseUrl, "api/activity/drops");
+		if (url == null)
+		{
+			if (onDone != null)
+			{
+				onDone.accept(null);
+			}
+			return;
+		}
+		url = url.newBuilder().addQueryParameter("player", rsn)
+			.addQueryParameter("limit", "1").build();
+		Request request = new Request.Builder().url(url).get().build();
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("fetchDropLedger failed", e);
+				if (onDone != null)
+				{
+					onDone.accept(null);
+				}
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				java.util.List<LedgerSource> out = null;
+				try (Response r = response)
+				{
+					if (r.code() == 200)
+					{
+						JsonObject body;
+						body = parse(r);
+						if (body != null && body.has("by_source") && body.get("by_source").isJsonArray())
+						{
+							out = new java.util.ArrayList<>();
+							for (JsonElement el : body.getAsJsonArray("by_source"))
+							{
+								if (!el.isJsonObject())
+								{
+									continue;
+								}
+								JsonObject o = el.getAsJsonObject();
+								out.add(new LedgerSource(
+									str(o, "source"),
+									num(o, "kc").intValue(),
+									num(o, "count").intValue(),
+									num(o, "total_value").longValue(),
+									num(o, "distinct_items").intValue()));
+							}
+						}
+					}
+				}
+				catch (RuntimeException | IOException e)
+				{
+					log.debug("fetchDropLedger parse failed", e);
+				}
+				if (onDone != null)
+				{
+					onDone.accept(out);
+				}
+			}
+		});
+	}
+
+	/** Fetch one source's item rows from the cloud ledger (drill-on-demand). */
+	public void fetchSourceItems(String baseUrl, String rsn, String source,
+		Consumer<java.util.List<LedgerItem>> onDone)
+	{
+		HttpUrl url = resolve(baseUrl, "api/activity/drops");
+		if (url == null)
+		{
+			if (onDone != null)
+			{
+				onDone.accept(null);
+			}
+			return;
+		}
+		url = url.newBuilder().addQueryParameter("player", rsn)
+			.addQueryParameter("source", source).addQueryParameter("limit", "1").build();
+		Request request = new Request.Builder().url(url).get().build();
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("fetchSourceItems failed", e);
+				if (onDone != null)
+				{
+					onDone.accept(null);
+				}
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				java.util.List<LedgerItem> out = null;
+				try (Response r = response)
+				{
+					if (r.code() == 200)
+					{
+						JsonObject body = parse(r);
+						if (body != null && body.has("by_item") && body.get("by_item").isJsonArray())
+						{
+							out = new java.util.ArrayList<>();
+							for (JsonElement el : body.getAsJsonArray("by_item"))
+							{
+								if (!el.isJsonObject())
+								{
+									continue;
+								}
+								JsonObject o = el.getAsJsonObject();
+								out.add(new LedgerItem(str(o, "name"),
+									num(o, "qty").longValue(), num(o, "value").longValue()));
+							}
+						}
+					}
+				}
+				catch (RuntimeException | IOException e)
+				{
+					log.debug("fetchSourceItems parse failed", e);
+				}
+				if (onDone != null)
+				{
+					onDone.accept(out);
+				}
+			}
+		});
+	}
+
+	private static String str(JsonObject o, String key)
+	{
+		return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : "";
+	}
+
+	private static Number num(JsonObject o, String key)
+	{
+		return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsNumber() : 0;
+	}
+
 	public void fetchCounters(String baseUrl, String token, Consumer<Map<String, Integer>> onDone)
 	{
 		HttpUrl url = resolve(baseUrl, "api/counters/seed/" + token);

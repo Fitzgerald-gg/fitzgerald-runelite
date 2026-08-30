@@ -148,6 +148,8 @@ public class ChroniclePlugin extends Plugin
 	// Server absolutes waiting to be floored into the journal (see the seed
 	// callback) once the journal's own load has finished.
 	private volatile Map<String, Integer> pendingServerFloor;
+	// The cloud ledger's per-source rollup, same lifecycle as the counter floor.
+	private volatile java.util.List<ChronicleApiClient.LedgerSource> pendingDropsAdopt;
 
 	private static final int SEED_RETRY_MIN_SEC = 5;
 	private static final int SEED_RETRY_MAX_SEC = 60;
@@ -669,6 +671,11 @@ public class ChroniclePlugin extends Plugin
 			// be in flight; refreshLocal (which always runs after the load, and on
 			// every push interval) applies it once the store is ready.
 			pendingServerFloor = base;
+			// The drop ledger adopts the same way: sources/kc/values floor at the
+			// server's rollup so the Drops tab shows the whole history, not just
+			// what this install has witnessed.
+			api.fetchDropLedger(config.serverBaseUrl(), name,
+				ledger -> pendingDropsAdopt = ledger);
 			countersSeeded = true;
 			resetSeedBackoff();
 			enrolledRsn = name;
@@ -714,6 +721,7 @@ public class ChroniclePlugin extends Plugin
 		executor.submit(() -> localStore.flush(localDir()));
 		localStore.endSession();
 		pendingServerFloor = null;   // account boundary — never floor the next login's journal
+		pendingDropsAdopt = null;
 		// Re-seed from the server on the next login (another device may have
 		// advanced the totals). The final push below still uses the in-memory
 		// snapshot we accumulated this session.
@@ -929,6 +937,23 @@ public class ChroniclePlugin extends Plugin
 		return localStore.dropSources();
 	}
 
+	java.util.List<LocalStore.BagItem> sourceItems(String source)
+	{
+		return localStore.sourceItems(source);
+	}
+
+	void fetchSourceItems(String source,
+		java.util.function.Consumer<java.util.List<ChronicleApiClient.LedgerItem>> onDone)
+	{
+		String rsn = displayRsn();
+		if (!cloudActive() || rsn == null || rsn.isEmpty())
+		{
+			onDone.accept(null);
+			return;
+		}
+		api.fetchSourceItems(config.serverBaseUrl(), rsn, source, onDone);
+	}
+
 	java.util.List<JsonObject> feedNewest(int n)
 	{
 		return localStore.feedNewest(n);
@@ -1051,6 +1076,12 @@ public class ChroniclePlugin extends Plugin
 		{
 			pendingServerFloor = null;
 			localStore.floorTrackers(floor, localName);
+		}
+		java.util.List<ChronicleApiClient.LedgerSource> adopt = pendingDropsAdopt;
+		if (adopt != null && localName != null && localStore.isReadyFor(localName))
+		{
+			pendingDropsAdopt = null;
+			localStore.floorDropSources(adopt, localName);
 		}
 		if (localName != null)
 		{

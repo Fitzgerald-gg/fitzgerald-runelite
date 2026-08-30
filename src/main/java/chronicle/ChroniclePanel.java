@@ -98,6 +98,11 @@ class ChroniclePanel extends PluginPanel
 	private Scope scope = Scope.LIFETIME;
 	private View view = View.HOME;
 	private String statsFamily = StatRegistry.FAMILIES[0];
+	private String expandedSource;
+	private int dropsShown = ROW_CAP;
+	// Cloud item lists already fetched this session, keyed by source — the
+	// drill fetches each source at most once.
+	private final Map<String, List<ChronicleApiClient.LedgerItem>> cloudBagCache = new LinkedHashMap<>();
 
 	ChroniclePanel(ChroniclePlugin plugin)
 	{
@@ -193,6 +198,8 @@ class ChroniclePanel extends PluginPanel
 		tab.setOnSelectEvent(() ->
 		{
 			view = target;
+			expandedSource = null;
+			dropsShown = ROW_CAP;
 			searchField.setText("");
 			rebuild();
 			return true;
@@ -396,23 +403,131 @@ class ChroniclePanel extends PluginPanel
 		int shown = 0;
 		for (LocalStore.SourceRow r : sources)
 		{
-			if (shown++ >= ROW_CAP)
+			if (shown++ >= dropsShown)
 			{
 				break;
 			}
 			JPanel card = cardPlain();
+			card.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
 			card.add(row(r.name, gp(r.value) + " gp", accent()));
 			String sub = (r.kc > 0 ? fmt(r.kc) + " kc" : fmt(r.loots) + " drops")
 				+ (r.pb != null ? " · PB " + pb(r.pb) : "");
 			card.add(row(sub, r.kc > 0 ? gp(r.value / Math.max(1, r.kc)) + " gp/kc" : "", null));
+			if (r.name.equals(expandedSource))
+			{
+				addSourceDrill(card, r);
+			}
+			final String src = r.name;
+			card.addMouseListener(clicker(() ->
+			{
+				expandedSource = src.equals(expandedSource) ? null : src;
+				rebuild();
+			}));
 			p.add(card);
 			p.add(vgap(4));
 		}
-		if (sources.size() > ROW_CAP)
+		if (sources.size() > dropsShown)
 		{
-			p.add(note(fmt(sources.size() - ROW_CAP) + " more sources — search to find one"));
+			JButton more = new JButton("Show " + Math.min(ROW_CAP, sources.size() - dropsShown)
+				+ " more of " + fmt(sources.size()) + " sources");
+			more.addActionListener(e ->
+			{
+				dropsShown += ROW_CAP;
+				rebuild();
+			});
+			p.add(more);
 		}
 		return p;
+	}
+
+	/** The per-source drill: local bag as sprites; the cloud ledger's item
+	 *  rows fetched on first expand when the bag holds less than the cloud. */
+	private void addSourceDrill(JPanel card, LocalStore.SourceRow r)
+	{
+		card.add(vgap(5));
+		List<LocalStore.BagItem> bag = plugin.sourceItems(r.name);
+		bag.sort(Comparator.comparingLong((LocalStore.BagItem b) -> b.value).reversed());
+		if (!bag.isEmpty())
+		{
+			JPanel grid = new JPanel(new GridLayout(0, 5, 3, 3));
+			grid.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+			int mounted = 0;
+			for (LocalStore.BagItem b : bag)
+			{
+				if (mounted++ >= 25)
+				{
+					break;
+				}
+				JLabel slot = new JLabel();
+				slot.setPreferredSize(new Dimension(36, 32));
+				slot.setHorizontalAlignment(JLabel.CENTER);
+				slot.setToolTipText(b.name + (b.qty > 1 ? " ×" + fmt(b.qty) : "")
+					+ " · " + gp(b.value) + " gp");
+				if (b.itemId > 0)
+				{
+					AsyncBufferedImage img = plugin.items().getImage(b.itemId,
+						(int) Math.min(Integer.MAX_VALUE, b.qty), b.qty > 1);
+					img.addTo(slot);
+				}
+				grid.add(slot);
+			}
+			card.add(grid);
+		}
+		// Cache protocol: absent = never asked; null value = fetch in flight;
+		// empty list = fetch failed; non-empty = the cloud ledger's rows.
+		List<ChronicleApiClient.LedgerItem> cloud = cloudBagCache.get(r.name);
+		if (cloud != null && !cloud.isEmpty())
+		{
+			card.add(vgap(4));
+			int mounted = 0;
+			for (ChronicleApiClient.LedgerItem it : cloud)
+			{
+				if (mounted++ >= 15)
+				{
+					break;
+				}
+				card.add(row(it.name + (it.qty > 1 ? " ×" + fmt(it.qty) : ""),
+					gp(it.value) + " gp", null));
+			}
+			if (cloud.size() > 15)
+			{
+				card.add(note(fmt(cloud.size() - 15) + " more on your cloud ledger"));
+			}
+		}
+		else if (r.cloudItems > bag.size() && plugin.cloudActive())
+		{
+			if (cloud != null)
+			{
+				card.add(note("Couldn't reach the cloud ledger — items the journal "
+					+ "witnessed are shown above."));
+			}
+			else if (cloudBagCache.containsKey(r.name))
+			{
+				card.add(note("Fetching the full item list…"));
+			}
+			else
+			{
+				card.add(note("Fetching the full item list…"));
+				cloudBagCache.put(r.name, null);
+				final String src = r.name;
+				plugin.fetchSourceItems(src, items ->
+				{
+					cloudBagCache.put(src, items != null ? items : java.util.Collections.emptyList());
+					SwingUtilities.invokeLater(() ->
+					{
+						if (src.equals(expandedSource) && view == View.DROPS)
+						{
+							rebuild();
+						}
+					});
+				});
+			}
+		}
+		else if (bag.isEmpty())
+		{
+			card.add(note("Items fill in as you play — the journal prices each "
+				+ "drop the moment it lands."));
+		}
 	}
 
 	private JPanel buildLog()
