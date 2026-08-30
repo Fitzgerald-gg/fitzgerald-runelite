@@ -143,6 +143,9 @@ public class FitzgeraldPlugin extends Plugin
 	// must FLOOR-merge (per-key max) instead of adding: the store already holds
 	// absolutes, and adding a fresh baseline on top would double-count.
 	private volatile boolean reseedFloor;
+	// Server absolutes waiting to be floored into the journal (see the seed
+	// callback) once the journal's own load has finished.
+	private volatile Map<String, Integer> pendingServerFloor;
 
 	private static final int SEED_RETRY_MIN_SEC = 5;
 	private static final int SEED_RETRY_MAX_SEC = 60;
@@ -381,6 +384,15 @@ public class FitzgeraldPlugin extends Plugin
 			reschedulePushLoop();
 			if ("cloudSync".equals(key) || "serverBaseUrl".equals(key))
 			{
+				// Fold the running session into the journal and re-freeze its base
+				// BEFORE clearing the counter store — the journal is always-on, so a
+				// cloud toggle must never cost it the increments since the last flush.
+				if (localName != null)
+				{
+					localStore.setTrackers(sessionView(), localName);
+					localStore.rebase(localName);
+					executor.submit(() -> localStore.flush(localDir()));
+				}
 				// The counter baseline means different things with cloud on or off (a
 				// cloud session is seeded to server absolutes; a purely local one
 				// counts from zero). Reset so a toggle can't carry one into the other.
@@ -618,6 +630,13 @@ public class FitzgeraldPlugin extends Plugin
 			{
 				statStore.seedAdditive(base);
 			}
+			// The journal adopts the server's history too (per-key floor): a fresh
+			// install on an account with a cloud record starts complete instead of
+			// from zero, and two computers converge through the server's union.
+			// Stashed rather than applied — the journal's own async load may still
+			// be in flight; refreshLocal (which always runs after the load, and on
+			// every push interval) applies it once the store is ready.
+			pendingServerFloor = base;
 			countersSeeded = true;
 			resetSeedBackoff();
 			enrolledRsn = name;
@@ -661,6 +680,7 @@ public class FitzgeraldPlugin extends Plugin
 		}
 		executor.submit(() -> localStore.flush(localDir()));
 		localStore.endSession();
+		pendingServerFloor = null;   // account boundary — never floor the next login's journal
 		// Re-seed from the server on the next login (another device may have
 		// advanced the totals). The final push below still uses the in-memory
 		// snapshot we accumulated this session.
@@ -920,6 +940,12 @@ public class FitzgeraldPlugin extends Plugin
 	private void refreshLocal()
 	{
 		gatherCharacter();
+		Map<String, Integer> floor = pendingServerFloor;
+		if (floor != null && localName != null && localStore.isReadyFor(localName))
+		{
+			pendingServerFloor = null;
+			localStore.floorTrackers(floor, localName);
+		}
 		if (localName != null)
 		{
 			localStore.setTrackers(sessionView(), localName);

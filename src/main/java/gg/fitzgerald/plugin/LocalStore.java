@@ -316,6 +316,66 @@ class LocalStore
 	 * ({@code StatStore.pushable()}); lifetime = frozen-base + session (max for peak
 	 * counters), so calling this repeatedly through a session never double-counts.
 	 */
+	/**
+	 * Raise the journal's lifetime base to AT LEAST the given absolutes, per key
+	 * (max keys included — max of absolutes is their natural semantics). Called
+	 * with the server's counters on a cloud login: the journal adopts history it
+	 * never witnessed (an install newer than the account's cloud record, another
+	 * computer's play) without ever double-counting — a base already higher, from
+	 * local play the server hasn't seen, is kept.
+	 */
+	void floorTrackers(java.util.Map<String, Integer> absolutes, String rsn)
+	{
+		if (!isReadyFor(rsn) || absolutes == null)
+		{
+			return;
+		}
+		synchronized (lock)
+		{
+			JsonObject tr = root.has("trackers") && root.get("trackers").isJsonObject()
+				? root.getAsJsonObject("trackers") : new JsonObject();
+			for (java.util.Map.Entry<String, Integer> e : absolutes.entrySet())
+			{
+				long have = trackersBase.has(e.getKey()) && !trackersBase.get(e.getKey()).isJsonNull()
+					? trackersBase.get(e.getKey()).getAsLong() : 0;
+				long floor = e.getValue() != null ? e.getValue().longValue() : 0;
+				if (floor > have)
+				{
+					trackersBase.addProperty(e.getKey(), floor);
+				}
+				long shown = tr.has(e.getKey()) && !tr.get(e.getKey()).isJsonNull()
+					? tr.get(e.getKey()).getAsLong() : 0;
+				if (floor > shown)
+				{
+					tr.addProperty(e.getKey(), floor);
+				}
+			}
+			root.add("trackers", tr);
+			root.addProperty("updated_at", nowSec());
+		}
+	}
+
+	/**
+	 * Re-freeze the lifetime base at the CURRENT journal values. Called before
+	 * the session counter store is cleared mid-session (a cloud toggle), so the
+	 * increments already folded in are owned by the base and the fresh
+	 * from-zero session can't erase them on the next recompute.
+	 */
+	void rebase(String rsn)
+	{
+		if (!isReadyFor(rsn))
+		{
+			return;
+		}
+		synchronized (lock)
+		{
+			if (root.has("trackers") && root.get("trackers").isJsonObject())
+			{
+				trackersBase = deepCopy(root.getAsJsonObject("trackers"));
+			}
+		}
+	}
+
 	void setTrackers(java.util.Map<String, Integer> session, String rsn)
 	{
 		if (!isReadyFor(rsn) || session == null)
