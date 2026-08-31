@@ -398,6 +398,36 @@ class ChroniclePanel extends PluginPanel
 		}
 	}
 
+	/** A small filled circle used as a status pip. */
+	private static javax.swing.Icon dot(Color c)
+	{
+		return new javax.swing.Icon()
+		{
+			@Override
+			public void paintIcon(Component host, java.awt.Graphics g, int x, int y)
+			{
+				java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
+				g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+					java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+				g2.setColor(c);
+				g2.fillOval(x, y, 6, 6);
+				g2.dispose();
+			}
+
+			@Override
+			public int getIconWidth()
+			{
+				return 6;
+			}
+
+			@Override
+			public int getIconHeight()
+			{
+				return 6;
+			}
+		};
+	}
+
 	private JPanel buildHome()
 	{
 		JPanel p = column();
@@ -409,8 +439,13 @@ class ChroniclePanel extends PluginPanel
 		// stopped reaching disk looks exactly as alive as one that hasn't. The
 		// heartbeat is the one place that can say otherwise.
 		String stalled = plugin.journalWarning();
-		JLabel state = new JLabel(stalled == null ? "● logging" : "● not saving");
-		state.setForeground(stalled == null ? ACCENT_SESSION : ColorScheme.PROGRESS_ERROR_COLOR);
+		Color pulse = stalled == null ? ACCENT_SESSION : ColorScheme.PROGRESS_ERROR_COLOR;
+		JLabel state = new JLabel(stalled == null ? "logging" : "not saving");
+		// The dot is PAINTED, not typed: the RuneScape font has no bullet glyph
+		// and renders one as a tofu box.
+		state.setIcon(dot(pulse));
+		state.setIconTextGap(4);
+		state.setForeground(pulse);
 		state.setFont(FontManager.getRunescapeSmallFont());
 		hdr.add(state, BorderLayout.EAST);
 		hdr.setMaximumSize(new Dimension(Integer.MAX_VALUE, 16));
