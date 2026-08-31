@@ -739,6 +739,18 @@ public class PanelPreviewTest
 		}
 
 		@Override
+		net.runelite.client.game.SkillIconManager skillIcons()
+		{
+			return null;   // headless: the grid falls back to a bare level
+		}
+
+		@Override
+		java.util.Map<String, long[]> skillSheet()
+		{
+			return store != null ? store.skillSheet() : new java.util.LinkedHashMap<>();
+		}
+
+		@Override
 		com.google.gson.Gson gson()
 		{
 			return new Gson();   // the stub has no injector

@@ -198,6 +198,14 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			// session counter is never double-counted.
 			trackersBase = deepCopy(loaded.getAsJsonObject("trackers"));
 			currentRsn = rsn;
+			// A record written by an earlier build can carry the same item twice
+			// in one source's bag; heal it on the way in rather than making the
+			// player re-import to be rid of it.
+			int healed = dedupeSourceBags();
+			if (healed > 0)
+			{
+				log.debug("collapsed {} duplicate item entries", healed);
+			}
 			// Rebuilt, not merged: the mirror must describe THIS account only, or
 			// an ore the previous character mined would credit this one's drops.
 			gatheredItems.clear();
@@ -1793,6 +1801,24 @@ class LocalStore implements chronicle.counters.GatheredLedger
 					{
 						JsonObject bag = cur.has("items") && cur.get("items").isJsonObject()
 							? cur.getAsJsonObject("items") : new JsonObject();
+						// The bag is keyed by ITEM ID; an export that knows only
+						// names is not. Matching on the name first is what stops
+						// an import filing a second, parallel entry for something
+						// already here — two lines for one herb, one holding what
+						// this client saw and one holding the other record's total.
+						java.util.Map<String, String> byName = new java.util.HashMap<>();
+						for (java.util.Map.Entry<String, JsonElement> be : bag.entrySet())
+						{
+							if (be.getValue().isJsonObject())
+							{
+								JsonObject b = be.getValue().getAsJsonObject();
+								if (b.has("name") && !b.get("name").isJsonNull())
+								{
+									byName.put(b.get("name").getAsString()
+										.toLowerCase(java.util.Locale.ROOT), be.getKey());
+								}
+							}
+						}
 						for (java.util.Map.Entry<String, JsonElement> ie
 							: inc.getAsJsonObject("items").entrySet())
 						{
@@ -1801,17 +1827,31 @@ class LocalStore implements chronicle.counters.GatheredLedger
 								continue;
 							}
 							JsonObject incItem = ie.getValue().getAsJsonObject();
-							JsonObject curItem = bag.has(ie.getKey()) && bag.get(ie.getKey()).isJsonObject()
-								? bag.getAsJsonObject(ie.getKey()) : new JsonObject();
+							String incName = incItem.has("name") && !incItem.get("name").isJsonNull()
+								? incItem.get("name").getAsString() : ie.getKey();
+							String key = byName.get(incName.toLowerCase(java.util.Locale.ROOT));
+							if (key == null)
+							{
+								// Nothing here by that name: file it under its id
+								// when the export carried one, so the reader can
+								// draw its sprite.
+								key = incItem.has("id") && incItem.get("id").getAsInt() > 0
+									? String.valueOf(incItem.get("id").getAsInt()) : ie.getKey();
+							}
+							JsonObject curItem = bag.has(key) && bag.get(key).isJsonObject()
+								? bag.getAsJsonObject(key) : new JsonObject();
 							floorNumber(curItem, incItem, "qty");
 							floorNumber(curItem, incItem, "value");
-							// An id the local bag lacks is worth taking: it is what
-							// draws the sprite.
+							if (!curItem.has("name"))
+							{
+								curItem.addProperty("name", incName);
+							}
 							if (!curItem.has("id") && incItem.has("id"))
 							{
 								curItem.add("id", incItem.get("id"));
 							}
-							bag.add(ie.getKey(), curItem);
+							bag.add(key, curItem);
+							byName.put(incName.toLowerCase(java.util.Locale.ROOT), key);
 						}
 						cur.add("items", bag);
 					}
@@ -1956,6 +1996,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 					}
 				}
 			}
+			dedupeSourceBags();
 			root.addProperty("updated_at", nowSec());
 		}
 		return sources + " sources · " + String.format(java.util.Locale.UK, "%,d", events)
@@ -2255,6 +2296,125 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			this.kc = kc;
 			this.ts = ts;
 		}
+	}
+
+	/**
+	 * Collapse item entries that name the same thing within one source.
+	 *
+	 * <p>The bag is keyed by item id; a record merged in from elsewhere may know
+	 * only names, and an earlier build filed those alongside rather than into
+	 * the entry already there — so a source could list one herb twice, each line
+	 * holding a different partial count. Both describe the same history, so the
+	 * survivor takes the HIGHER of the two (the same floor rule the rest of the
+	 * merge uses) and keeps the id-bearing key, which is what draws the sprite.
+	 * Callers hold {@code lock}. Returns how many entries were absorbed.
+	 */
+	private int dedupeSourceBags()
+	{
+		if (root == null || !root.has("drops") || !root.get("drops").isJsonObject())
+		{
+			return 0;
+		}
+		int absorbed = 0;
+		for (java.util.Map.Entry<String, JsonElement> se
+			: root.getAsJsonObject("drops").entrySet())
+		{
+			if (!se.getValue().isJsonObject())
+			{
+				continue;
+			}
+			JsonObject src = se.getValue().getAsJsonObject();
+			if (!src.has("items") || !src.get("items").isJsonObject())
+			{
+				continue;
+			}
+			JsonObject bag = src.getAsJsonObject("items");
+			java.util.Map<String, String> keep = new java.util.HashMap<>();
+			java.util.List<String> drop = new java.util.ArrayList<>();
+			for (java.util.Map.Entry<String, JsonElement> ie : bag.entrySet())
+			{
+				if (!ie.getValue().isJsonObject())
+				{
+					continue;
+				}
+				JsonObject it = ie.getValue().getAsJsonObject();
+				String name = it.has("name") && !it.get("name").isJsonNull()
+					? it.get("name").getAsString().toLowerCase(java.util.Locale.ROOT)
+					: ie.getKey().toLowerCase(java.util.Locale.ROOT);
+				String held = keep.get(name);
+				if (held == null)
+				{
+					keep.put(name, ie.getKey());
+					continue;
+				}
+				// Prefer the numeric (id) key as the survivor.
+				String winner = held;
+				String loser = ie.getKey();
+				if (!isNumeric(held) && isNumeric(ie.getKey()))
+				{
+					winner = ie.getKey();
+					loser = held;
+					keep.put(name, winner);
+				}
+				JsonObject w = bag.getAsJsonObject(winner);
+				JsonObject l = bag.getAsJsonObject(loser);
+				floorNumber(w, l, "qty");
+				floorNumber(w, l, "value");
+				if (!w.has("name") && l.has("name"))
+				{
+					w.add("name", l.get("name"));
+				}
+				drop.add(loser);
+			}
+			for (String k : drop)
+			{
+				bag.remove(k);
+				absorbed++;
+			}
+		}
+		return absorbed;
+	}
+
+	private static boolean isNumeric(String s)
+	{
+		if (s == null || s.isEmpty())
+		{
+			return false;
+		}
+		for (int i = 0; i < s.length(); i++)
+		{
+			if (!Character.isDigit(s.charAt(i)))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** The character sheet's skills: {skill: [level, xp]}, as last gathered. */
+	java.util.Map<String, long[]> skillSheet()
+	{
+		java.util.Map<String, long[]> out = new java.util.LinkedHashMap<>();
+		synchronized (lock)
+		{
+			if (root == null || !root.has("skills") || !root.get("skills").isJsonObject())
+			{
+				return out;
+			}
+			for (java.util.Map.Entry<String, JsonElement> e
+				: root.getAsJsonObject("skills").entrySet())
+			{
+				if (!e.getValue().isJsonObject())
+				{
+					continue;
+				}
+				JsonObject o = e.getValue().getAsJsonObject();
+				out.put(e.getKey(), new long[]{
+					o.has("level") ? asLong(o.get("level")) : 0,
+					o.has("xp") ? asLong(o.get("xp")) : 0});
+			}
+		}
+		return out;
 	}
 
 	/** The journal's stored collection log, deep-copied for the panel. */

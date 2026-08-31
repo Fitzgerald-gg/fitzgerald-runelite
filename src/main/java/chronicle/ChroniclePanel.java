@@ -2276,6 +2276,141 @@ class ChroniclePanel extends PluginPanel
 		return feed.isEmpty() ? 0 : safeLong(feed.get(0).get("ts"));
 	}
 
+	// The hiscores order, which is the order every player already reads a
+	// skill list in. Overall is drawn separately, as its own headline.
+	private static final net.runelite.api.Skill[] SKILL_ORDER = {
+		net.runelite.api.Skill.ATTACK, net.runelite.api.Skill.HITPOINTS,
+		net.runelite.api.Skill.MINING, net.runelite.api.Skill.STRENGTH,
+		net.runelite.api.Skill.AGILITY, net.runelite.api.Skill.SMITHING,
+		net.runelite.api.Skill.DEFENCE, net.runelite.api.Skill.HERBLORE,
+		net.runelite.api.Skill.FISHING, net.runelite.api.Skill.RANGED,
+		net.runelite.api.Skill.THIEVING, net.runelite.api.Skill.COOKING,
+		net.runelite.api.Skill.PRAYER, net.runelite.api.Skill.CRAFTING,
+		net.runelite.api.Skill.FIREMAKING, net.runelite.api.Skill.MAGIC,
+		net.runelite.api.Skill.FLETCHING, net.runelite.api.Skill.WOODCUTTING,
+		net.runelite.api.Skill.RUNECRAFT, net.runelite.api.Skill.SLAYER,
+		net.runelite.api.Skill.FARMING, net.runelite.api.Skill.CONSTRUCTION,
+		net.runelite.api.Skill.HUNTER,
+	};
+
+	/**
+	 * Every skill at once, the way a player already reads them: the hiscores
+	 * grid, each with the level it stands at and what the chosen period added
+	 * to it. A skill that did not move keeps its place and simply says nothing —
+	 * the shape of the grid is itself the information, and a wall of "+0" would
+	 * bury the handful of rows that actually moved.
+	 */
+	private void addSkillGrid(JPanel p, List<Map.Entry<String, Long>> gains,
+		Map<String, Long> closingXp)
+	{
+		Map<String, Long> gain = new LinkedHashMap<>();
+		long totalGained = 0;
+		for (Map.Entry<String, Long> g : gains)
+		{
+			gain.put(g.getKey(), g.getValue());
+			totalGained += g.getValue();
+		}
+		Map<String, long[]> sheet = plugin.skillSheet();
+
+		JPanel head = card("The period");
+		long overall = closingXp.getOrDefault("overall", 0L);
+		long[] ov = sheet.get("overall");
+		head.add(row(ov != null && ov[0] > 0 ? "Total level " + fmt(ov[0]) : "Experience",
+			totalGained > 0 ? "+" + gp(totalGained) : "nothing gained",
+			totalGained > 0 ? accent() : null));
+		if (!gains.isEmpty())
+		{
+			Map.Entry<String, Long> top = gains.get(0);
+			head.add(row("Most moved", StatRegistry.prettify(top.getKey())
+				+ " +" + gp(top.getValue()), null));
+		}
+		p.add(head);
+		p.add(vgap(5));
+
+		JPanel grid = new JPanel(new GridLayout(0, 3, 2, 2));
+		grid.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		grid.setAlignmentX(Component.LEFT_ALIGNMENT);
+		for (net.runelite.api.Skill sk : SKILL_ORDER)
+		{
+			String key = sk.name().toLowerCase(Locale.ROOT);
+			long[] cur = sheet.get(key);
+			long level = cur != null ? cur[0] : 0;
+			// No sheet yet (a journal that has never seen a login) still knows
+			// the xp from the spine, and a level read off xp beats a blank.
+			if (level <= 0)
+			{
+				level = PaceBook.levelAt(closingXp.getOrDefault(key, 0L));
+			}
+			grid.add(skillCell(sk, level, gain.get(key)));
+		}
+		p.add(grid);
+		p.add(vgap(6));
+	}
+
+	/** One skill: its icon, the level it stands at, and the period's gain. */
+	private JPanel skillCell(net.runelite.api.Skill sk, long level, Long gained)
+	{
+		JPanel cell = new JPanel(new BorderLayout(3, 0));
+		cell.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		cell.setBorder(BorderFactory.createEmptyBorder(3, 4, 3, 4));
+		cell.setToolTipText(StatRegistry.prettify(sk.name().toLowerCase(Locale.ROOT))
+			+ (gained != null ? " — +" + gp(gained) + " this period" : ""));
+
+		JLabel icon = new JLabel();
+		java.awt.image.BufferedImage img = skillIcon(sk);
+		if (img != null)
+		{
+			icon.setIcon(new javax.swing.ImageIcon(img));
+		}
+		else
+		{
+			// Without the sprite cache the icon IS the label — a grid of bare
+			// numbers names nothing. Fall back to the skill's first letters.
+			icon.setText(sk.name().substring(0, Math.min(3, sk.name().length())));
+			icon.setFont(FontManager.getRunescapeSmallFont());
+			icon.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker());
+		}
+		cell.add(icon, BorderLayout.WEST);
+
+		JPanel text = new JPanel(new GridLayout(gained != null ? 2 : 1, 1));
+		text.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		JLabel lvl = new JLabel(level > 0 ? String.valueOf(level) : "-");
+		lvl.setFont(FontManager.getRunescapeSmallFont());
+		// A skill that moved is lit; the rest stay quiet so the movers read at
+		// a glance rather than having to be hunted for.
+		lvl.setForeground(gained != null ? Color.WHITE : ColorScheme.LIGHT_GRAY_COLOR.darker());
+		text.add(lvl);
+		if (gained != null)
+		{
+			JLabel g = new JLabel("+" + gp(gained));
+			g.setFont(FontManager.getRunescapeSmallFont());
+			g.setForeground(accent());
+			text.add(g);
+		}
+		cell.add(text, BorderLayout.CENTER);
+		return cell;
+	}
+
+	private static final Map<net.runelite.api.Skill, java.awt.image.BufferedImage> SKILL_ICONS =
+		new java.util.EnumMap<>(net.runelite.api.Skill.class);
+
+	/** The game's own skill icon, loaded once and shared. */
+	private java.awt.image.BufferedImage skillIcon(net.runelite.api.Skill sk)
+	{
+		return SKILL_ICONS.computeIfAbsent(sk, s ->
+		{
+			try
+			{
+				java.awt.image.BufferedImage img = plugin.skillIcons().getSkillImage(s, true);
+				return img;
+			}
+			catch (RuntimeException e)
+			{
+				return null;   // a dev client without the sprite cache
+			}
+		});
+	}
+
 	private JPanel buildHistory()
 	{
 		JPanel p = column();
@@ -2477,37 +2612,7 @@ class ChroniclePanel extends PluginPanel
 				}
 			}
 			gains.sort(Map.Entry.<String, Long>comparingByValue().reversed());
-			if (!gains.isEmpty())
-			{
-				// Ranked rows, the site's Chronicle idiom: total first, skills
-				// by xp desc, a lit "99" where the window crossed the line.
-				long totalGained = 0;
-				for (Map.Entry<String, Long> g : gains)
-				{
-					totalGained += g.getValue();
-				}
-				JPanel card = card("Xp gained");
-				card.add(row("Total", "+" + gp(totalGained), accent()));
-				int mounted = 0;
-				for (Map.Entry<String, Long> g : gains)
-				{
-					if (mounted++ >= 14)
-					{
-						break;
-					}
-					long after = at.getValue().skills.getOrDefault(g.getKey(), 0L);
-					boolean hit99 = after >= XP_99 && after - g.getValue() < XP_99;
-					card.add(row(StatRegistry.prettify(g.getKey())
-						+ (hit99 ? " · 99" : ""), "+" + gp(g.getValue()),
-						hit99 ? ACCENT_SESSION : null, hit99));
-				}
-				if (gains.size() > 14)
-				{
-					card.add(ghostRow("+ " + (gains.size() - 14) + " more skills", ""));
-				}
-				p.add(card);
-				p.add(vgap(5));
-			}
+			addSkillGrid(p, gains, at.getValue().skills);
 
 			Map<String, Long> beforeCt = before != null ? before.getValue().counters
 				: new LinkedHashMap<>();

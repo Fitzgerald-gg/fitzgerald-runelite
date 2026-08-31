@@ -172,6 +172,48 @@ public class JournalImportTest
 	}
 
 	@Test
+	public void anExportThatKnowsOnlyNamesMergesIntoWhatIsAlreadyHere()
+	{
+		// The bag is keyed by item id; the export is keyed by name. Filing the
+		// incoming one alongside listed a source's herb twice, each line holding
+		// a different partial count.
+		store.record("LOOT", gson.fromJson("{\"source\":\"Herbiboar\","
+			+ "\"items\":[{\"id\":207,\"quantity\":6}]}", JsonObject.class), "Tester");
+		assertEquals(1, store.sourceItems("Herbiboar").size());
+
+		store.importJournal(gson.fromJson("{\"drops\":{\"Herbiboar\":{"
+			+ "\"kc\":27,\"loots\":27,\"value\":121000,"
+			+ "\"items\":{\"Rune dagger\":{\"qty\":9,\"value\":900}}}}}",
+			JsonObject.class), "Tester");
+
+		java.util.List<LocalStore.BagItem> bag = store.sourceItems("Herbiboar");
+		assertEquals(1, bag.size());
+		assertEquals("Rune dagger", bag.get(0).name);
+		assertEquals(9, bag.get(0).qty);     // floored to the higher of the two
+	}
+
+	@Test
+	public void aRecordAlreadyCarryingDuplicatesHealsOnLoad() throws Exception
+	{
+		// What an earlier build wrote: the same item under an id key and a name
+		// key, each holding part of the count.
+		java.io.File f = new java.io.File(dir, "healme.json");
+		java.nio.file.Files.write(f.toPath(), ("{\"schema\":1,\"rsn\":\"Healme\","
+			+ "\"drops\":{\"Herbiboar\":{\"kc\":27,\"loots\":27,\"value\":1,"
+			+ "\"items\":{"
+			+ "\"207\":{\"id\":207,\"name\":\"Grimy ranarr weed\",\"qty\":6,\"value\":34000},"
+			+ "\"Grimy ranarr weed\":{\"qty\":6,\"value\":35000}}}}}")
+			.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+		LocalStore healed = new LocalStore(store.items(), gson);
+		healed.load(dir, "Healme");
+		java.util.List<LocalStore.BagItem> bag = healed.sourceItems("Herbiboar");
+		assertEquals(1, bag.size());
+		assertEquals("Grimy ranarr weed", bag.get(0).name);
+		assertEquals(207, bag.get(0).itemId);   // the id-bearing key survives
+		assertEquals(35000L, bag.get(0).value); // and takes the higher figure
+	}
+
+	@Test
 	public void anImportIntoAnUnmountedAccountIsRefused()
 	{
 		store.endSession();

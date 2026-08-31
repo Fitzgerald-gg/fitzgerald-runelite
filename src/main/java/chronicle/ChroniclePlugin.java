@@ -121,6 +121,9 @@ public class ChroniclePlugin extends Plugin
 	@Inject
 	private LocalStore localStore;
 
+	@Inject
+	private net.runelite.client.game.SkillIconManager skillIcons;
+
 	// Injected rather than constructed: the Plugin Hub's review rejects a plugin
 	// that builds its own Gson/OkHttp instead of taking the client's.
 	@Inject
@@ -1008,6 +1011,18 @@ public class ChroniclePlugin extends Plugin
 			historyCacheRsn = rsn;
 			refreshPanel();
 		}
+	}
+
+	/** The game's own skill sprites, for the History grid. */
+	net.runelite.client.game.SkillIconManager skillIcons()
+	{
+		return skillIcons;
+	}
+
+	/** Level + xp per skill, as the journal last saw them. */
+	java.util.Map<String, long[]> skillSheet()
+	{
+		return localStore.skillSheet();
 	}
 
 	JsonObject clogSnapshot()

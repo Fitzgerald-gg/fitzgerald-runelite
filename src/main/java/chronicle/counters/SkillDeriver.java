@@ -67,6 +67,12 @@ public class SkillDeriver
 	// means something. Cooking shares the table's shape but is deliberately out:
 	// it transforms a fish already valued when it was caught, and pricing the
 	// cooked one would count the same catch twice.
+	// Value it where the world hands something over for nothing but time.
+	// Cooking, runecraft, smithing and herblore all TRANSFORM something already
+	// valued when it was gathered (or already paid for), so counting their
+	// output would count one trip twice. Hunter and farming were considered and
+	// deliberately left out: hunter passes the test but was judged not worth the
+	// second code path, and a farm run's yield stands on a bought seed.
 	private static final Set<String> VALUED_GATHERING = new HashSet<>(Arrays.asList(
 		"WOODCUTTING", "MINING", "FISHING"));
 	// net-trap species by exact catch xp (merged multi-trap deltas match ×n)
