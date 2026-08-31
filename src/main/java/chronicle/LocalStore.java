@@ -1183,6 +1183,90 @@ class LocalStore
 		}
 	}
 
+	/**
+	 * Adopt the cloud's uncollected ledger: per-source rows floor into the
+	 * same {@code untaken} store live capture feeds (max, never add — the
+	 * server re-includes what this client pushed), per-item rows into a
+	 * sibling {@code untaken_items} map for the lens's item section.
+	 */
+	void floorUntaken(java.util.List<String[]> bySource, java.util.List<String[]> byItem,
+		String rsn)
+	{
+		if (!isReadyFor(rsn))
+		{
+			return;
+		}
+		synchronized (lock)
+		{
+			if (bySource != null)
+			{
+				JsonObject untaken = root.has("untaken") && root.get("untaken").isJsonObject()
+					? root.getAsJsonObject("untaken") : new JsonObject();
+				root.add("untaken", untaken);
+				floorUntakenRows(untaken, bySource);
+			}
+			if (byItem != null)
+			{
+				JsonObject items = root.has("untaken_items") && root.get("untaken_items").isJsonObject()
+					? root.getAsJsonObject("untaken_items") : new JsonObject();
+				root.add("untaken_items", items);
+				floorUntakenRows(items, byItem);
+			}
+		}
+	}
+
+	private static void floorUntakenRows(JsonObject store, java.util.List<String[]> rows)
+	{
+		for (String[] row : rows)
+		{
+			JsonObject e = store.has(row[0]) && store.get(row[0]).isJsonObject()
+				? store.getAsJsonObject(row[0]) : new JsonObject();
+			if (!store.has(row[0]))
+			{
+				e.addProperty("qty", 0);
+				e.addProperty("value", 0);
+				store.add(row[0], e);
+			}
+			long qty = Long.parseLong(row[1]);
+			long value = Long.parseLong(row[2]);
+			if (qty > (e.has("qty") ? e.get("qty").getAsLong() : 0))
+			{
+				e.addProperty("qty", qty);
+			}
+			if (value > (e.has("value") ? e.get("value").getAsLong() : 0))
+			{
+				e.addProperty("value", value);
+			}
+		}
+	}
+
+	/** The per-item side of the uncollected ledger (adopted + any local adds). */
+	java.util.List<UntakenRow> untakenItems()
+	{
+		java.util.List<UntakenRow> out = new java.util.ArrayList<>();
+		synchronized (lock)
+		{
+			if (root == null || !root.has("untaken_items")
+				|| !root.get("untaken_items").isJsonObject())
+			{
+				return out;
+			}
+			for (java.util.Map.Entry<String, JsonElement> e
+				: root.getAsJsonObject("untaken_items").entrySet())
+			{
+				if (!e.getValue().isJsonObject())
+				{
+					continue;
+				}
+				JsonObject it = e.getValue().getAsJsonObject();
+				out.add(new UntakenRow(e.getKey(),
+					it.has("qty") ? it.get("qty").getAsLong() : 0,
+					it.has("value") ? it.get("value").getAsLong() : 0));
+			}
+		}
+		return out;
+	}
+
 	java.util.List<UntakenRow> untakenSources()
 	{
 		java.util.List<UntakenRow> out = new java.util.ArrayList<>();

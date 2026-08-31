@@ -596,13 +596,14 @@ class ChroniclePanel extends PluginPanel
 		if (rows.isEmpty())
 		{
 			p.add(note("What you walk past gets counted here — priced at the "
-				+ "moment you declined it. The record starts with this build."));
+				+ "moment you declined it."));
 			return p;
 		}
 		JPanel head = card("Walked past, lifetime");
 		head.add(row(fmt(totalQty) + " items", gp(totalVal) + " gp", ACCENT_RED));
 		p.add(head);
 		p.add(vgap(6));
+		p.add(group("By source"));
 		int shown = 0;
 		for (LocalStore.UntakenRow r : rows)
 		{
@@ -610,7 +611,31 @@ class ChroniclePanel extends PluginPanel
 			{
 				break;
 			}
-			p.add(row(r.name, fmt(r.qty) + " · " + gp(r.value) + " gp", ACCENT_RED));
+			JPanel sr = row(r.name, fmt(r.qty) + " · " + gp(r.value) + " gp", ACCENT_RED);
+			sr.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+			final String src = r.name;
+			sr.addMouseListener(clicker(() -> openSource(src)));
+			p.add(sr);
+		}
+		List<LocalStore.UntakenRow> items = plugin.untakenItems();
+		if (!items.isEmpty())
+		{
+			items.sort(Comparator.comparingLong((LocalStore.UntakenRow r) -> r.value).reversed());
+			p.add(group("By item"));
+			int mounted = 0;
+			for (LocalStore.UntakenRow r : items)
+			{
+				if (mounted++ >= ROW_CAP)
+				{
+					p.add(ghostRow("+ " + fmt(items.size() - ROW_CAP) + " more items", ""));
+					break;
+				}
+				JPanel ir = row(r.name, "×" + fmt(r.qty) + " · " + gp(r.value) + " gp", ACCENT_RED);
+				ir.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+				final String itm = r.name;
+				ir.addMouseListener(clicker(() -> openItem(itm)));
+				p.add(ir);
+			}
 		}
 		return p;
 	}

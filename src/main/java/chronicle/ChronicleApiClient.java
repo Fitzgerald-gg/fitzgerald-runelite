@@ -902,6 +902,85 @@ public class ChronicleApiClient
 		});
 	}
 
+	/** The cloud's uncollected-loot ledger: per-source and per-item rows. */
+	public static final class UntakenLedger
+	{
+		public final java.util.List<String[]> bySource;   // {name, qty, value}
+		public final java.util.List<String[]> byItem;
+
+		UntakenLedger(java.util.List<String[]> bySource, java.util.List<String[]> byItem)
+		{
+			this.bySource = bySource;
+			this.byItem = byItem;
+		}
+	}
+
+	/** Fetch the uncollected ledger the server has kept since the untaken
+	 *  capture first shipped — the panel's Left behind lens adopts it. */
+	public void fetchUntaken(String baseUrl, String rsn, Consumer<UntakenLedger> onDone)
+	{
+		HttpUrl url = resolve(baseUrl, "api/untaken/" + rsn);
+		if (url == null)
+		{
+			onDone.accept(null);
+			return;
+		}
+		Request request = new Request.Builder().url(url).get().build();
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("untaken fetch failed", e);
+				onDone.accept(null);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				UntakenLedger out = null;
+				try (Response r = response)
+				{
+					if (r.code() == 200)
+					{
+						JsonObject o = gson.fromJson(r.body().charStream(), JsonObject.class);
+						out = new UntakenLedger(untakenRows(o, "by_source", "source"),
+							untakenRows(o, "by_item", "name"));
+					}
+				}
+				catch (RuntimeException e)
+				{
+					log.debug("untaken parse failed", e);
+				}
+				onDone.accept(out);
+			}
+		});
+	}
+
+	private static java.util.List<String[]> untakenRows(JsonObject o, String field, String nameKey)
+	{
+		java.util.List<String[]> rows = new java.util.ArrayList<>();
+		if (o != null && o.has(field) && o.get(field).isJsonArray())
+		{
+			for (JsonElement el : o.getAsJsonArray(field))
+			{
+				if (!el.isJsonObject())
+				{
+					continue;
+				}
+				JsonObject row = el.getAsJsonObject();
+				String name = str(row, nameKey);
+				if (!name.isEmpty())
+				{
+					rows.add(new String[]{name,
+						String.valueOf(num(row, "qty").longValue()),
+						String.valueOf(num(row, "value").longValue())});
+				}
+			}
+		}
+		return rows;
+	}
+
 	/** The cloud's slayer journey, as the site's Slayer chapter reads it. */
 	public static final class SlayerJourney
 	{

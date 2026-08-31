@@ -248,6 +248,9 @@ public class PanelPreviewTest
 		s.untaken.add(new LocalStore.UntakenRow("Abyssal demons", 412, 512_113L));
 		s.untaken.add(new LocalStore.UntakenRow("Nechryael", 1_204, 204_113L));
 		s.untaken.add(new LocalStore.UntakenRow("Thermonuclear smoke devil", 88, 41_205L));
+		s.untakenItems.add(new LocalStore.UntakenRow("Bones", 3_121, 97_435L));
+		s.untakenItems.add(new LocalStore.UntakenRow("Rune javelin heads", 44, 38_210L));
+		s.untakenItems.add(new LocalStore.UntakenRow("Air rune", 8_350, 41_750L));
 
 		for (int i = 0; i < 8; i++)
 		{
@@ -389,6 +392,7 @@ public class PanelPreviewTest
 		List<LocalStore.SourceRow> sessionSources = new ArrayList<>();
 		Map<String, List<LocalStore.BagItem>> bags = new LinkedHashMap<>();
 		List<LocalStore.UntakenRow> untaken = new ArrayList<>();
+		List<LocalStore.UntakenRow> untakenItems = new ArrayList<>();
 		List<LocalStore.RecentDrop> recent = new ArrayList<>();
 		List<JsonObject> feed = new ArrayList<>();
 		JsonObject clog = new JsonObject();
@@ -479,6 +483,12 @@ public class PanelPreviewTest
 		java.util.List<LocalStore.UntakenRow> untakenSources()
 		{
 			return new ArrayList<>(untaken);
+		}
+
+		@Override
+		java.util.List<LocalStore.UntakenRow> untakenItems()
+		{
+			return new ArrayList<>(untakenItems);
 		}
 
 		@Override

@@ -153,6 +153,8 @@ public class ChroniclePlugin extends Plugin
 	private volatile java.util.List<ChronicleApiClient.WomSnapshot> pendingHistoryAdopt;
 	// The whole per-source item ledger, floored into the local bags each login.
 	private volatile java.util.List<ChronicleApiClient.SourceItemRow> pendingBagsAdopt;
+	// The uncollected ledger, floored into the untaken store each login.
+	private volatile ChronicleApiClient.UntakenLedger pendingUntakenAdopt;
 	// True while the stashed feed adoption is the one-shot DEEP import —
 	// its config flag is only written once the adopt actually applies.
 	private volatile boolean pendingFeedDeep;
@@ -729,6 +731,13 @@ public class ChroniclePlugin extends Plugin
 				pendingBagsAdopt = rows;
 				clientThread.invoke(this::refreshLocal);
 			});
+			// The uncollected ledger the server has kept since untaken capture
+			// first shipped — the Left behind lens presents it at last.
+			api.fetchUntaken(config.serverBaseUrl(), name, ledger ->
+			{
+				pendingUntakenAdopt = ledger;
+				clientThread.invoke(this::refreshLocal);
+			});
 			clientThread.invoke(this::refreshLocal);   // the counter floor, likewise
 			countersSeeded = true;
 			resetSeedBackoff();
@@ -779,6 +788,7 @@ public class ChroniclePlugin extends Plugin
 		pendingFeedAdopt = null;
 		pendingHistoryAdopt = null;
 		pendingBagsAdopt = null;
+		pendingUntakenAdopt = null;
 		pendingFeedDeep = false;
 		// Re-seed from the server on the next login (another device may have
 		// advanced the totals). The final push below still uses the in-memory
@@ -1097,6 +1107,11 @@ public class ChroniclePlugin extends Plugin
 		return localStore.untakenSources();
 	}
 
+	java.util.List<LocalStore.UntakenRow> untakenItems()
+	{
+		return localStore.untakenItems();
+	}
+
 	long[] sessionUntakenTally()
 	{
 		return localStore.sessionUntakenTally();
@@ -1226,6 +1241,13 @@ public class ChroniclePlugin extends Plugin
 		{
 			pendingBagsAdopt = null;
 			localStore.floorSourceBags(bags, localName);
+		}
+		ChronicleApiClient.UntakenLedger untaken = pendingUntakenAdopt;
+		if (untaken != null && localName != null && localStore.isReadyFor(localName))
+		{
+			pendingUntakenAdopt = null;
+			localStore.floorUntaken(untaken.bySource, untaken.byItem, localName);
+			refreshPanel();
 		}
 		java.util.List<ChronicleApiClient.FeedEvent> feed = pendingFeedAdopt;
 		if (feed != null && localName != null && localStore.isReadyFor(localName))
