@@ -33,7 +33,8 @@ zero.
 
 ## Import and export
 
-The Journal tab writes your whole record out as JSON, and reads one back in. An import is for
+Your record is already a plain JSON file on your own disk — there is nothing to export, so the
+Journal tab simply opens the folder it lives in. What it does read is an import, which is for
 another copy of **the same account's** history — a backup, another computer, or a record someone
 has been keeping for you — and every store merges as a **floor**: per-key maximum, earliest
 first-sighting, best personal best, never a sum. Importing the same file twice does nothing the

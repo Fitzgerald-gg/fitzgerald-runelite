@@ -1555,20 +1555,22 @@ public class ChroniclePlugin extends Plugin
 		});
 	}
 
-	/** Point the player at their own journal on disk — the export IS the file. */
-	void actionExport()
+	/**
+	 * Show the player their journal. There is nothing to export: the record is
+	 * already a plain JSON file on their own disk, so the honest gesture is to
+	 * open the folder it lives in rather than to manufacture a second copy.
+	 */
+	void actionOpenJournalFolder()
 	{
-		final String rsn = localName != null ? localName : enrolledRsn;
-		if (rsn == null)
-		{
-			chat("Chronicle: log in first — the journal opens with an account.");
-			return;
-		}
 		executor.submit(() ->
 		{
-			localStore.flush(localDir());
-			chat("Chronicle: your journal lives in " + localDir().getAbsolutePath()
-				+ " — plain JSON, every byte of it yours.");
+			if (localName != null && localStore.isReadyFor(localName))
+			{
+				localStore.flush(localDir());   // show it current, not as of the last fold
+			}
+			File dir = localDir();
+			dir.mkdirs();
+			net.runelite.client.util.LinkBrowser.open(dir.getAbsolutePath());
 		});
 	}
 

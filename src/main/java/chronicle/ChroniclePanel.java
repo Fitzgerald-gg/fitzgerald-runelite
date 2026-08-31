@@ -2700,8 +2700,8 @@ class ChroniclePanel extends PluginPanel
 		}
 
 		p.add(vgap(10));
-		JButton export = new JButton("Export journal data (JSON)");
-		export.addActionListener(ev -> plugin.actionExport());
+		JButton export = new JButton("Open journal folder");
+		export.addActionListener(ev -> plugin.actionOpenJournalFolder());
 		export.setAlignmentX(Component.LEFT_ALIGNMENT);
 		export.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 		p.add(export);
@@ -2712,7 +2712,7 @@ class ChroniclePanel extends PluginPanel
 		importBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 		p.add(importBtn);
 		p.add(vgap(4));
-		p.add(note("saved beside your journal: .runelite/chronicle/ — an import "
+		p.add(note("your journal is plain JSON in .runelite/chronicle/ — an import "
 			+ "merges another copy of THIS account's record in (a backup, another "
 			+ "computer, a record kept for you elsewhere). Everything floors, so "
 			+ "importing twice changes nothing."));

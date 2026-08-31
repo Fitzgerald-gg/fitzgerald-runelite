@@ -751,7 +751,7 @@ public class PanelPreviewTest
 		}
 
 		@Override
-		void actionExport()
+		void actionOpenJournalFolder()
 		{
 		}
 
