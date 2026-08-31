@@ -880,6 +880,23 @@ public class ChroniclePlugin extends Plugin
 		{
 			statusLine = "Last push OK (" + result.changed + " changed) at " + nowClock() + ".";
 			log.debug("push ok: {} accepted, {} changed", result.accepted, result.changed);
+			// Server-MINTED counters (typed skilling: shafts cut, logs typed by
+			// wood…) only exist server-side — without this, they sat frozen in
+			// the panel until the next login's floor. Re-fetch after each push
+			// so they flow at the push cadence.
+			String tok = cachedToken;
+			String who = cachedName;
+			if (tok != null && who != null)
+			{
+				api.fetchCounters(config.serverBaseUrl(), tok, base ->
+				{
+					if (base != null)
+					{
+						pendingServerFloor = base;
+						clientThread.invoke(this::refreshLocal);
+					}
+				});
+			}
 		}
 		else if (result.code == 409)
 		{

@@ -353,8 +353,12 @@ class ChroniclePanel extends PluginPanel
 					break;
 			}
 		}
+		// AS_NEEDED is safe now: row heights are width-independent (labels
+		// ellipsise, notes wrap at a fixed width), so the scrollbar appearing
+		// can't change content height and oscillate — the html-note era's
+		// re-wrap jitter that once forced ALWAYS is gone.
 		JScrollPane scroll = new JScrollPane(wrapTop(body),
-			ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS,
+			ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
 			ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
 		scroll.setBorder(null);
 		scroll.getVerticalScrollBar().setUnitIncrement(14);
