@@ -1,0 +1,606 @@
+{
+  "_meta": {
+    "generated": "2026-06-18",
+    "source": "oldschool.runescape.wiki",
+    "schema": 1,
+    "note": "Per-kill/completion drop-rate denominators (1/N) for collection-log uniques, keyed by canonical _OSRS_BOSSES names. Point-based content (raids) uses standard per-completion rates and is approximate. Regenerate via the clean-clog-rates workflow — see tools/README.md."
+  },
+  "drops": {
+    "Abyssal Sire": {
+      "Bludgeon axon": 20600,
+      "Bludgeon claw": 20600,
+      "Bludgeon spine": 20600,
+      "Abyssal dagger": 49200,
+      "Jar of miasma": 98400,
+      "Abyssal whip": 106600,
+      "Abyssal head": 128000,
+      "Abyssal orphan": 256000
+    },
+    "Alchemical Hydra": {
+      "Hydra's eye": 181,
+      "Hydra's fang": 181,
+      "Hydra's heart": 181,
+      "Hydra tail": 513,
+      "Hydra leather": 514,
+      "Hydra's claw": 1001,
+      "Dragon thrownaxe": 2000,
+      "Jar of chemicals": 2000,
+      "Dragon knife": 2001,
+      "Ikkle hydra": 3000
+    },
+    "Amoxliatl": {
+      "Pendant of ates (inert)": 25,
+      "Glacial temotli": 100,
+      "Moxi": 3000
+    },
+    "Araxxor": {
+      "Noxious blade": 200,
+      "Noxious point": 200,
+      "Noxious pommel": 200,
+      "Araxyte head": 250,
+      "Araxyte fang": 600,
+      "Jar of venom": 1500,
+      "Nid": 3000
+    },
+    "Artio": {
+      "Dragon 2h sword": 358,
+      "Dragon pickaxe": 358,
+      "Claws of Callisto": 618,
+      "Tyrannical ring": 716,
+      "Voidwaker hilt": 912,
+      "Callisto cub": 2800
+    },
+    "Barrows Chests": {
+      "Dragon med helm": 1012,
+      "Ahrim's hood": 2448,
+      "Ahrim's robetop": 2448,
+      "Ahrim's robeskirt": 2448,
+      "Ahrim's staff": 2448,
+      "Dharok's helm": 2448,
+      "Dharok's platebody": 2448,
+      "Dharok's platelegs": 2448,
+      "Dharok's greataxe": 2448,
+      "Guthan's helm": 2448,
+      "Guthan's platebody": 2448,
+      "Guthan's chainskirt": 2448,
+      "Guthan's warspear": 2448,
+      "Karil's coif": 2448,
+      "Karil's leathertop": 2448,
+      "Karil's leatherskirt": 2448,
+      "Karil's crossbow": 2448,
+      "Torag's helm": 2448,
+      "Torag's platebody": 2448,
+      "Torag's platelegs": 2448,
+      "Torag's hammers": 2448,
+      "Verac's helm": 2448,
+      "Verac's brassard": 2448,
+      "Verac's plateskirt": 2448,
+      "Verac's flail": 2448
+    },
+    "Bryophyta": {
+      "Bryophyta's essence": 118
+    },
+    "Callisto": {
+      "Claws of Callisto": 196,
+      "Dragon 2h sword": 256,
+      "Dragon pickaxe": 256,
+      "Voidwaker hilt": 360,
+      "Tyrannical ring": 512,
+      "Callisto cub": 1500
+    },
+    "Calvar'ion": {
+      "Dragon 2h sword": 358,
+      "Dragon pickaxe": 358,
+      "Skull of vet'ion": 618,
+      "Ring of the gods": 716,
+      "Voidwaker blade": 912,
+      "Vet'ion jr.": 2800
+    },
+    "Cerberus": {
+      "Key master teleport": 65,
+      "Primordial crystal": 520,
+      "Pegasian crystal": 520,
+      "Eternal crystal": 520,
+      "Smouldering stone": 520,
+      "Jar of souls": 2000,
+      "Hellpuppy": 3000
+    },
+    "Chambers of Xeric": {
+      "Dexterous prayer scroll": 4,
+      "Arcane prayer scroll": 4,
+      "Dragon hunter crossbow": 17,
+      "Twisted buckler": 17,
+      "Dragon claws": 23,
+      "Ancestral hat": 23,
+      "Ancestral robe top": 23,
+      "Ancestral robe bottom": 23,
+      "Dinh's bulwark": 23,
+      "Twisted bow": 35,
+      "Elder maul": 35,
+      "Kodai insignia": 35,
+      "Twisted ancestral colour kit": 75,
+      "Metamorphic dust": 400,
+      "Olmlet": 1765
+    },
+    "Chambers of Xeric: Challenge Mode": {
+      "Torn prayer scroll": 17,
+      "Dark relic": 17,
+      "Olmlet": 53,
+      "Twisted ancestral colour kit": 75,
+      "Onyx": 128,
+      "Dexterous prayer scroll": 345,
+      "Arcane prayer scroll": 345,
+      "Metamorphic dust": 400,
+      "Dragon hunter crossbow": 1725,
+      "Twisted buckler": 1725,
+      "Dragon claws": 2300,
+      "Dinh's bulwark": 2300,
+      "Ancestral hat": 2300,
+      "Ancestral robe top": 2300,
+      "Ancestral robe bottom": 2300,
+      "Twisted bow": 3450,
+      "Elder maul": 3450,
+      "Kodai insignia": 3450
+    },
+    "Chaos Elemental": {
+      "Dragon 2h sword": 64,
+      "Dragon pickaxe": 256,
+      "Pet chaos elemental": 300
+    },
+    "Chaos Fanatic": {
+      "Ancient staff": 128,
+      "Odium shard 1": 256,
+      "Malediction shard 1": 256,
+      "Pet chaos elemental": 1000
+    },
+    "Commander Zilyana": {
+      "Saradomin sword": 127,
+      "Saradomin's light": 254,
+      "Armadyl crossbow": 508,
+      "Saradomin hilt": 508,
+      "Godsword shard 1": 762,
+      "Godsword shard 2": 762,
+      "Godsword shard 3": 762,
+      "Pet zilyana": 5000
+    },
+    "Corporeal Beast": {
+      "Jar of spirits": 1000,
+      "Spectral sigil": 1365,
+      "Arcane sigil": 1365,
+      "Elysian sigil": 4095,
+      "Pet dark core": 5000
+    },
+    "Crazy Archaeologist": {
+      "Fedora": 128,
+      "Odium shard 2": 256,
+      "Malediction shard 2": 256
+    },
+    "Dagannoth Prime": {
+      "Mud battlestaff": 128,
+      "Dragon axe": 128,
+      "Farseer helm": 128,
+      "Skeletal top": 128,
+      "Skeletal bottoms": 128,
+      "Seers ring": 128,
+      "Pet dagannoth prime": 5000
+    },
+    "Dagannoth Rex": {
+      "Berserker ring": 128,
+      "Warrior ring": 128,
+      "Dragon axe": 128,
+      "Pet dagannoth rex": 5000
+    },
+    "Dagannoth Supreme": {
+      "Archer helm": 128,
+      "Archers ring": 128,
+      "Dragon axe": 128,
+      "Seercull": 128,
+      "Spined body": 128,
+      "Spined chaps": 128,
+      "Fremennik helm": 128,
+      "Fremennik blade": 128,
+      "Fremennik shield": 128,
+      "Pet dagannoth supreme": 5000
+    },
+    "Deranged Archaeologist": {
+      "Steel ring": 44
+    },
+    "Duke Sucellus": {
+      "Chromium ingot": 240,
+      "Magus vestige": 720,
+      "Eye of the duke": 720,
+      "Virtus mask": 2160,
+      "Virtus robe top": 2160,
+      "Virtus robe bottom": 2160,
+      "Baron": 2500
+    },
+    "General Graardor": {
+      "Bandos chestplate": 381,
+      "Bandos tassets": 381,
+      "Bandos boots": 381,
+      "Bandos hilt": 508,
+      "Godsword shard 1": 762,
+      "Godsword shard 2": 762,
+      "Godsword shard 3": 762,
+      "Pet general graardor": 5000
+    },
+    "Giant Mole": {
+      "Immaculate mole skin": 50,
+      "Baby mole": 3000
+    },
+    "Grotesque Guardians": {
+      "Granite maul": 250,
+      "Granite gloves": 500,
+      "Granite ring": 500,
+      "Granite hammer": 750,
+      "Black tourmaline core": 1000,
+      "Noon": 3000,
+      "Jar of stone": 5000
+    },
+    "Hespori": {
+      "Bottomless compost bucket": 35,
+      "Tangleroot": 5375
+    },
+    "K'ril Tsutsaroth": {
+      "Steam battlestaff": 127,
+      "Zamorakian spear": 127,
+      "Staff of the dead": 508,
+      "Zamorak hilt": 508,
+      "Godsword shard 1": 762,
+      "Godsword shard 2": 762,
+      "Godsword shard 3": 762,
+      "Pet k'ril tsutsaroth": 5000
+    },
+    "Kalphite Queen": {
+      "Kq head": 128,
+      "Dragon chainbody": 128,
+      "Dragon 2h sword": 256,
+      "Dragon pickaxe": 400,
+      "Jar of sand": 2000,
+      "Kalphite princess": 3000
+    },
+    "King Black Dragon": {
+      "Dragon pickaxe": 1000,
+      "Prince black dragon": 3000,
+      "Draconic visage": 5000
+    },
+    "Kraken": {
+      "Kraken tentacle": 400,
+      "Trident of the seas (full)": 512,
+      "Jar of dirt": 1000,
+      "Pet kraken": 3000
+    },
+    "Kree'arra": {
+      "Armadyl helmet": 381,
+      "Armadyl chestplate": 381,
+      "Armadyl chainskirt": 381,
+      "Armadyl hilt": 508,
+      "Godsword shard 1": 762,
+      "Godsword shard 2": 762,
+      "Godsword shard 3": 762,
+      "Pet kree'arra": 5000
+    },
+    "Lunar Chests": {
+      "Eclipse atlatl": 224,
+      "Eclipse moon helm": 224,
+      "Eclipse moon chestplate": 224,
+      "Eclipse moon tassets": 224,
+      "Blue moon spear": 224,
+      "Blue moon helm": 224,
+      "Blue moon chestplate": 224,
+      "Blue moon tassets": 224,
+      "Blood moon helm": 224,
+      "Blood moon chestplate": 224,
+      "Blood moon tassets": 224,
+      "Dual macuahuitl": 224
+    },
+    "Mimic": {
+      "Ring of 3rd age": 42,
+      "3rd age full helmet": 5750,
+      "3rd age platebody": 5750,
+      "3rd age platelegs": 5750,
+      "3rd age plateskirt": 5750,
+      "3rd age kiteshield": 5750,
+      "3rd age range coif": 5750,
+      "3rd age range top": 5750,
+      "3rd age range legs": 5750,
+      "3rd age vambraces": 5750,
+      "3rd age mage hat": 5750,
+      "3rd age robe top": 5750,
+      "3rd age robe": 5750,
+      "3rd age amulet": 5750,
+      "3rd age longsword": 5750,
+      "3rd age bow": 5750,
+      "3rd age wand": 5750,
+      "3rd age cloak": 5750,
+      "3rd age druidic robe top": 5750,
+      "3rd age druidic robe bottoms": 5750,
+      "3rd age druidic cloak": 5750,
+      "3rd age druidic staff": 5750,
+      "3rd age pickaxe": 5750,
+      "3rd age axe": 5750
+    },
+    "Nex": {
+      "Torva full helm (damaged)": 258,
+      "Torva platebody (damaged)": 258,
+      "Torva platelegs (damaged)": 258,
+      "Nihil horn": 258,
+      "Zaryte vambraces": 258,
+      "Nexling": 500,
+      "Ancient hilt": 516
+    },
+    "Nightmare": {
+      "Nightmare staff": 300,
+      "Inquisitor's great helm": 420,
+      "Inquisitor's hauberk": 420,
+      "Inquisitor's plateskirt": 420,
+      "Inquisitor's mace": 750,
+      "Little nightmare": 800,
+      "Eldritch orb": 960,
+      "Harmonised orb": 960,
+      "Volatile orb": 960,
+      "Jar of dreams": 1900
+    },
+    "Obor": {
+      "Hill giant club": 118
+    },
+    "Phantom Muspah": {
+      "Frozen cache": 25,
+      "Ancient icon": 50,
+      "Venator shard": 100,
+      "Muphin": 2500
+    },
+    "Phosani's Nightmare": {
+      "Parasitic egg": 200,
+      "Nightmare staff": 507,
+      "Inquisitor's great helm": 700,
+      "Inquisitor's hauberk": 700,
+      "Inquisitor's plateskirt": 700,
+      "Inquisitor's mace": 1129,
+      "Little nightmare": 1400,
+      "Eldritch orb": 1600,
+      "Harmonised orb": 1600,
+      "Volatile orb": 1600,
+      "Jar of dreams": 4000
+    },
+    "Sarachnis": {
+      "Giant egg sac (full)": 20,
+      "Pristine spider silk": 50,
+      "Dragon med helm": 192,
+      "Sarachnis cudgel": 384,
+      "Jar of eyes": 2000,
+      "Sraracha": 3000
+    },
+    "Scorpia": {
+      "Dragon scimitar": 128,
+      "Dragon 2h sword": 128,
+      "Mystic robe top": 128,
+      "Mystic robe bottom": 128,
+      "Odium shard 3": 256,
+      "Malediction shard 3": 256,
+      "Scorpia's offspring": 2016
+    },
+    "Scurrius": {
+      "Scurrius' spine": 33,
+      "Scurry": 3000
+    },
+    "Skotizo": {
+      "Dark claw": 25,
+      "Dark totem base": 43,
+      "Dark totem middle": 43,
+      "Dark totem top": 43,
+      "Skotos": 65,
+      "Dark totem": 128,
+      "Jar of darkness": 200
+    },
+    "Sol Heredit": {
+      "Sunfire fanatic helm": 21,
+      "Sunfire fanatic cuirass": 21,
+      "Sunfire fanatic chausses": 21,
+      "Echo crystal": 32,
+      "Tonalztics of Ralos": 192,
+      "Smol heredit": 200
+    },
+    "Spindel": {
+      "Dragon 2h sword": 358,
+      "Dragon pickaxe": 358,
+      "Fangs of venenatis": 618,
+      "Treasonous ring": 716,
+      "Voidwaker gem": 912,
+      "Venenatis spiderling": 2800
+    },
+    "Tempoross": {
+      "Spirit flakes": 4,
+      "Casket": 20,
+      "Soaked page": 54,
+      "Fish barrel": 400,
+      "Tackle box": 400,
+      "Big harpoonfish": 1600,
+      "Tome of water (empty)": 1600,
+      "Dragon harpoon": 8000,
+      "Tiny tempor": 8000
+    },
+    "The Corrupted Gauntlet": {
+      "Crystal Weapon Seed": 50,
+      "Crystal Armour Seed": 50,
+      "Enhanced Crystal Weapon Seed": 400,
+      "Youngllef": 800
+    },
+    "The Gauntlet": {
+      "Crystal weapon seed": 120,
+      "Crystal armour seed": 120,
+      "Enhanced crystal weapon seed": 2000,
+      "Youngllef": 2000
+    },
+    "The Hueycoatl": {
+      "Hueycoatl hide": 29,
+      "Tome of earth (empty)": 90,
+      "Dragon hunter wand": 105,
+      "Huberte": 400
+    },
+    "The Leviathan": {
+      "Scarred tablet": 26,
+      "Awakener's orb": 54,
+      "Smoke quartz": 206,
+      "Chromium ingot": 256,
+      "Venator vestige": 768,
+      "Leviathan's lure": 768,
+      "Virtus mask": 2304,
+      "Virtus robe top": 2304,
+      "Virtus robe bottom": 2304,
+      "Lil'viathan": 2500
+    },
+    "The Royal Titans": {
+      "Giantsoul amulet": 16,
+      "Fire element staff crown": 75,
+      "Mystic vigour prayer scroll": 75,
+      "Ice element staff crown": 75,
+      "Deadeye prayer scroll": 75,
+      "Bran": 3000
+    },
+    "The Whisperer": {
+      "Sirenic tablet": 26,
+      "Awakener's orb": 35,
+      "Chromium ingot": 171,
+      "Shadow quartz": 209,
+      "Bellator vestige": 512,
+      "Siren's staff": 512,
+      "Virtus mask": 1536,
+      "Virtus robe top": 1536,
+      "Virtus robe bottom": 1536,
+      "Wisp": 2000
+    },
+    "Theatre of Blood": {
+      "Avernic defender hilt": 22,
+      "Ghrazi rapier": 87,
+      "Sanguinesti staff": 87,
+      "Justiciar faceguard": 87,
+      "Justiciar chestguard": 87,
+      "Justiciar legguards": 87,
+      "Holy ornament kit": 100,
+      "Sanguine ornament kit": 150,
+      "Scythe of vitur": 173,
+      "Sanguine dust": 275,
+      "Lil' zik": 650
+    },
+    "Theatre of Blood: Hard Mode": {
+      "Avernic defender hilt": 20,
+      "Ghrazi rapier": 69,
+      "Sanguinesti staff (uncharged)": 69,
+      "Justiciar faceguard": 69,
+      "Justiciar chestguard": 69,
+      "Justiciar legguards": 69,
+      "Holy ornament kit": 100,
+      "Scythe of vitur (uncharged)": 139,
+      "Sanguine ornament kit": 150,
+      "Sanguine dust": 275,
+      "Lil' zik": 500
+    },
+    "Thermonuclear Smoke Devil": {
+      "Occult necklace": 350,
+      "Smoke battlestaff": 512,
+      "Dragon chainbody": 2000,
+      "Jar of smoke": 2000,
+      "Pet smoke devil": 3000
+    },
+    "Tombs of Amascut": {
+      "Osmumten's fang": 3,
+      "Lightbearer": 3,
+      "Elidinis' ward": 8,
+      "Thread of elidinis": 10,
+      "Masori mask": 12,
+      "Masori body": 12,
+      "Masori chaps": 12,
+      "Tumeken's shadow": 24,
+      "Eye of the corruptor": 50,
+      "Jewel of the sun": 50,
+      "Breach of the scarab": 50,
+      "Jewel of amascut": 50
+    },
+    "Tombs of Amascut: Expert Mode": {
+      "Thread of elidinis": 10,
+      "Breach of the scarab": 50,
+      "Eye of the corruptor": 50,
+      "Jewel of the sun": 50,
+      "Jewel of amascut": 50,
+      "Osmumten's fang": 77,
+      "Lightbearer": 77,
+      "Elidinis' ward": 180,
+      "Masori mask": 270,
+      "Masori body": 270,
+      "Masori chaps": 270,
+      "Tumeken's shadow": 540,
+      "Tumeken's guardian": 700
+    },
+    "TzKal-Zuk": {
+      "Jal-nib-rek": 100
+    },
+    "TzTok-Jad": {
+      "Tzrek-jad": 200
+    },
+    "Vardorvis": {
+      "Strangled tablet": 26,
+      "Awakener's orb": 81,
+      "Blood quartz": 204,
+      "Chromium ingot": 363,
+      "Ultor vestige": 1088,
+      "Executioner's axe head": 1088,
+      "Butch": 3000,
+      "Virtus mask": 3264,
+      "Virtus robe top": 3264,
+      "Virtus robe bottom": 3264
+    },
+    "Venenatis": {
+      "Fangs of venenatis": 196,
+      "Dragon 2h sword": 256,
+      "Dragon pickaxe": 256,
+      "Voidwaker gem": 360,
+      "Treasonous ring": 512,
+      "Venenatis spiderling": 1500
+    },
+    "Vet'ion": {
+      "Skull of vet'ion": 196,
+      "Dragon 2h sword": 256,
+      "Dragon pickaxe": 256,
+      "Voidwaker blade": 360,
+      "Ring of the gods": 512,
+      "Vet'ion jr.": 1500
+    },
+    "Vorkath": {
+      "Vorkath's head": 50,
+      "Dragonbone necklace": 1000,
+      "Jar of decay": 3000,
+      "Vorki": 3000,
+      "Draconic visage": 5000,
+      "Skeletal visage": 5000
+    },
+    "Wintertodt": {
+      "Burnt page": 45,
+      "Pyromancer hood": 150,
+      "Pyromancer garb": 150,
+      "Pyromancer robe": 150,
+      "Pyromancer boots": 150,
+      "Warm gloves": 150,
+      "Bruma torch": 150,
+      "Tome of fire": 1000,
+      "Phoenix": 5000,
+      "Dragon axe": 10000
+    },
+    "Zalcano": {
+      "Crystal tool seed": 205,
+      "Zalcano shard": 750,
+      "Smolcano": 2250,
+      "Uncut onyx": 8000
+    },
+    "Zulrah": {
+      "Tanzanite fang": 512,
+      "Magic fang": 512,
+      "Serpentine visage": 512,
+      "Uncut onyx": 512,
+      "Jar of swamp": 3000,
+      "Pet snakeling": 4000,
+      "Tanzanite mutagen": 6554,
+      "Magma mutagen": 6554
+    }
+  }
+}

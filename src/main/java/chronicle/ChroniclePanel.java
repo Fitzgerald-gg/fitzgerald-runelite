@@ -117,7 +117,6 @@ class ChroniclePanel extends PluginPanel
 	private static Map<String, Map<String, List<String>>> taxonomy;
 	// Cloud item lists already fetched this session, keyed by source — the
 	// drill fetches each source at most once.
-	private final Map<String, List<ChronicleApiClient.LedgerItem>> cloudBagCache = new LinkedHashMap<>();
 
 	ChroniclePanel(ChroniclePlugin plugin)
 	{
@@ -679,35 +678,30 @@ class ChroniclePanel extends PluginPanel
 			p.add(vgap(6));
 		}
 
-		if (plugin.cloudActive())
+		if (journeyCache != null)
 		{
-			if (journeyCache != null)
-			{
-				addJourney(p, journeyCache);
-			}
-			else if (journeyFetching)
-			{
-				p.add(note("Fetching the task journey from your cloud record…"));
-			}
-			else
-			{
-				journeyFetching = true;
-				plugin.fetchSlayerJourney(j -> SwingUtilities.invokeLater(() ->
-				{
-					journeyFetching = false;
-					journeyCache = j;
-					if (view == View.SLAYER)
-					{
-						rebuild();
-					}
-				}));
-				p.add(note("Fetching the task journey from your cloud record…"));
-			}
+			addJourney(p, journeyCache);
+		}
+		else if (journeyFetching)
+		{
+			p.add(note("Reading the task journey from the journal…"));
 		}
 		else
 		{
-			p.add(note("The task-by-task journey rides with cloud sync — the "
-				+ "journal keeps your Kill Log and completions meanwhile."));
+			journeyFetching = true;
+			plugin.fetchSlayerJourney(j -> SwingUtilities.invokeLater(() ->
+			{
+				journeyFetching = false;
+				// A null read (store not ready) settles as an empty journey so
+				// the view lands on its empty-state note, never a stuck spinner.
+				journeyCache = j != null ? j : new ChronicleApiClient.SlayerJourney(
+					0, 0, 0, 0, new ArrayList<>());
+				if (view == View.SLAYER)
+				{
+					rebuild();
+				}
+			}));
+			p.add(note("Reading the task journey from the journal…"));
 		}
 		p.add(vgap(6));
 
@@ -756,7 +750,7 @@ class ChroniclePanel extends PluginPanel
 	{
 		if (j.tasks.isEmpty() && j.completedTasks == 0)
 		{
-			p.add(note("No tasks on the cloud record yet — they collect as "
+			p.add(note("No tasks in the journal yet — they collect as "
 				+ "you play with the Slayer plugin on."));
 			return;
 		}
@@ -1028,7 +1022,7 @@ class ChroniclePanel extends PluginPanel
 					TASK_DAY.format(Instant.ofEpochMilli(sr.firstMs)), null));
 			}
 			// The chase, when the dryness ledger knows one for this source.
-			if (grindsCache == null && !grindsFetching && plugin.cloudActive())
+			if (grindsCache == null && !grindsFetching)
 			{
 				grindsFetching = true;
 				final String src = sr.name;
@@ -1118,56 +1112,6 @@ class ChroniclePanel extends PluginPanel
 				});
 				p.add(vgap(3));
 				p.add(more);
-			}
-			return p;
-		}
-		// Empty bag: the one-shot cloud fetch as a fallback (BYO servers
-		// without the whole-ledger endpoint, pre-adoption sessions).
-		if (sr != null && sr.cloudItems > 0 && plugin.cloudActive())
-		{
-			List<ChronicleApiClient.LedgerItem> cloud = cloudBagCache.get(sr.name);
-			if (cloud != null && !cloud.isEmpty())
-			{
-				p.add(group("Loot"));
-				int mounted = 0;
-				for (ChronicleApiClient.LedgerItem it : cloud)
-				{
-					if (mounted++ >= 25)
-					{
-						break;
-					}
-					JPanel r = row(it.name + (it.qty > 1 ? " ×" + fmt(it.qty) : ""),
-						gp(it.value) + " gp", null);
-					r.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
-					final String itm = it.name;
-					r.addMouseListener(clicker(() -> openItem(itm)));
-					p.add(r);
-				}
-			}
-			else if (cloud != null)
-			{
-				p.add(note("Couldn't reach the cloud ledger just now."));
-			}
-			else if (!cloudBagCache.containsKey(sr.name))
-			{
-				p.add(note("Fetching the item list…"));
-				cloudBagCache.put(sr.name, null);
-				final String src = sr.name;
-				plugin.fetchSourceItems(src, items ->
-				{
-					cloudBagCache.put(src, items != null ? items : java.util.Collections.emptyList());
-					SwingUtilities.invokeLater(() ->
-					{
-						if (src.equals(detailSource))
-						{
-							rebuild();
-						}
-					});
-				});
-			}
-			else
-			{
-				p.add(note("Fetching the item list…"));
 			}
 			return p;
 		}
@@ -2194,62 +2138,31 @@ class ChroniclePanel extends PluginPanel
 		return p;
 	}
 
-	/** Cloud self-service: status, sync actions, privacy — shown only when syncing. */
+	/** Cloud sync status — upward mirror only, so status + a push button is all there is. */
 	private JPanel buildCloudSection()
 	{
 		JPanel s = column();
-		JLabel t = new JLabel("Cloud");
+		JLabel t = new JLabel("Cloud sync");
 		t.setFont(FontManager.getRunescapeBoldFont());
 		t.setForeground(accent());
 		t.setAlignmentX(Component.LEFT_ALIGNMENT);
 		s.add(t);
 		s.add(vgap(4));
 		String rsn = plugin.enrolledRsn();
-		boolean enrolled = rsn != null && !rsn.isEmpty();
-		s.add(row(enrolled ? "Enrolled: " + rsn : "Not enrolled", "", null));
+		if (rsn != null && !rsn.isEmpty())
+		{
+			s.add(row("Mirroring " + rsn + " upward", "", null));
+		}
 		s.add(row(plugin.statusLine(), "", null));
+		s.add(vgap(4));
+		s.add(note("The journal on this computer is the record; the server only "
+			+ "receives a copy. Nothing here depends on it."));
 		s.add(vgap(6));
-
-		JPanel buttons = new JPanel(new GridLayout(0, 1, 0, 5));
-		buttons.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		buttons.setAlignmentX(Component.LEFT_ALIGNMENT);
 		JButton push = new JButton("Push stats now");
 		push.addActionListener(e -> plugin.actionPushNow());
-		buttons.add(push);
-		JButton reEnrol = new JButton("Re-enrol this account");
-		reEnrol.addActionListener(e -> plugin.actionReEnrol());
-		buttons.add(reEnrol);
-		JButton open = new JButton("Open my page");
-		open.setEnabled(enrolled);
-		open.addActionListener(e ->
-		{
-			if (rsn != null)
-			{
-				LinkBrowser.browse(plugin.serverBaseUrl() + "/osrs/"
-					+ rsn.trim().toLowerCase(Locale.ROOT).replace(' ', '-'));
-			}
-		});
-		buttons.add(open);
-		JButton lock = new JButton(plugin.pageLocked() ? "Unlock page" : "Lock page (set passphrase)");
-		lock.setEnabled(enrolled);
-		lock.addActionListener(e -> onLockClicked());
-		buttons.add(lock);
-		JButton list = new JButton(plugin.publicListed() ? "Unlist from directory" : "List in public directory");
-		list.setEnabled(enrolled);
-		list.addActionListener(e -> plugin.actionSetPublic(!plugin.publicListed()));
-		buttons.add(list);
-		Long pending = plugin.deletePendingTs();
-		JButton delete = new JButton(pending != null ? "Cancel deletion" : "Delete my cloud data");
-		delete.setEnabled(enrolled);
-		delete.addActionListener(e -> onDeleteClicked());
-		buttons.add(delete);
-		s.add(buttons);
-		if (pending != null)
-		{
-			s.add(vgap(4));
-			s.add(note("Deletion scheduled for " + WHEN.format(Instant.ofEpochSecond(pending))
-				+ " — cancel above to keep your data."));
-		}
+		push.setAlignmentX(Component.LEFT_ALIGNMENT);
+		push.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		s.add(push);
 		return s;
 	}
 
@@ -2761,52 +2674,6 @@ class ChroniclePanel extends PluginPanel
 				r.run();
 			}
 		};
-	}
-
-	private void onLockClicked()
-	{
-		if (plugin.pageLocked())
-		{
-			int ok = JOptionPane.showConfirmDialog(this,
-				"Remove the password lock from your page?\nAnyone with the link will be able to view it again.",
-				"Unlock page", JOptionPane.OK_CANCEL_OPTION);
-			if (ok == JOptionPane.OK_OPTION)
-			{
-				plugin.actionSetLock("");
-			}
-			return;
-		}
-		JPasswordField field = new JPasswordField();
-		int ok = JOptionPane.showConfirmDialog(this, field,
-			"Set a passphrase — viewers of your page will need it", JOptionPane.OK_CANCEL_OPTION);
-		if (ok != JOptionPane.OK_OPTION)
-		{
-			return;
-		}
-		String pw = new String(field.getPassword());
-		if (pw.trim().isEmpty())
-		{
-			JOptionPane.showMessageDialog(this, "Empty passphrase — nothing changed.");
-			return;
-		}
-		plugin.actionSetLock(pw);
-	}
-
-	private void onDeleteClicked()
-	{
-		if (plugin.deletePendingTs() != null)
-		{
-			plugin.actionScheduleDelete(true);   // cancel
-			return;
-		}
-		int ok = JOptionPane.showConfirmDialog(this,
-			"Schedule deletion of your cloud profile and all its data?\n"
-				+ "It is removed in 7 days. You can cancel any time before then.",
-			"Delete my data", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
-		if (ok == JOptionPane.OK_OPTION)
-		{
-			plugin.actionScheduleDelete(false);
-		}
 	}
 
 	// ------------------------------------------------------------------

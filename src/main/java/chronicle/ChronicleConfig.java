@@ -42,11 +42,13 @@ public interface ChronicleConfig extends Config
 	@ConfigItem(
 		keyName = "cloudSync",
 		name = "Enable cloud sync",
-		description = "ALSO send your captured activity (loot, levels, kill counts, "
+		description = "ALSO send a copy of your journal (loot, levels, kill counts, "
 			+ "collection log, clues, quests, diaries, combat achievements, slayer "
-			+ "tasks, pets, deaths, group-storage movements) to the server below, so "
-			+ "it can appear on a profile page there. Off by default: without this, "
-			+ "Chronicle never touches the network. Requires a server URL.",
+			+ "tasks, pets, deaths, group-storage movements) UPWARD to the server "
+			+ "below. One-way: the plugin never reads anything back, and every "
+			+ "feature works identically with this off. Off by default: without "
+			+ "this, Chronicle never touches the network. Requires a server URL "
+			+ "and a token.",
 		warning = "This feature submits your IP address, and your own account's activity, "
 			+ "to the 3rd-party server you configure below — a server not controlled or "
 			+ "verified by the RuneLite developers",
@@ -74,10 +76,10 @@ public interface ChronicleConfig extends Config
 
 	@ConfigItem(
 		keyName = "manualToken",
-		name = "Cloud token override",
-		description = "Paste an existing token to use this account on the configured "
-			+ "server without self-enrolling (a re-install, or a second device). "
-			+ "Leave blank to enrol normally.",
+		name = "Cloud token",
+		description = "The push token for this account on the configured server "
+			+ "(issued by that server's operator). Cloud sync sends nothing "
+			+ "without one.",
 		position = 12,
 		section = advancedSection
 	)

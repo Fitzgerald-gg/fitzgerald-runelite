@@ -353,6 +353,10 @@ public class PanelPreviewTest
 		s.feed = store.feedNewest(2000);
 		s.store = store;
 		s.history = new HistoryLog().read(dir, "Oxli");
+		// The real journey + dryness, through the real local engines.
+		s.journey = store.slayerJourney();
+		s.consumVals = store.consumableValues();
+		s.grinds = new GrindBook().grinds(store.clogSnapshot(), store.dropSources());
 		return s;
 	}
 
@@ -580,34 +584,9 @@ public class PanelPreviewTest
 		}
 
 		@Override
-		boolean pageLocked()
-		{
-			return false;
-		}
-
-		@Override
-		boolean publicListed()
-		{
-			return false;
-		}
-
-		@Override
-		Long deletePendingTs()
-		{
-			return null;
-		}
-
-		@Override
 		net.runelite.client.game.ItemManager items()
 		{
 			return itemManager;
-		}
-
-		@Override
-		void fetchSourceItems(String source,
-			java.util.function.Consumer<java.util.List<ChronicleApiClient.LedgerItem>> onDone)
-		{
-			onDone.accept(null);
 		}
 
 		@Override
@@ -620,10 +599,6 @@ public class PanelPreviewTest
 		{
 		}
 
-		@Override
-		void actionReEnrol()
-		{
-		}
 	}
 
 	// ------------------------------------------------------------------

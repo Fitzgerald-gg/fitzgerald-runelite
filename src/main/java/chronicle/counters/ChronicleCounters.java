@@ -32,9 +32,13 @@ public class ChronicleCounters
 	private final Client client;
 	private final ChronicleConfig config;
 	private final StatStore store;
-	private final SkillChatBuffer skillBuffer;
 	private final ItemManager itemManager;
 	private final SkillDeriver skillDeriver;
+
+	// Where per-consumable gp lands (the plugin wires this to the journal's
+	// lifetime consumable-value map). Volatile: set at startUp, read on the
+	// client thread when the tracker array is lazily built.
+	private volatile java.util.function.BiConsumer<String, Integer> consumableSink;
 
 	// Optional: RuneLite's core XP Tracker plugin. Absent in a dev-mode client
 	// (or if the user disables XP Tracker) — SkillingStatTracker null-guards its
@@ -49,14 +53,18 @@ public class ChronicleCounters
 
 	@Inject
 	ChronicleCounters(Client client, ChronicleConfig config, StatStore store,
-		SkillChatBuffer skillBuffer, ItemManager itemManager, SkillDeriver skillDeriver)
+		ItemManager itemManager, SkillDeriver skillDeriver)
 	{
 		this.client = client;
 		this.config = config;
 		this.store = store;
-		this.skillBuffer = skillBuffer;
 		this.itemManager = itemManager;
 		this.skillDeriver = skillDeriver;
+	}
+
+	public void setConsumableSink(java.util.function.BiConsumer<String, Integer> sink)
+	{
+		this.consumableSink = sink;
 	}
 
 	private StatTracker[] trackers()
@@ -67,8 +75,8 @@ public class ChronicleCounters
 				new GoldStatTracker(store, client),
 				new ItemStatTracker(store, client, itemManager),
 				new MovementStatTracker(store, client),
-				new SkillingStatTracker(store, client, xpTrackerService, skillBuffer, skillDeriver),
-				new FoodStatTracker(store, client, itemManager),
+				new SkillingStatTracker(store, client, xpTrackerService, skillDeriver),
+				new FoodStatTracker(store, client, itemManager, consumableSink),
 				new NPCStatTracker(store),
 				new ExperienceStatTracker(store),
 				new MagicStatTracker(store, client),

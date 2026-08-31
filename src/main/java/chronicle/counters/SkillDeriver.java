@@ -232,6 +232,53 @@ public class SkillDeriver
 		}
 	}
 
+	// The residual CHAT channel: the handful of signals no xp tuple carries —
+	// 0-xp failures (burns, failed pickpockets), lap lines (not 1:1 with
+	// obstacle xp) and the seeds-planted milestone. Port of the server's
+	// osrs_skill_rules.json fixed rules; SkillingStatTracker pre-filters to
+	// these prefixes, so this stays cheap on the chat path.
+	private static final java.util.regex.Pattern FAILED_PICKPOCKET =
+		java.util.regex.Pattern.compile("You fail to pick (?:the )?([\\w'. -]+?)'s pocket.*");
+
+	/** Derive the residual chat-only counters and fold them into the stat store. */
+	void applyChat(String msg)
+	{
+		if (msg == null || msg.isEmpty())
+		{
+			return;
+		}
+		if (msg.contains("You accidentally burn"))
+		{
+			statStore.incrementStat("foodBurned");
+			return;
+		}
+		if (msg.contains("You plant "))
+		{
+			statStore.incrementStat("seedsPlanted");
+			return;
+		}
+		if (msg.contains("Rooftop lap"))
+		{
+			statStore.incrementStat("rooftopAgilityLaps");
+			return;
+		}
+		if (msg.contains("lap count"))
+		{
+			statStore.incrementStat("normalAgilityLaps");
+			return;
+		}
+		java.util.regex.Matcher m = FAILED_PICKPOCKET.matcher(msg);
+		if (m.matches())
+		{
+			statStore.incrementStat("failedPickPockets");
+			String typed = camel(m.group(1));
+			if (!typed.isEmpty())
+			{
+				statStore.incrementStat(typed + "FailedPickpockets");
+			}
+		}
+	}
+
 	List<Map.Entry<String, Integer>> derive(String tuple)
 	{
 		String[] parts = (tuple == null ? "" : tuple).split("\\|", -1);

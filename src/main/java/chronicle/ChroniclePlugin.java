@@ -15,14 +15,11 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.function.BiConsumer;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -105,9 +102,6 @@ public class ChroniclePlugin extends Plugin
 	private chronicle.counters.StatStore statStore;
 
 	@Inject
-	private chronicle.counters.SkillChatBuffer skillBuffer;
-
-	@Inject
 	private ClogCapture clogCapture;
 
 	@Inject
@@ -132,53 +126,55 @@ public class ChroniclePlugin extends Plugin
 	private volatile Map<String, Integer> cachedSnapshot;
 	private volatile String cachedAccountType;
 
-	// Counter cache lifecycle: seeded from the server once per login before we
-	// push absolutes; `seeding` guards against concurrent seed fetches.
-	private volatile boolean countersSeeded;
-	private volatile boolean seeding;
-	// A failed seed retries on its own short backoff (5s doubling to 60s) rather
-	// than waiting out the multi-minute push loop — the longer we sit unseeded,
-	// the more of the session rides on the final-logout push alone.
-	private ScheduledFuture<?> seedRetryTask;
-	private int seedRetryDelaySec = SEED_RETRY_MIN_SEC;
-	// After a 409 (server totals ahead of ours — regression guard), the next seed
-	// must FLOOR-merge (per-key max) instead of adding: the store already holds
-	// absolutes, and adding a fresh baseline on top would double-count.
-	private volatile boolean reseedFloor;
-	// Server absolutes waiting to be floored into the journal (see the seed
-	// callback) once the journal's own load has finished.
-	private volatile Map<String, Integer> pendingServerFloor;
-	// The 4th adoption: month-end xp baselines from the cloud's snapshot
-	// archive, one-shot (flag cloudHistoryImported). Stash→apply like the rest.
-	private volatile java.util.List<ChronicleApiClient.WomSnapshot> pendingHistoryAdopt;
-	// The whole per-source item ledger, floored into the local bags each login.
-	private volatile java.util.List<ChronicleApiClient.SourceItemRow> pendingBagsAdopt;
-	// The uncollected ledger, floored into the untaken store each login.
-	private volatile ChronicleApiClient.UntakenLedger pendingUntakenAdopt;
-	// Server-priced consumable values ({key: gp}), floored each login.
-	private volatile java.util.List<String[]> pendingConsumablesAdopt;
-	// True while the stashed feed adoption is the one-shot DEEP import —
-	// its config flag is only written once the adopt actually applies.
-	private volatile boolean pendingFeedDeep;
-	// The cloud ledger's per-source rollup, same lifecycle as the counter floor.
-	private volatile java.util.List<ChronicleApiClient.LedgerSource> pendingDropsAdopt;
-	private volatile java.util.List<ChronicleApiClient.FeedEvent> pendingFeedAdopt;
+	// One inheritance fetch per session at most — a failed attempt waits for the
+	// next login rather than refiring on every refresh cycle.
+	private volatile boolean slayerImportTried;
 
-	private static final int SEED_RETRY_MIN_SEC = 5;
-	private static final int SEED_RETRY_MAX_SEC = 60;
+	// Counters the server computes from OTHER data at read time (untaken loot from
+	// forwarded events; resource value priced from the gathering counters). They can
+	// appear in the journal via old adoptions, but pushing them as counters would
+	// double-present them — the only keys the upward sync withholds.
+	private static final java.util.Set<String> PUSH_EXCLUDE = new java.util.HashSet<>(
+		java.util.Arrays.asList("untakenLootValue", "untakenLootCount", "resourcesGatheredValue"));
+
+	// The prayer-verb forensic correction (see refreshLocal): absolute values
+	// reconciled against the account's Prayer xp ledger, identical to the map the
+	// server migration applied. null = delete the contaminated key outright.
+	private static final Map<String, Long> PRAYER_VERB_FIX = new java.util.HashMap<>();
+	static
+	{
+		PRAYER_VERB_FIX.put("ashesScattered", 4L);
+		PRAYER_VERB_FIX.put("vileAshesScattered", 4L);
+		PRAYER_VERB_FIX.put("abyssalAshesScattered", null);
+		PRAYER_VERB_FIX.put("maliciousAshesScattered", null);
+		PRAYER_VERB_FIX.put("fiendishAshesScattered", null);
+		PRAYER_VERB_FIX.put("abyssalAshesSacrificed", 1093L);
+		PRAYER_VERB_FIX.put("vileAshesSacrificed", 905L);
+		PRAYER_VERB_FIX.put("maliciousAshesSacrificed", 425L);
+		PRAYER_VERB_FIX.put("fiendishAshesSacrificed", 157L);
+		PRAYER_VERB_FIX.put("bonesBuried", 23L);
+		PRAYER_VERB_FIX.put("bigBonesBuried", 8L);
+		PRAYER_VERB_FIX.put("dragonBonesBuried", 4L);
+		PRAYER_VERB_FIX.put("normalBonesBuried", 9L);
+		PRAYER_VERB_FIX.put("lavaDragonBonesBuried", 1L);
+		PRAYER_VERB_FIX.put("bonesBonesBuried", null);
+		PRAYER_VERB_FIX.put("wyrmBonesSacrificed", 258L);
+		PRAYER_VERB_FIX.put("bigBonesSacrificed", 253L);
+		PRAYER_VERB_FIX.put("superiorDragonBonesSacrificed", 201L);
+		PRAYER_VERB_FIX.put("dragonBonesSacrificed", 112L);
+		PRAYER_VERB_FIX.put("frostDragonBonesSacrificed", 105L);
+		PRAYER_VERB_FIX.put("normalBonesSacrificed", 2L);
+	}
+
+	// The wiki drop-rate book for the local dryness ledger (lazy-loaded).
+	private final GrindBook grindBook = new GrindBook();
 
 	// Panel-facing status.
 	private volatile String enrolledRsn;
-	// The logged-in name in local mode (no enrolment happens, but the panel and the
-	// on-disk page still need to know whose account this is).
+	// The logged-in name (the journal's account identity; also the cloud push's
+	// name when sync is on).
 	private volatile String localName;
-	private volatile String statusLine = "Not enrolled yet.";
-
-	// Self-service profile state, mirrored from the server so the panel can show
-	// it. Refreshed on enrol and after each management action.
-	private volatile boolean pageLocked;
-	private volatile boolean publicListed;
-	private volatile Long deletePendingTs;
+	private volatile String statusLine = "Waiting for a login.";
 
 	@Provides
 	ChronicleConfig provideConfig(ConfigManager configManager)
@@ -245,8 +241,17 @@ public class ChroniclePlugin extends Plugin
 		// inference state (inventory snapshots, in-flight clicks) would survive the
 		// blind window with nothing to invalidate it. Clear it here instead.
 		counters.reset();
-		// Native lifetime-counter trackers feed the in-memory StatStore, which the
-		// push loop below flushes to the server.
+		// Native lifetime-counter trackers feed the in-memory StatStore; the
+		// refresh loop folds it into the journal (and the push loop mirrors the
+		// journal upward when cloud sync is on).
+		counters.setConsumableSink((key, gp) ->
+		{
+			String who = localName;
+			if (who != null)
+			{
+				localStore.addConsumableValue(key, gp, who);
+			}
+		});
 		eventBus.register(counters);
 		// Passive collection-log capture — reads the completion fraction on login
 		// and scrapes whatever clog page the player opens themselves; the push loop
@@ -284,7 +289,6 @@ public class ChroniclePlugin extends Plugin
 			pushTask.cancel(false);
 			pushTask = null;
 		}
-		resetSeedBackoff();
 		if (navButton != null)
 		{
 			clientToolbar.removeNavigation(navButton);
@@ -294,11 +298,7 @@ public class ChroniclePlugin extends Plugin
 		pendingEnrolCheck = false;
 		// While we are unregistered no events reach the trackers, so the store stops
 		// tracking reality — and the player may switch accounts before toggling us
-		// back on. Forget both the totals and the fact that we ever seeded, so the
-		// next login must re-seed from the server before it can push anything.
-		countersSeeded = false;
-		reseedFloor = false;   // a cleared store is zero-based again
-		resetSeedBackoff();
+		// back on. Forget the totals so the next login counts its own session.
 		statStore.clear();
 	}
 
@@ -414,7 +414,7 @@ public class ChroniclePlugin extends Plugin
 		});
 		if (cloudActive())
 		{
-			ensureEnrolled(name);
+			adoptToken(name);
 		}
 	}
 
@@ -441,14 +441,12 @@ public class ChroniclePlugin extends Plugin
 					localStore.rebase(localName);
 					executor.submit(() -> localStore.flush(localDir()));
 				}
-				// The counter baseline means different things with cloud on or off (a
-				// cloud session is seeded to server absolutes; a purely local one
-				// counts from zero). Reset so a toggle can't carry one into the other.
-				countersSeeded = false;
+				// The session store restarts from zero either side of the toggle;
+				// the rebase above already banked its increments in the journal.
 				statStore.clear();
 				counters.reset();
 			}
-			// Turning cloud on re-runs the per-login branch so enrolment happens now.
+			// Turning cloud on re-runs the per-login branch so the token adopts now.
 			if (cloudActive() && client.getGameState() == GameState.LOGGED_IN)
 			{
 				pendingEnrolCheck = true;
@@ -458,15 +456,16 @@ public class ChroniclePlugin extends Plugin
 	}
 
 	// ------------------------------------------------------------------
-	// Enrolment
+	// Cloud identity (upward sync only — no enrolment, no downward calls)
 	// ------------------------------------------------------------------
 
-	/** Runs on the client thread (from onGameTick). */
-	private void ensureEnrolled(String name)
+	/**
+	 * Adopt this account's push token: a pasted override from the settings, or
+	 * whatever an earlier install left on the RSProfile. No token means no cloud —
+	 * the journal carries on identically either way. Runs on the client thread.
+	 */
+	private void adoptToken(String name)
 	{
-		// Token override: paste an existing token to skip self-enrolment
-		// (site owner / re-install / second device). It seeds the RSProfile
-		// token slot so the rest of the flow is identical to a normal enrol.
 		String override = trimToNull(config.manualToken());
 		String token = trimToNull(configManager.getRSProfileConfiguration(GROUP, KEY_TOKEN));
 		if (override != null && !override.equals(token))
@@ -474,65 +473,20 @@ public class ChroniclePlugin extends Plugin
 			configManager.setRSProfileConfiguration(GROUP, KEY_TOKEN, override);
 			token = override;
 		}
-		if (token != null)
+		if (token == null)
 		{
-			enrolledRsn = name;
-			cachedToken = token;
-			cachedName = name;
-			statusLine = "Enrolled. Pushing on the next interval.";
+			statusLine = "Cloud sync is on but this account has no token — paste one "
+				+ "under Advanced in the plugin settings.";
 			refreshPanel();
-			// Pull the current lock / listing / pending-deletion state for the panel.
-			refreshSelfServiceState();
-			// Push straight away so a freshly-launched client isn't stale.
-			pushCurrent();
 			return;
 		}
-
-		statusLine = "Enrolling " + name + "…";
+		enrolledRsn = name;
+		cachedToken = token;
+		cachedName = name;
+		statusLine = "Cloud sync on. Pushing on the next interval.";
 		refreshPanel();
-		final String rsn = name;
-		api.enroll(config.serverBaseUrl(), rsn, result -> handleEnrollResult(rsn, result));
-	}
-
-	/** Callback fires on an OkHttp thread. */
-	private void handleEnrollResult(String rsn, ChronicleApiClient.EnrollResult result)
-	{
-		if (result.ok && result.token != null)
-		{
-			final String token = result.token;
-			clientThread.invoke(() ->
-			{
-				configManager.setRSProfileConfiguration(GROUP, KEY_TOKEN, token);
-				enrolledRsn = rsn;
-				cachedToken = token;
-				cachedName = rsn;
-				statusLine = "Enrolled as " + rsn + ".";
-				chat("Chronicle: enrolled " + rsn + " — your page is unlisted (reachable by "
-					+ "its link, not in the public directory). Manage privacy in the side panel.");
-				refreshPanel();
-				refreshSelfServiceState();
-				pushCurrent();
-			});
-		}
-		else if (result.code == 409)
-		{
-			statusLine = "Already enrolled elsewhere — ask an admin to reissue the token.";
-			chat("Chronicle: " + rsn + " is already enrolled. Ask an admin to reissue the token to move it here.");
-			refreshPanel();
-		}
-		else if (result.code == 403)
-		{
-			statusLine = "Blocked from enrolment.";
-			chat("Chronicle: enrolment for " + rsn + " was blocked.");
-			refreshPanel();
-		}
-		else
-		{
-			statusLine = "Enrolment failed (" + result.code + ")"
-				+ (result.error != null ? ": " + result.error : "") + ".";
-			log.debug("enroll failed code={} err={}", result.code, result.error);
-			refreshPanel();
-		}
+		// Push straight away so a freshly-launched client isn't stale.
+		pushCurrent();
 	}
 
 	// ------------------------------------------------------------------
@@ -586,19 +540,15 @@ public class ChroniclePlugin extends Plugin
 		{
 			return; // not enrolled yet
 		}
-		// Forward any accumulated skilling chat every tick (independent of the
-		// counter seed — the server derives + owns these counters).
-		flushSkillChat(token, name);
-		// Flush any collection-log pages viewed since the last push (independent of
-		// the counter seed; the server merges partial snapshots).
+		// Flush any collection-log pages viewed since the last push (the server
+		// merges partial snapshots).
 		if (clogCapture.isDirty())
 		{
 			api.pushClog(config.serverBaseUrl(), token, name, clogCapture.snapshot());
 			clogCapture.clearDirty();
 		}
 		// Achievement state (quests / diaries / combat tasks) — whole-snapshot
-		// sync, sent only when it differs from the last copy the server acked
-		// (also independent of the counter seed; the server just keeps latest).
+		// sync, sent only when it differs from the last copy the server acked.
 		final JsonObject achievements = achievementSync.snapshot();
 		if (achievementSync.changedSince(achievements))
 		{
@@ -611,18 +561,19 @@ public class ChroniclePlugin extends Plugin
 					}
 				});
 		}
-		// The server is the counter store. Seed our in-memory cache from it once
-		// per login before pushing absolutes — otherwise we'd push a base of zero
-		// and the server's regression guard would (correctly) reject it.
-		if (!countersSeeded)
+		// The JOURNAL is the system of record. Fold the running session into it,
+		// then mirror its lifetime absolutes upward — the server is a passive copy
+		// (the discord bot's feed), never a source. The one-shot correction runs
+		// first from here too, so no push can beat it to a freshly-loaded journal.
+		maybeMigratePrayerVerbs();
+		if (localName != null && localStore.isReadyFor(localName))
 		{
-			seedCounters(token, name);
-			return;
+			localStore.setTrackers(sessionView(), localName);
 		}
-		Map<String, Integer> snapshot = statStore.pushable();
+		Map<String, Integer> snapshot = journalAbsolutes();
 		if (snapshot.isEmpty())
 		{
-			return;   // nothing tracked yet on this account — nothing to push
+			return;   // nothing journaled yet on this account — nothing to push
 		}
 		cachedToken = token;
 		cachedName = name;
@@ -655,190 +606,76 @@ public class ChroniclePlugin extends Plugin
 	}
 
 	/**
-	 * Seed the in-memory counter cache from the server (once per login), then
-	 * push. On failure we stay unseeded and retry on the next push tick, so a
-	 * transient network blip never causes us to push an all-zero baseline.
+	 * One-shot repair for the reference account: early builds minted Demonic
+	 * Offering casts as per-ash "Scattered" rows. The server's copy was
+	 * forensically reconciled from the xp ledger (2026-08-30); this applies the
+	 * identical correction to the local journal so the two records agree — and
+	 * so journal-absolute pushes can't resurrect the contaminated rows. Called
+	 * from both the refresh and the push path (whichever reaches a ready store
+	 * first applies it; the flag makes the second call a no-op).
 	 */
-	private void seedCounters(String token, String name)
+	private void maybeMigratePrayerVerbs()
 	{
-		if (seeding)
+		if (localName != null && localStore.isReadyFor(localName)
+			&& "oxli".equals(localName.trim().toLowerCase(java.util.Locale.ROOT))
+			&& !"true".equals(configManager.getConfiguration(GROUP, "prayerVerbMigrated")))
 		{
-			return;   // a seed fetch is already in flight
+			localStore.correctTrackers(PRAYER_VERB_FIX, localName);
+			configManager.setConfiguration(GROUP, "prayerVerbMigrated", true);
 		}
-		seeding = true;
-		statusLine = "Syncing counters…";
-		refreshPanel();
-		api.fetchCounters(config.serverBaseUrl(), token, base -> clientThread.invoke(() ->
-		{
-			seeding = false;
-			if (base == null)
-			{
-				scheduleSeedRetry();
-				statusLine = "Counter sync failed — retrying shortly.";
-				refreshPanel();
-				return;   // stay unseeded; the backoff retry re-enters here
-			}
-			// Floor, never add: with a second writer on the same account (a
-			// stray second install, another computer mid-session) additive
-			// seeding stacks the server's copy of events this client also
-			// counted — a one-way ratchet minting phantom increments every
-			// seed/push interleaving. Flooring costs at most the few seconds
-			// counted before this callback returned.
-			statStore.seedFloor(base);
-			reseedFloor = false;
-			// The journal adopts the server's history too (per-key floor): a fresh
-			// install on an account with a cloud record starts complete instead of
-			// from zero, and two computers converge through the server's union.
-			// Stashed rather than applied — the journal's own async load may still
-			// be in flight; refreshLocal (which always runs after the load, and on
-			// every push interval) applies it once the store is ready.
-			pendingServerFloor = base;
-			// The drop ledger and the feed adopt the same way. Each callback
-			// nudges refreshLocal immediately — a stash must never sit waiting
-			// for the next five-minute interval to become visible.
-			api.fetchDropLedger(config.serverBaseUrl(), name, ledger ->
-			{
-				pendingDropsAdopt = ledger;
-				clientThread.invoke(this::refreshLocal);
-			});
-			// The feed's first cloud adoption goes DEEP — the server holds
-			// milestones back to its first sync (2023 on the reference
-			// instance) and one 300-row window would orphan the early years.
-			boolean deepFeed = !"true".equals(
-				configManager.getConfiguration(GROUP, "cloudFeedDeepImported"));
-			api.fetchFeed(config.serverBaseUrl(), name, deepFeed ? 5000 : 300, events ->
-			{
-				pendingFeedDeep = deepFeed && events != null;
-				pendingFeedAdopt = events;
-				clientThread.invoke(this::refreshLocal);
-			});
-			// The xp archive adopts once too — v2 pulls the server's DAILY
-			// series in one call (the snapshots endpoint, token-authed for
-			// full depth), so Day and Week history answer everywhere the
-			// archive has days, not just month ends.
-			if (!"true".equals(configManager.getConfiguration(GROUP, "cloudHistoryImported2")))
-			{
-				api.fetchServerHistoryDaily(config.serverBaseUrl(), name, token, snaps ->
-				{
-					if (snaps != null && !snaps.isEmpty())
-					{
-						pendingHistoryAdopt = snaps;
-						clientThread.invoke(this::refreshLocal);
-					}
-				});
-			}
-			// The whole per-source item ledger floors into the local bags each
-			// login — item questions answer locally, no drill-time fetches.
-			api.fetchAllSourceItems(config.serverBaseUrl(), name, rows ->
-			{
-				pendingBagsAdopt = rows;
-				clientThread.invoke(this::refreshLocal);
-			});
-			// The uncollected ledger the server has kept since untaken capture
-			// first shipped — the Left behind lens presents it at last.
-			api.fetchUntaken(config.serverBaseUrl(), name, ledger ->
-			{
-				pendingUntakenAdopt = ledger;
-				clientThread.invoke(this::refreshLocal);
-			});
-			// Server-priced consumables, so Food and Potions rows can say what
-			// the habit cost.
-			api.fetchConsumables(config.serverBaseUrl(), name, rows ->
-			{
-				pendingConsumablesAdopt = rows;
-				clientThread.invoke(this::refreshLocal);
-			});
-			clientThread.invoke(this::refreshLocal);   // the counter floor, likewise
-			countersSeeded = true;
-			resetSeedBackoff();
-			enrolledRsn = name;
-			statusLine = "Enrolled. Pushing on the next interval.";
-			refreshPanel();
-			pushCurrent();
-		}));
 	}
 
-	/** Re-run the push path (which re-enters the seed) after a short backoff. */
-	private synchronized void scheduleSeedRetry()
+	/**
+	 * The journal's lifetime counters, clamped to the wire's int shape. This is
+	 * the ONLY thing the counter push sends — what the journal says is what the
+	 * server gets, so a fresh server (or a wiped one) rebuilds entirely from the
+	 * client and "server on or off" makes no difference to what the player sees.
+	 */
+	private Map<String, Integer> journalAbsolutes()
 	{
-		if (seedRetryTask != null && !seedRetryTask.isDone())
+		Map<String, Integer> out = new java.util.HashMap<>();
+		for (Map.Entry<String, Long> e : localStore.trackersSnapshot().entrySet())
 		{
-			return;   // a retry is already queued
+			long v = e.getValue() != null ? e.getValue() : 0;
+			if (v > 0 && !PUSH_EXCLUDE.contains(e.getKey()))
+			{
+				out.put(e.getKey(), (int) Math.min(Integer.MAX_VALUE, v));
+			}
 		}
-		seedRetryTask = executor.schedule(this::scheduledPush, seedRetryDelaySec, TimeUnit.SECONDS);
-		seedRetryDelaySec = Math.min(SEED_RETRY_MAX_SEC, seedRetryDelaySec * 2);
-	}
-
-	private synchronized void resetSeedBackoff()
-	{
-		seedRetryDelaySec = SEED_RETRY_MIN_SEC;
-		if (seedRetryTask != null)
-		{
-			seedRetryTask.cancel(false);
-			seedRetryTask = null;
-		}
+		return out;
 	}
 
 	/** Runs on the client thread (GameStateChanged). Best-effort final push. */
 	private void onLogout()
 	{
-		// The journal always closes out the session: capture the final counters
-		// (session view — the cloud-seeded share is subtracted so the journal's
-		// additive lifetime base can't double-count), write, end the session so a
-		// different account logging in next can't record onto this model.
+		// The journal always closes out the session: fold the final counters in,
+		// write, end the session so a different account logging in next can't
+		// record onto this model.
 		if (localName != null)
 		{
 			localStore.setTrackers(sessionView(), localName);
 			appendHistoryBaseline();
 			recordSessionLine();
+			// Freeze the journal's totals for the final push BEFORE the stores
+			// reset — the logout flush sends exactly what the journal will say
+			// on the next login.
+			Map<String, Integer> fresh = journalAbsolutes();
+			if (!fresh.isEmpty())
+			{
+				cachedSnapshot = fresh;
+			}
 		}
 		executor.submit(() -> localStore.flush(localDir()));
 		localStore.endSession();
 		eventCapture.resetSessionFlags();
-		pendingServerFloor = null;   // account boundary — never floor the next login's journal
-		pendingDropsAdopt = null;
-		pendingFeedAdopt = null;
-		pendingHistoryAdopt = null;
-		pendingBagsAdopt = null;
-		pendingUntakenAdopt = null;
-		pendingConsumablesAdopt = null;
-		pendingFeedDeep = false;
-		// Re-seed from the server on the next login (another device may have
-		// advanced the totals). The final push below still uses the in-memory
-		// snapshot we accumulated this session.
-		//
-		// Only a SEEDED session holds true absolutes. An unseeded one holds this
-		// session's increments counted up from nothing, so pushing it would rewrite
-		// the server's totals downward — which the regression guard would (rightly)
-		// reject with a 409 and freeze the stream pending admin review.
-		boolean pushable = countersSeeded;
-		countersSeeded = false;
-		reseedFloor = false;   // the store is cleared below — zero-based again
-		resetSeedBackoff();
-		// Best-effort final flush of skilling chat before we lose the session buffer.
-		if (cachedToken != null && cachedName != null)
-		{
-			flushSkillChat(cachedToken, cachedName);
-		}
-		// Same rule as statStore.clear() below: these chat lines belong to the
-		// account that just logged out. The flush above froze its own copies, so
-		// clearing here can't lose that request — it only stops a failed flush
-		// from retrying the batch under the NEXT account's name.
-		skillBuffer.clearAll();
+		slayerImportTried = false;
 		// Account boundary for the achievement gate too: the next login must
 		// sync its own snapshot even if it happens to serialize identically.
 		achievementSync.reset();
-		Map<String, Integer> fresh = statStore.pushable();
-		if (!fresh.isEmpty())
-		{
-			cachedSnapshot = fresh;
-		}
-		// These totals belong to the account that just logged out. Drop them here so
-		// a DIFFERENT account logging in next can never inherit them: without this
-		// the store survives, and any path that reaches a push before re-seeding
-		// would file one player's lifetime counters under another's name.
+		// These totals belong to the account that just logged out. Drop them here
+		// so a DIFFERENT account logging in next can never inherit them.
 		statStore.clear();
-		if (!cloudActive() || !pushable || cachedToken == null || cachedName == null
+		if (!cloudActive() || cachedToken == null || cachedName == null
 			|| cachedSnapshot == null || cachedSnapshot.isEmpty())
 		{
 			return;
@@ -847,32 +684,6 @@ public class ChroniclePlugin extends Plugin
 			null, this::onPushResult);   // logout flush: client unreadable, skip skills
 	}
 
-	/**
-	 * Flush accumulated skilling chat lines to the server (which derives the
-	 * counters). Frozen-batch + server dedup = exactly-once apply: on ack we clear
-	 * the batch; on failure we keep it and retry the identical batch next tick.
-	 */
-	private void flushSkillChat(String token, String name)
-	{
-		chronicle.counters.SkillChatBuffer.Batch batch = skillBuffer.beginFlush();
-		if (batch == null || batch.isEmpty())
-		{
-			return;
-		}
-		api.forwardSkillChat(config.serverBaseUrl(), token, name, batch.id, batch.chat, batch.actions,
-			code -> {
-				// Retire the batch on success (200) or a permanent rejection
-				// (204 name-mismatch, or any 4xx except 429) so the pipeline
-				// advances and pending can't grow unbounded; keep it to retry
-				// only on network failure (-1), 5xx, or 429.
-				boolean terminal = code == 200 || code == 204
-					|| (code >= 400 && code < 500 && code != 429);
-				if (terminal)
-				{
-					skillBuffer.ackFlush(batch.id);
-				}
-			});
-	}
 
 	private void onPushResult(ChronicleApiClient.PushResult result)
 	{
@@ -880,36 +691,15 @@ public class ChroniclePlugin extends Plugin
 		{
 			statusLine = "Last push OK (" + result.changed + " changed) at " + nowClock() + ".";
 			log.debug("push ok: {} accepted, {} changed", result.accepted, result.changed);
-			// Server-MINTED counters (typed skilling: shafts cut, logs typed by
-			// wood…) only exist server-side — without this, they sat frozen in
-			// the panel until the next login's floor. Re-fetch after each push
-			// so they flow at the push cadence.
-			String tok = cachedToken;
-			String who = cachedName;
-			if (tok != null && who != null)
-			{
-				api.fetchCounters(config.serverBaseUrl(), tok, base ->
-				{
-					if (base != null)
-					{
-						pendingServerFloor = base;
-						clientThread.invoke(this::refreshLocal);
-					}
-				});
-			}
 		}
 		else if (result.code == 409)
 		{
-			// Regression guard: the server holds higher totals than we pushed
-			// (usually a second device advancing them). Re-seed with a floor merge
-			// so our next push can never regress the server again — self-healing
-			// once an admin unfreezes a flagged stream, and preventive before one.
-			countersSeeded = false;
-			reseedFloor = true;
-			resetSeedBackoff();
-			scheduleSeedRetry();
-			statusLine = "Server totals are ahead — resyncing at " + nowClock() + ".";
-			log.debug("push 409 — scheduling floor re-seed");
+			// The server holds higher totals than this journal — usually another
+			// computer's journal is ahead. The client is authoritative for its own
+			// record, so surface it rather than silently rewriting either side.
+			statusLine = "Server totals are ahead of this journal (another computer?) at "
+				+ nowClock() + ".";
+			log.debug("push 409 — server ahead; journal stays authoritative");
 		}
 		else
 		{
@@ -963,33 +753,6 @@ public class ChroniclePlugin extends Plugin
 	// ------------------------------------------------------------------
 	// Panel-invoked actions (may be called off the client thread)
 	// ------------------------------------------------------------------
-
-	void actionReEnrol()
-	{
-		clientThread.invoke(() ->
-		{
-			if (client.getGameState() != GameState.LOGGED_IN)
-			{
-				chat("Chronicle: log in first, then re-enrol.");
-				return;
-			}
-			Player lp = client.getLocalPlayer();
-			String name = lp != null ? lp.getName() : null;
-			if (name == null || name.isEmpty())
-			{
-				return;
-			}
-			String token = trimToNull(configManager.getRSProfileConfiguration(GROUP, KEY_TOKEN));
-			if (token != null)
-			{
-				chat("Chronicle: " + name + " already has a token on this client. "
-					+ "Ask an admin to reissue if you need to move it.");
-				return;
-			}
-			pendingEnrolCheck = false;
-			ensureEnrolled(name);
-		});
-	}
 
 	void actionPushNow()
 	{
@@ -1057,29 +820,17 @@ public class ChroniclePlugin extends Plugin
 		return localStore.sourceItems(source);
 	}
 
-	void fetchSourceItems(String source,
-		java.util.function.Consumer<java.util.List<ChronicleApiClient.LedgerItem>> onDone)
-	{
-		String rsn = displayRsn();
-		if (!cloudActive() || rsn == null || rsn.isEmpty())
-		{
-			onDone.accept(null);
-			return;
-		}
-		api.fetchSourceItems(config.serverBaseUrl(), rsn, source, onDone);
-	}
-
-	/** The cloud's task-by-task slayer journey (panel fetches on first open). */
+	/** The journal's task-by-task slayer journey (panel fetches on first open). */
 	void fetchSlayerJourney(
 		java.util.function.Consumer<ChronicleApiClient.SlayerJourney> onDone)
 	{
-		String rsn = displayRsn();
-		if (!cloudActive() || rsn == null || rsn.isEmpty())
+		final String rsn = localName;
+		if (rsn == null || !localStore.isReadyFor(rsn))
 		{
 			onDone.accept(null);
 			return;
 		}
-		api.fetchSlayerJourney(config.serverBaseUrl(), rsn, onDone);
+		executor.submit(() -> onDone.accept(localStore.slayerJourney()));
 	}
 
 	java.util.List<JsonObject> feedNewest(int n)
@@ -1149,16 +900,20 @@ public class ChroniclePlugin extends Plugin
 		return localStore.consumableValues();
 	}
 
-	/** The dryness ledger (panel fetches once per session on demand). */
+	/** The dryness ledger, computed from the journal's own collection log +
+	 *  kill counts against the bundled wiki rate book (panel fetches once per
+	 *  session on demand; the maths is the site's: 1 − (1 − 1/rate)^kc). */
 	void fetchGrinds(java.util.function.Consumer<java.util.List<ChronicleApiClient.GrindRow>> onDone)
 	{
-		String rsn = displayRsn();
-		if (!cloudActive() || rsn == null || rsn.isEmpty())
+		final String rsn = localName;
+		if (rsn == null || !localStore.isReadyFor(rsn))
 		{
 			onDone.accept(null);
 			return;
 		}
-		api.fetchGrinds(config.serverBaseUrl(), rsn, onDone);
+		final JsonObject clog = localStore.clogSnapshot();
+		final java.util.List<LocalStore.SourceRow> sources = localStore.dropSources();
+		executor.submit(() -> onDone.accept(grindBook.grinds(clog, sources)));
 	}
 
 	/** True once this session produced an on-task slayer kill. */
@@ -1208,18 +963,17 @@ public class ChroniclePlugin extends Plugin
 
 	/**
 	 * Session counters shaped for DISPLAY: peak keys (highest hit and friends)
-	 * only appear when this session actually beat the seeded baseline — the
+	 * only appear when this session actually beat the journal's lifetime record — the
 	 * journal-write path keeps its absolutes, but the panel must never show a
 	 * lifetime peak as a session feat.
 	 */
 	Map<String, Integer> sessionDisplayCounters()
 	{
 		Map<String, Integer> out = new java.util.HashMap<>(sessionView());
-		Map<String, Integer> seeded = statStore.seededBaseline();
 		for (String key : LocalStore.MAX_KEYS)
 		{
 			Integer val = out.get(key);
-			if (val != null && val <= seeded.getOrDefault(key, 0))
+			if (val != null && val <= localStore.trackerBase(key))
 			{
 				out.remove(key);
 			}
@@ -1239,27 +993,20 @@ public class ChroniclePlugin extends Plugin
 	}
 
 	/**
-	 * This session's own counter increments — the totals snapshot minus the
-	 * server-seeded share — for the local journal's additive lifetime base.
-	 * Max-type keys pass through as absolutes (the journal takes their max).
-	 * With cloud off nothing is ever seeded, so this IS the plain harvest.
+	 * This session's own counter increments, straight from the trackers — the
+	 * store counts from zero at each account boundary, so the harvest IS the
+	 * session. Max-type keys pass through as absolutes (the journal takes their
+	 * max); everything else drops non-positive noise.
 	 */
 	Map<String, Integer> sessionView()
 	{
 		Map<String, Integer> abs = harvest();
-		Map<String, Integer> seeded = statStore.seededBaseline();
 		Map<String, Integer> out = new java.util.HashMap<>(abs.size());
 		for (Map.Entry<String, Integer> en : abs.entrySet())
 		{
-			if (LocalStore.MAX_KEYS.contains(en.getKey()))
+			if (LocalStore.MAX_KEYS.contains(en.getKey()) || en.getValue() > 0)
 			{
 				out.put(en.getKey(), en.getValue());
-				continue;
-			}
-			int sess = en.getValue() - seeded.getOrDefault(en.getKey(), 0);
-			if (sess > 0)
-			{
-				out.put(en.getKey(), sess);
 			}
 		}
 		return out;
@@ -1304,83 +1051,11 @@ public class ChroniclePlugin extends Plugin
 		localStore.setTrackers(sessionView(), name);
 	}
 
-	/** Local-mode equivalent of a push: refresh the sheet, then rewrite the page. */
+	/** The journal's refresh: gather the sheet, fold the session in, rewrite the page. */
 	private void refreshLocal()
 	{
 		gatherCharacter();
-		Map<String, Integer> floor = pendingServerFloor;
-		if (floor != null && localName != null && localStore.isReadyFor(localName))
-		{
-			pendingServerFloor = null;
-			localStore.floorTrackers(floor, localName);
-		}
-		java.util.List<ChronicleApiClient.LedgerSource> adopt = pendingDropsAdopt;
-		if (adopt != null && localName != null && localStore.isReadyFor(localName))
-		{
-			pendingDropsAdopt = null;
-			localStore.floorDropSources(adopt, localName);
-		}
-		java.util.List<ChronicleApiClient.SourceItemRow> bags = pendingBagsAdopt;
-		if (bags != null && localName != null && localStore.isReadyFor(localName))
-		{
-			pendingBagsAdopt = null;
-			localStore.floorSourceBags(bags, localName);
-		}
-		ChronicleApiClient.UntakenLedger untaken = pendingUntakenAdopt;
-		if (untaken != null && localName != null && localStore.isReadyFor(localName))
-		{
-			pendingUntakenAdopt = null;
-			localStore.floorUntaken(untaken.bySource, untaken.byItem, localName);
-			refreshPanel();
-		}
-		java.util.List<String[]> consum = pendingConsumablesAdopt;
-		if (consum != null && localName != null && localStore.isReadyFor(localName))
-		{
-			pendingConsumablesAdopt = null;
-			localStore.floorConsumableValues(consum, localName);
-		}
-		java.util.List<ChronicleApiClient.FeedEvent> feed = pendingFeedAdopt;
-		if (feed != null && localName != null && localStore.isReadyFor(localName))
-		{
-			pendingFeedAdopt = null;
-			localStore.adoptFeed(feed, localName);
-			if (pendingFeedDeep)
-			{
-				pendingFeedDeep = false;
-				configManager.setConfiguration(GROUP, "cloudFeedDeepImported", true);
-			}
-			refreshPanel();
-		}
-		java.util.List<ChronicleApiClient.WomSnapshot> histAdopt = pendingHistoryAdopt;
-		if (histAdopt != null && localName != null)
-		{
-			pendingHistoryAdopt = null;
-			final String rsn = localName;
-			executor.submit(() ->
-			{
-				// The archive walk returns month-end absolutes oldest-first;
-				// collapse to one line per date through the same door the WOM
-				// import uses (readers take last-per-date, so the streams merge).
-				java.util.TreeMap<String, Map<String, Long>> byDate = new java.util.TreeMap<>();
-				for (ChronicleApiClient.WomSnapshot snap : histAdopt)
-				{
-					byDate.put(snap.date, snap.skills);
-				}
-				for (Map.Entry<String, Map<String, Long>> e : byDate.entrySet())
-				{
-					historyLog.appendImported(localDir(), rsn, e.getKey(), e.getValue());
-				}
-				// the flag must match what the gate READS — a mismatch here once
-				// made this one-shot re-run (and re-append) every login
-				configManager.setConfiguration(GROUP, "cloudHistoryImported2", true);
-				if (!byDate.isEmpty())
-				{
-					chat("Chronicle: adopted " + byDate.size()
-						+ " months of history from your cloud record.");
-				}
-				clientThread.invoke(this::refreshPanel);
-			});
-		}
+		maybeMigratePrayerVerbs();
 		if (localName != null)
 		{
 			localStore.setTrackers(sessionView(), localName);
@@ -1399,6 +1074,26 @@ public class ChroniclePlugin extends Plugin
 			&& !"true".equals(configManager.getConfiguration(GROUP, "lootTrackerImported")))
 		{
 			importLootTracker();
+		}
+		// One-shot inheritance of the cloud's task-by-task slayer journey — the
+		// only downward call left, and it no-ops without a server URL, so a
+		// local-only install never notices it exists. From here the journey is
+		// kept locally (LOOT slayer stamps open segments; SLAYER events close them).
+		if (cloudActive() && !slayerImportTried
+			&& localName != null && localStore.isReadyFor(localName)
+			&& !"true".equals(configManager.getConfiguration(GROUP, "slayerJourneyImported")))
+		{
+			slayerImportTried = true;
+			final String who = localName;
+			api.fetchSlayerJourney(config.serverBaseUrl(), who, j -> clientThread.invoke(() ->
+			{
+				if (j != null && localStore.isReadyFor(who))
+				{
+					localStore.adoptSlayerJourney(j, who);
+					configManager.setConfiguration(GROUP, "slayerJourneyImported", true);
+					refreshPanel();
+				}
+			}));
 		}
 		executor.submit(() -> localStore.flush(localDir()));
 	}
@@ -1511,163 +1206,21 @@ public class ChroniclePlugin extends Plugin
 		return statusLine;
 	}
 
-	boolean pageLocked()
-	{
-		return pageLocked;
-	}
-
-	boolean publicListed()
-	{
-		return publicListed;
-	}
-
-	/** Epoch-seconds a scheduled deletion will fire, or null if none is pending. */
-	Long deletePendingTs()
-	{
-		return deletePendingTs;
-	}
-
-	// ------------------------------------------------------------------
-	// Self-service profile management (panel-invoked; token-authed)
-	// ------------------------------------------------------------------
-
-	/** Resolve this account's token + in-game name on the client thread, then run
-	 *  the action off it. Chats a nudge and does nothing if not logged in / enrolled. */
-	private void withOwner(BiConsumer<String, String> action)
-	{
-		clientThread.invoke(() ->
-		{
-			if (client.getGameState() != GameState.LOGGED_IN)
-			{
-				chat("Chronicle: log in first.");
-				return;
-			}
-			Player lp = client.getLocalPlayer();
-			String name = lp != null ? lp.getName() : null;
-			String token = trimToNull(configManager.getRSProfileConfiguration(GROUP, KEY_TOKEN));
-			if (name == null || name.isEmpty() || token == null)
-			{
-				chat("Chronicle: this account isn't enrolled yet.");
-				return;
-			}
-			action.accept(token, name);
-		});
-	}
-
-	/** Pull the current lock / listing / pending-deletion state into the panel. */
-	void refreshSelfServiceState()
-	{
-		withOwner((token, name) -> api.fetchState(config.serverBaseUrl(), token, state ->
-			clientThread.invoke(() ->
-			{
-				if (state != null)
-				{
-					applyState(state);
-					refreshPanel();
-				}
-			})));
-	}
-
-	private void applyState(JsonObject state)
-	{
-		if (state.has("page_locked"))
-		{
-			pageLocked = state.get("page_locked").getAsBoolean();
-		}
-		if (state.has("public_listed"))
-		{
-			publicListed = state.get("public_listed").getAsBoolean();
-		}
-		deletePendingTs = state.has("delete_scheduled_ts") && !state.get("delete_scheduled_ts").isJsonNull()
-			? state.get("delete_scheduled_ts").getAsLong() : null;
-	}
-
-	/** Set ({@code password} non-empty) or clear (empty) the page-view password. */
-	void actionSetLock(String password)
-	{
-		withOwner((token, name) -> api.setLock(config.serverBaseUrl(), token, name, password, reply ->
-			clientThread.invoke(() ->
-			{
-				if (reply == null)
-				{
-					chat("Chronicle: couldn't reach the server — lock unchanged.");
-					return;
-				}
-				pageLocked = reply.has("locked") && reply.get("locked").getAsBoolean();
-				chat(pageLocked
-					? "Chronicle: your page is now locked — viewers need the password."
-					: "Chronicle: page lock removed.");
-				refreshPanel();
-			})));
-	}
-
-	void actionSetPublic(boolean listed)
-	{
-		withOwner((token, name) -> api.setVisibility(config.serverBaseUrl(), token, name, listed, reply ->
-			clientThread.invoke(() ->
-			{
-				if (reply == null)
-				{
-					chat("Chronicle: couldn't reach the server — listing unchanged.");
-					return;
-				}
-				publicListed = reply.has("public") && reply.get("public").getAsBoolean();
-				chat(publicListed
-					? "Chronicle: your page is now listed in the public directory."
-					: "Chronicle: your page is unlisted (reachable by direct link only).");
-				refreshPanel();
-			})));
-	}
-
-	void actionScheduleDelete(boolean cancel)
-	{
-		withOwner((token, name) -> api.scheduleDelete(config.serverBaseUrl(), token, name, cancel, reply ->
-			clientThread.invoke(() ->
-			{
-				if (reply == null)
-				{
-					chat("Chronicle: couldn't reach the server — nothing changed.");
-					return;
-				}
-				boolean scheduled = reply.has("scheduled") && reply.get("scheduled").getAsBoolean();
-				deletePendingTs = scheduled && reply.has("delete_ts") ? reply.get("delete_ts").getAsLong() : null;
-				chat(scheduled
-					? "Chronicle: deletion scheduled. Your data is removed in 7 days unless you cancel."
-					: "Chronicle: scheduled deletion cancelled — your data stays.");
-				refreshPanel();
-			})));
-	}
-
-	/** Download the account's full export and write it to a file in the RuneLite dir. */
+	/** Point the player at their own journal on disk — the export IS the file. */
 	void actionExport()
 	{
-		withOwner((token, name) -> api.exportData(config.serverBaseUrl(), token, name, json ->
+		final String rsn = localName != null ? localName : enrolledRsn;
+		if (rsn == null)
 		{
-			// Runs on the OkHttp callback thread: keep the (potentially large)
-			// disk write OFF the client/game thread so it can't stutter a frame.
-			if (json == null)
-			{
-				chat("Chronicle: export failed — couldn't reach the server.");
-				return;
-			}
-			try
-			{
-				// Hub rule: all plugin file I/O stays inside a plugin-specific
-				// subdirectory of .runelite — never the .runelite root.
-				File dir = localDir();
-				dir.mkdirs();
-				File out = new File(dir,
-					"export-" + name.replaceAll("[^A-Za-z0-9]", "_")
-						+ "-" + System.currentTimeMillis() + ".json");
-				Files.write(out.toPath(), json.getBytes(StandardCharsets.UTF_8));
-				chat("Chronicle: data exported to " + out.getAbsolutePath());
-			}
-			catch (Exception e)
-			{
-				log.debug("export write failed", e);
-				chat("Chronicle: export downloaded but couldn't be saved to disk.");
-			}
-		}));
+			chat("Chronicle: log in first — the journal opens with an account.");
+			return;
+		}
+		executor.submit(() ->
+		{
+			localStore.flush(localDir());
+			chat("Chronicle: your journal lives in " + localDir().getAbsolutePath()
+				+ " — plain JSON, every byte of it yours.");
+		});
 	}
 
 	// ------------------------------------------------------------------

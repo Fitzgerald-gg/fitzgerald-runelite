@@ -46,7 +46,6 @@ public class SkillingStatTracker implements StatTracker
 	private final StatStore statStore;
 	private final Client client;
 	private final XpTrackerService xpService;
-	private final SkillChatBuffer skillBuffer;
 	// Local-first: the same tuple derives typed counters HERE, instantly —
 	// the buffered copy still travels for cloud users (floor-merge reconciles).
 	private final SkillDeriver deriver;
@@ -91,13 +90,11 @@ public class SkillingStatTracker implements StatTracker
 	};
 
 	public SkillingStatTracker(StatStore statStore, Client client,
-	                           XpTrackerService xpTrackerService, SkillChatBuffer skillBuffer,
-	                           SkillDeriver deriver)
+	                           XpTrackerService xpTrackerService, SkillDeriver deriver)
 	{
 		this.statStore = statStore;
 		this.client = client;
 		this.xpService = xpTrackerService;
-		this.skillBuffer = skillBuffer;
 		this.deriver = deriver;
 	}
 
@@ -234,7 +231,6 @@ public class SkillingStatTracker implements StatTracker
 					// 7-field tuple; targetName may contain spaces but never '|'.
 					String tuple = skill.name() + "|" + delta + "|" + objStr
 						+ "|" + gainStr + "|" + qtyStr + "|" + target + "|" + consStr;
-					skillBuffer.addAction(tuple);
 					deriver.apply(tuple);
 				}
 			}
@@ -275,7 +271,7 @@ public class SkillingStatTracker implements StatTracker
 		{
 			if (msg.contains(prefix))
 			{
-				skillBuffer.add(msg);
+				deriver.applyChat(msg);
 				return;
 			}
 		}

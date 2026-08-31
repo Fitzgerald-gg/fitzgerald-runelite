@@ -128,11 +128,22 @@ public class FoodStatTracker implements StatTracker
 	/** Previous inventory contents, used to spot the eaten stack shrinking. */
 	private Map<Integer, Integer> inventorySnapshot;
 
+	// Journal sink for per-consumable gp (typed key -> price at use). Nullable —
+	// tests build the tracker bare and the counts still flow without it.
+	private final java.util.function.BiConsumer<String, Integer> consumableSink;
+
 	public FoodStatTracker(StatStore statStore, Client client, ItemManager itemManager)
+	{
+		this(statStore, client, itemManager, null);
+	}
+
+	public FoodStatTracker(StatStore statStore, Client client, ItemManager itemManager,
+		java.util.function.BiConsumer<String, Integer> consumableSink)
 	{
 		this.itemManager = itemManager;
 		this.store = statStore;
 		this.client = client;
+		this.consumableSink = consumableSink;
 	}
 
 	@Override
@@ -272,6 +283,12 @@ public class FoodStatTracker implements StatTracker
 				if (!typed.isEmpty())
 				{
 					store.incrementStat(typed);
+					// The habit's cost, filed under the same typed key the
+					// count uses — priced at the bite, like drops at the kill.
+					if (price > 0 && consumableSink != null)
+					{
+						consumableSink.accept(typed, price);
+					}
 				}
 			}
 		}
@@ -416,6 +433,10 @@ public class FoodStatTracker implements StatTracker
 				if (!typed.isEmpty())
 				{
 					store.incrementStat(typed);
+					if (dose > 0 && consumableSink != null)
+					{
+						consumableSink.accept(typed, dose);
+					}
 				}
 
 				if (message.contains("divine"))

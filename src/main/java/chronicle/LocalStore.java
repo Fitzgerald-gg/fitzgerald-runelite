@@ -197,6 +197,11 @@ class LocalStore
 			{
 				recordClogSlot(data);
 			}
+			// A completion closes the open task segment in the local journey.
+			if ("SLAYER".equals(type))
+			{
+				recordSlayerCompletion(data);
+			}
 			JsonObject entry = new JsonObject();
 			entry.addProperty("ts", System.currentTimeMillis());
 			entry.addProperty("type", type);
@@ -280,8 +285,17 @@ class LocalStore
 			pbCand = data.get("killTime").getAsDouble();
 		}
 
+		String slayerTask = data.has("slayerTask") && !data.get("slayerTask").isJsonNull()
+			? data.get("slayerTask").getAsString() : null;
+		long slayerAssignment = data.has("slayerTaskInitial") && !data.get("slayerTaskInitial").isJsonNull()
+			? data.get("slayerTaskInitial").getAsLong() : 0;
+
 		synchronized (lock)
 		{
+			if (slayerTask != null && !slayerTask.isEmpty())
+			{
+				slayerLoot(slayerTask, slayerAssignment, batchValue);
+			}
 			JsonObject drops = root.getAsJsonObject("drops");
 			JsonObject src = drops.has(source) ? drops.getAsJsonObject(source) : new JsonObject();
 			if (!drops.has(source))
@@ -383,51 +397,6 @@ class LocalStore
 	}
 
 	/**
-	 * Refresh the lifetime tracker counters from this session's live totals. Runs on
-	 * the client thread. {@code session} is the client-computed counter snapshot
-	 * ({@code StatStore.pushable()}); lifetime = frozen-base + session (max for peak
-	 * counters), so calling this repeatedly through a session never double-counts.
-	 */
-	/**
-	 * Raise the journal's lifetime base to AT LEAST the given absolutes, per key
-	 * (max keys included — max of absolutes is their natural semantics). Called
-	 * with the server's counters on a cloud login: the journal adopts history it
-	 * never witnessed (an install newer than the account's cloud record, another
-	 * computer's play) without ever double-counting — a base already higher, from
-	 * local play the server hasn't seen, is kept.
-	 */
-	void floorTrackers(java.util.Map<String, Integer> absolutes, String rsn)
-	{
-		if (!isReadyFor(rsn) || absolutes == null)
-		{
-			return;
-		}
-		synchronized (lock)
-		{
-			JsonObject tr = root.has("trackers") && root.get("trackers").isJsonObject()
-				? root.getAsJsonObject("trackers") : new JsonObject();
-			for (java.util.Map.Entry<String, Integer> e : absolutes.entrySet())
-			{
-				long have = trackersBase.has(e.getKey()) && !trackersBase.get(e.getKey()).isJsonNull()
-					? trackersBase.get(e.getKey()).getAsLong() : 0;
-				long floor = e.getValue() != null ? e.getValue().longValue() : 0;
-				if (floor > have)
-				{
-					trackersBase.addProperty(e.getKey(), floor);
-				}
-				long shown = tr.has(e.getKey()) && !tr.get(e.getKey()).isJsonNull()
-					? tr.get(e.getKey()).getAsLong() : 0;
-				if (floor > shown)
-				{
-					tr.addProperty(e.getKey(), floor);
-				}
-			}
-			root.add("trackers", tr);
-			root.addProperty("updated_at", nowSec());
-		}
-	}
-
-	/**
 	 * Re-freeze the lifetime base at the CURRENT journal values. Called before
 	 * the session counter store is cleared mid-session (a cloud toggle), so the
 	 * increments already folded in are owned by the base and the fresh
@@ -448,6 +417,12 @@ class LocalStore
 		}
 	}
 
+	/**
+	 * Refresh the lifetime tracker counters from this session's live totals. Runs on
+	 * the client thread. {@code session} is the trackers' from-zero session snapshot;
+	 * lifetime = frozen-base + session (max for peak counters), so calling this
+	 * repeatedly through a session never double-counts.
+	 */
 	void setTrackers(java.util.Map<String, Integer> session, String rsn)
 	{
 		if (!isReadyFor(rsn) || session == null)
@@ -713,65 +688,6 @@ class LocalStore
 		}
 	}
 
-	/**
-	 * Floor the journal's drop sources at the cloud ledger's rollup, per source
-	 * (kc / loot count / value all take the max — the same union philosophy as
-	 * the counter floor, so a journal that predates cloud sync is never wiped
-	 * and a fresh install adopts the server's history whole). Item bags stay
-	 * locally-witnessed: the server's rollup is name-keyed with no item ids,
-	 * so adopted items would render iconless — the drill fetches those on
-	 * demand instead. cloud_items records how many distinct items the cloud
-	 * ledger holds, so the panel can say what the bag is missing.
-	 */
-	void floorDropSources(java.util.List<chronicle.ChronicleApiClient.LedgerSource> ledger, String rsn)
-	{
-		if (!isReadyFor(rsn) || ledger == null)
-		{
-			return;
-		}
-		synchronized (lock)
-		{
-			JsonObject drops = root.has("drops") && root.get("drops").isJsonObject()
-				? root.getAsJsonObject("drops") : new JsonObject();
-			for (chronicle.ChronicleApiClient.LedgerSource ls : ledger)
-			{
-				if (ls.source == null || ls.source.isEmpty())
-				{
-					continue;
-				}
-				JsonObject src = drops.has(ls.source) && drops.get(ls.source).isJsonObject()
-					? drops.getAsJsonObject(ls.source) : new JsonObject();
-				if (!drops.has(ls.source))
-				{
-					src.addProperty("kc", 0);
-					src.addProperty("loots", 0);
-					src.addProperty("value", 0);
-					src.add("items", new JsonObject());
-					drops.add(ls.source, src);
-				}
-				if (ls.kc > src.get("kc").getAsInt())
-				{
-					src.addProperty("kc", ls.kc);
-				}
-				if (ls.loots > src.get("loots").getAsInt())
-				{
-					src.addProperty("loots", ls.loots);
-				}
-				if (ls.value > src.get("value").getAsLong())
-				{
-					src.addProperty("value", ls.value);
-				}
-				int haveItems = src.has("cloud_items") ? src.get("cloud_items").getAsInt() : 0;
-				if (ls.itemsCount > haveItems)
-				{
-					src.addProperty("cloud_items", ls.itemsCount);
-				}
-			}
-			root.add("drops", drops);
-			root.addProperty("updated_at", nowSec());
-		}
-	}
-
 	/** One item held in a source's local bag. */
 	static final class BagItem
 	{
@@ -790,86 +706,6 @@ class LocalStore
 	}
 
 	/** The locally-witnessed item bag for one source, unsorted. */
-	/**
-	 * Adopt the cloud's whole per-source item ledger into the local bags, so
-	 * item questions ("how many whips, from where") answer locally. Matched
-	 * by NAME (the server has no item ids): an existing local entry keeps its
-	 * id (sprites) and floors its qty/value at the cloud's; a cloud-only item
-	 * lands as an id-less entry keyed "n:&lt;name&gt;". Idempotent — re-adoption
-	 * is a floor, never a sum.
-	 */
-	void floorSourceBags(java.util.List<chronicle.ChronicleApiClient.SourceItemRow> rows, String rsn)
-	{
-		if (!isReadyFor(rsn) || rows == null)
-		{
-			return;
-		}
-		synchronized (lock)
-		{
-			JsonObject drops = root.has("drops") && root.get("drops").isJsonObject()
-				? root.getAsJsonObject("drops") : new JsonObject();
-			root.add("drops", drops);
-			for (chronicle.ChronicleApiClient.SourceItemRow row : rows)
-			{
-				if (row.source == null || row.source.isEmpty()
-					|| row.name == null || row.name.isEmpty())
-				{
-					continue;
-				}
-				JsonObject src = drops.has(row.source) && drops.get(row.source).isJsonObject()
-					? drops.getAsJsonObject(row.source) : null;
-				if (src == null)
-				{
-					src = new JsonObject();
-					src.addProperty("kc", 0);
-					src.addProperty("loots", 0);
-					src.addProperty("value", 0);
-					src.add("items", new JsonObject());
-					drops.add(row.source, src);
-				}
-				if (!src.has("items") || !src.get("items").isJsonObject())
-				{
-					src.add("items", new JsonObject());
-				}
-				JsonObject items = src.getAsJsonObject("items");
-				// find an existing entry with this name (id-keyed or adopted)
-				JsonObject hit = null;
-				for (java.util.Map.Entry<String, JsonElement> e : items.entrySet())
-				{
-					if (e.getValue().isJsonObject())
-					{
-						JsonObject it = e.getValue().getAsJsonObject();
-						if (it.has("name") && !it.get("name").isJsonNull()
-							&& row.name.equalsIgnoreCase(it.get("name").getAsString()))
-						{
-							hit = it;
-							break;
-						}
-					}
-				}
-				if (hit == null)
-				{
-					hit = new JsonObject();
-					hit.addProperty("id", 0);
-					hit.addProperty("name", row.name);
-					hit.addProperty("qty", 0);
-					hit.addProperty("value", 0);
-					items.add("n:" + row.name.toLowerCase(java.util.Locale.ROOT), hit);
-				}
-				long q = hit.has("qty") ? hit.get("qty").getAsLong() : 0;
-				long v = hit.has("value") ? hit.get("value").getAsLong() : 0;
-				if (row.qty > q)
-				{
-					hit.addProperty("qty", row.qty);
-				}
-				if (row.value > v)
-				{
-					hit.addProperty("value", row.value);
-				}
-			}
-		}
-	}
-
 	/** One source's whole record from the core Loot Tracker's local store,
 	 *  already canonicalised and priced by the caller (client thread). */
 	static final class LootSeed
@@ -1063,75 +899,6 @@ class LocalStore
 	}
 
 	/**
-	 * One-shot adoption of the cloud feed's milestones into the journal's own
-	 * feed, deduplicated by (millisecond timestamp, type) — the server's floats
-	 * are stable, so re-adoption on every login is a no-op. Entries land in
-	 * timestamp order; the cap trims oldest, exactly like live recording.
-	 */
-	void adoptFeed(java.util.List<chronicle.ChronicleApiClient.FeedEvent> events, String rsn)
-	{
-		if (!isReadyFor(rsn) || events == null || events.isEmpty())
-		{
-			return;
-		}
-		synchronized (lock)
-		{
-			JsonArray feed = root.has("feed") && root.get("feed").isJsonArray()
-				? root.getAsJsonArray("feed") : new JsonArray();
-			java.util.Set<String> have = new java.util.HashSet<>();
-			for (JsonElement el : feed)
-			{
-				if (el.isJsonObject())
-				{
-					JsonObject o = el.getAsJsonObject();
-					have.add((o.has("ts") ? o.get("ts").getAsLong() : 0)
-						+ "|" + (o.has("type") ? o.get("type").getAsString() : ""));
-				}
-			}
-			java.util.List<JsonObject> merged = new java.util.ArrayList<>();
-			for (JsonElement el : feed)
-			{
-				if (el.isJsonObject())
-				{
-					merged.add(el.getAsJsonObject());
-				}
-			}
-			int added = 0;
-			for (chronicle.ChronicleApiClient.FeedEvent ev : events)
-			{
-				long tsMs = Math.round(ev.ts * 1000.0);
-				if (!have.add(tsMs + "|" + ev.type))
-				{
-					continue;
-				}
-				JsonObject entry = new JsonObject();
-				entry.addProperty("ts", tsMs);
-				entry.addProperty("type", ev.type);
-				entry.add("data", ev.data != null ? ev.data : new JsonObject());
-				merged.add(entry);
-				added++;
-			}
-			if (added == 0)
-			{
-				return;
-			}
-			merged.sort(java.util.Comparator.comparingLong(
-				o -> o.has("ts") ? o.get("ts").getAsLong() : 0));
-			while (merged.size() > FEED_CAP)
-			{
-				merged.remove(0);
-			}
-			JsonArray next = new JsonArray();
-			for (JsonObject o : merged)
-			{
-				next.add(o);
-			}
-			root.add("feed", next);
-			root.addProperty("updated_at", nowSec());
-		}
-	}
-
-	/**
 	 * Left-behind loot: the same price-at-record pattern as drops, aggregated
 	 * per source ({@code untaken: {source: {qty, value}}}). Forward-only and
 	 * local — the morbid ledger of what was declined.
@@ -1148,6 +915,7 @@ class LocalStore
 		}
 		long qty = 0;
 		long value = 0;
+		java.util.List<Object[]> perItem = new java.util.ArrayList<>();
 		for (JsonElement ie : items)
 		{
 			if (!ie.isJsonObject() || !ie.getAsJsonObject().has("id"))
@@ -1157,8 +925,20 @@ class LocalStore
 			JsonObject it = ie.getAsJsonObject();
 			int id = it.get("id").getAsInt();
 			int n = it.has("quantity") ? it.get("quantity").getAsInt() : 1;
+			int canon = itemManager.canonicalize(id);
+			long v = (long) itemManager.getItemPrice(canon) * n;
 			qty += n;
-			value += (long) itemManager.getItemPrice(itemManager.canonicalize(id)) * n;
+			value += v;
+			String name;
+			try
+			{
+				name = itemManager.getItemComposition(canon).getName();
+			}
+			catch (Exception e)
+			{
+				name = "Item " + id;
+			}
+			perItem.add(new Object[]{name, (long) n, v});
 		}
 		synchronized (lock)
 		{
@@ -1170,6 +950,18 @@ class LocalStore
 			src.addProperty("value", (src.has("value") ? src.get("value").getAsLong() : 0) + value);
 			untaken.add(source, src);
 			root.add("untaken", untaken);
+			// The item lens accumulates beside the source lens, name-keyed.
+			JsonObject byItem = root.has("untaken_items") && root.get("untaken_items").isJsonObject()
+				? root.getAsJsonObject("untaken_items") : new JsonObject();
+			for (Object[] row : perItem)
+			{
+				JsonObject e = byItem.has((String) row[0]) && byItem.get((String) row[0]).isJsonObject()
+					? byItem.getAsJsonObject((String) row[0]) : new JsonObject();
+				e.addProperty("qty", (e.has("qty") ? e.get("qty").getAsLong() : 0) + (Long) row[1]);
+				e.addProperty("value", (e.has("value") ? e.get("value").getAsLong() : 0) + (Long) row[2]);
+				byItem.add((String) row[0], e);
+			}
+			root.add("untaken_items", byItem);
 			sessionUntaken += qty;
 			sessionUntakenValue += value;
 			root.addProperty("updated_at", nowSec());
@@ -1191,67 +983,10 @@ class LocalStore
 		}
 	}
 
-	/**
-	 * Adopt the cloud's uncollected ledger: per-source rows floor into the
-	 * same {@code untaken} store live capture feeds (max, never add — the
-	 * server re-includes what this client pushed), per-item rows into a
-	 * sibling {@code untaken_items} map for the lens's item section.
-	 */
-	void floorUntaken(java.util.List<String[]> bySource, java.util.List<String[]> byItem,
-		String rsn)
+	/** Add the price of one consumption to a typed key's lifetime gp. Client thread. */
+	void addConsumableValue(String key, long gp, String rsn)
 	{
-		if (!isReadyFor(rsn))
-		{
-			return;
-		}
-		synchronized (lock)
-		{
-			if (bySource != null)
-			{
-				JsonObject untaken = root.has("untaken") && root.get("untaken").isJsonObject()
-					? root.getAsJsonObject("untaken") : new JsonObject();
-				root.add("untaken", untaken);
-				floorUntakenRows(untaken, bySource);
-			}
-			if (byItem != null)
-			{
-				JsonObject items = root.has("untaken_items") && root.get("untaken_items").isJsonObject()
-					? root.getAsJsonObject("untaken_items") : new JsonObject();
-				root.add("untaken_items", items);
-				floorUntakenRows(items, byItem);
-			}
-		}
-	}
-
-	private static void floorUntakenRows(JsonObject store, java.util.List<String[]> rows)
-	{
-		for (String[] row : rows)
-		{
-			JsonObject e = store.has(row[0]) && store.get(row[0]).isJsonObject()
-				? store.getAsJsonObject(row[0]) : new JsonObject();
-			if (!store.has(row[0]))
-			{
-				e.addProperty("qty", 0);
-				e.addProperty("value", 0);
-				store.add(row[0], e);
-			}
-			long qty = Long.parseLong(row[1]);
-			long value = Long.parseLong(row[2]);
-			if (qty > (e.has("qty") ? e.get("qty").getAsLong() : 0))
-			{
-				e.addProperty("qty", qty);
-			}
-			if (value > (e.has("value") ? e.get("value").getAsLong() : 0))
-			{
-				e.addProperty("value", value);
-			}
-		}
-	}
-
-	/** Floor the server-priced per-key consumable values ({key: gp}). */
-	void floorConsumableValues(java.util.List<String[]> rows, String rsn)
-	{
-		if (!isReadyFor(rsn) || rows == null)
+		if (!isReadyFor(rsn) || key == null || key.isEmpty() || gp <= 0)
 		{
 			return;
 		}
@@ -1259,20 +994,273 @@ class LocalStore
 		{
 			JsonObject store = root.has("consumable_values") && root.get("consumable_values").isJsonObject()
 				? root.getAsJsonObject("consumable_values") : new JsonObject();
+			long cur = store.has(key) && !store.get(key).isJsonNull() ? store.get(key).getAsLong() : 0;
+			store.addProperty(key, cur + gp);
 			root.add("consumable_values", store);
-			for (String[] row : rows)
-			{
-				long v = Long.parseLong(row[1]);
-				long cur = store.has(row[0]) ? store.get(row[0]).getAsLong() : 0;
-				if (v > cur)
-				{
-					store.addProperty(row[0], v);
-				}
-			}
+			root.addProperty("updated_at", nowSec());
 		}
 	}
 
-	/** Server-priced gp per consumable counter key (empty when never adopted). */
+	/**
+	 * Apply absolute corrections to the lifetime trackers — base AND shown value,
+	 * so the fix survives the next {@code setTrackers} recompute. A null value
+	 * deletes the key outright. One-shot migrations only.
+	 */
+	void correctTrackers(java.util.Map<String, Long> fixes, String rsn)
+	{
+		if (!isReadyFor(rsn) || fixes == null)
+		{
+			return;
+		}
+		synchronized (lock)
+		{
+			JsonObject tr = root.has("trackers") && root.get("trackers").isJsonObject()
+				? root.getAsJsonObject("trackers") : new JsonObject();
+			for (java.util.Map.Entry<String, Long> e : fixes.entrySet())
+			{
+				if (e.getValue() == null)
+				{
+					trackersBase.remove(e.getKey());
+					tr.remove(e.getKey());
+				}
+				else
+				{
+					trackersBase.addProperty(e.getKey(), e.getValue());
+					tr.addProperty(e.getKey(), e.getValue());
+				}
+			}
+			root.add("trackers", tr);
+			root.addProperty("updated_at", nowSec());
+		}
+	}
+
+	/** The lifetime base (pre-session) for one counter — 0 when unknown. */
+	long trackerBase(String key)
+	{
+		synchronized (lock)
+		{
+			return trackersBase != null && trackersBase.has(key)
+				&& !trackersBase.get(key).isJsonNull()
+				? trackersBase.get(key).getAsLong() : 0;
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// The slayer journey (task-by-task, kept locally)
+	// ------------------------------------------------------------------
+
+	// A runaway guard far above any realistic task history, not a retention policy.
+	private static final int SLAYER_TASK_CAP = 1000;
+
+	/** The slayer store, created on first use. Callers hold {@code lock}. */
+	private JsonObject slayerRoot()
+	{
+		JsonObject sl = root.has("slayer") && root.get("slayer").isJsonObject()
+			? root.getAsJsonObject("slayer") : new JsonObject();
+		if (!root.has("slayer") || !root.get("slayer").isJsonObject())
+		{
+			root.add("slayer", sl);
+		}
+		if (!sl.has("tasks") || !sl.get("tasks").isJsonArray())
+		{
+			sl.add("tasks", new JsonArray());
+		}
+		return sl;
+	}
+
+	/** The newest task segment if it is open and names {@code task}, else null.
+	 *  Callers hold {@code lock}. */
+	private static JsonObject openSegment(JsonArray tasks, String task)
+	{
+		if (tasks.size() == 0)
+		{
+			return null;
+		}
+		JsonObject last = tasks.get(tasks.size() - 1).getAsJsonObject();
+		boolean open = last.has("open") && last.get("open").getAsBoolean();
+		return open && last.has("task")
+			&& task.equalsIgnoreCase(last.get("task").getAsString()) ? last : null;
+	}
+
+	/** One on-task kill: extend (or open) the current task segment. Callers hold lock. */
+	private void slayerLoot(String task, long assignment, long value)
+	{
+		JsonObject sl = slayerRoot();
+		JsonArray tasks = sl.getAsJsonArray("tasks");
+		JsonObject seg = openSegment(tasks, task);
+		if (seg == null)
+		{
+			seg = new JsonObject();
+			seg.addProperty("task", task);
+			seg.addProperty("kills", 0);
+			seg.addProperty("assignment", 0);
+			seg.addProperty("value", 0);
+			seg.addProperty("open", true);
+			tasks.add(seg);
+			while (tasks.size() > SLAYER_TASK_CAP)
+			{
+				tasks.remove(0);
+			}
+		}
+		seg.addProperty("kills", seg.get("kills").getAsLong() + 1);
+		seg.addProperty("value", seg.get("value").getAsLong() + value);
+		if (assignment > seg.get("assignment").getAsLong())
+		{
+			seg.addProperty("assignment", assignment);
+		}
+		seg.addProperty("ts", nowSec());
+	}
+
+	/**
+	 * A task completion: close the open segment (opening one first if the whole
+	 * task somehow went unwitnessed). The finished line's exact kill count trues
+	 * up the loot spine — kills the drops never captured surface as
+	 * {@code noLootKills}, the same reconciliation the site performs.
+	 */
+	private void recordSlayerCompletion(JsonObject data)
+	{
+		String task = data.has("task") && !data.get("task").isJsonNull()
+			? data.get("task").getAsString() : null;
+		if (task == null || task.isEmpty())
+		{
+			return;
+		}
+		Long exact = data.has("killCount") && !data.get("killCount").isJsonNull()
+			? data.get("killCount").getAsLong() : null;
+		Long streak = data.has("count") && !data.get("count").isJsonNull()
+			? data.get("count").getAsLong() : null;
+		synchronized (lock)
+		{
+			JsonObject sl = slayerRoot();
+			JsonArray tasks = sl.getAsJsonArray("tasks");
+			JsonObject seg = openSegment(tasks, task);
+			if (seg == null)
+			{
+				seg = new JsonObject();
+				seg.addProperty("task", task);
+				seg.addProperty("kills", 0);
+				seg.addProperty("assignment", 0);
+				seg.addProperty("value", 0);
+				tasks.add(seg);
+			}
+			long kills = seg.get("kills").getAsLong();
+			if (exact != null && exact > 0)
+			{
+				if (exact > kills)
+				{
+					seg.addProperty("noLootKills", exact - kills);
+				}
+				seg.addProperty("kills", Math.max(kills, exact));
+				if (exact > seg.get("assignment").getAsLong())
+				{
+					seg.addProperty("assignment", exact);
+				}
+			}
+			seg.addProperty("open", false);
+			seg.addProperty("ts", nowSec());
+			long done = sl.has("completed") ? asLong(sl.get("completed")) : 0;
+			// The streak line's lifetime total is authoritative when it is ahead;
+			// otherwise this completion simply increments what we hold.
+			sl.addProperty("completed", streak != null && streak > done ? streak : done + 1);
+			root.addProperty("updated_at", nowSec());
+		}
+	}
+
+	/**
+	 * One-shot inheritance of the cloud's task history: totals floor, and the
+	 * task list adopts wholesale only while the local list is still empty —
+	 * merging two overlapping spines would double tasks, and by the time a
+	 * local spine exists it is the authoritative one.
+	 */
+	void adoptSlayerJourney(chronicle.ChronicleApiClient.SlayerJourney j, String rsn)
+	{
+		if (!isReadyFor(rsn) || j == null)
+		{
+			return;
+		}
+		synchronized (lock)
+		{
+			JsonObject sl = slayerRoot();
+			JsonArray tasks = sl.getAsJsonArray("tasks");
+			if (tasks.size() == 0 && j.tasks != null)
+			{
+				// The cloud sends newest-first; the store keeps oldest-first.
+				for (int i = j.tasks.size() - 1; i >= 0; i--)
+				{
+					chronicle.ChronicleApiClient.SlayerTask t = j.tasks.get(i);
+					JsonObject seg = new JsonObject();
+					seg.addProperty("task", t.task);
+					seg.addProperty("kills", t.kills);
+					seg.addProperty("assignment", t.assignment);
+					seg.addProperty("value", t.totalValue);
+					if (t.noLootKills > 0)
+					{
+						seg.addProperty("noLootKills", t.noLootKills);
+					}
+					seg.addProperty("ts", (long) t.ts);
+					seg.addProperty("open", t.inProgress);
+					tasks.add(seg);
+				}
+			}
+			if (j.completedTasks > (sl.has("completed") ? asLong(sl.get("completed")) : 0))
+			{
+				sl.addProperty("completed", j.completedTasks);
+			}
+			if (j.totalXpEst > (sl.has("xp_est") ? asLong(sl.get("xp_est")) : 0))
+			{
+				sl.addProperty("xp_est", j.totalXpEst);
+			}
+			root.addProperty("updated_at", nowSec());
+		}
+	}
+
+	/** The journey as the journal knows it, shaped for the panel (newest first). */
+	chronicle.ChronicleApiClient.SlayerJourney slayerJourney()
+	{
+		synchronized (lock)
+		{
+			if (root == null)
+			{
+				return null;
+			}
+			JsonObject sl = root.has("slayer") && root.get("slayer").isJsonObject()
+				? root.getAsJsonObject("slayer") : new JsonObject();
+			JsonArray tasks = sl.has("tasks") && sl.get("tasks").isJsonArray()
+				? sl.getAsJsonArray("tasks") : new JsonArray();
+			java.util.List<chronicle.ChronicleApiClient.SlayerTask> out =
+				new java.util.ArrayList<>(tasks.size());
+			long totalKills = 0;
+			long totalValue = 0;
+			for (int i = tasks.size() - 1; i >= 0; i--)
+			{
+				if (!tasks.get(i).isJsonObject())
+				{
+					continue;
+				}
+				JsonObject seg = tasks.get(i).getAsJsonObject();
+				long kills = seg.has("kills") ? asLong(seg.get("kills")) : 0;
+				long value = seg.has("value") ? asLong(seg.get("value")) : 0;
+				totalKills += kills;
+				totalValue += value;
+				out.add(new chronicle.ChronicleApiClient.SlayerTask(
+					seg.has("task") ? seg.get("task").getAsString() : "?",
+					kills,
+					seg.has("assignment") ? asLong(seg.get("assignment")) : 0,
+					seg.has("noLootKills") ? asLong(seg.get("noLootKills")) : 0,
+					seg.has("ts") ? asLong(seg.get("ts")) : 0,
+					value,
+					seg.has("open") && seg.get("open").getAsBoolean()));
+			}
+			return new chronicle.ChronicleApiClient.SlayerJourney(
+				(int) (sl.has("completed") ? asLong(sl.get("completed")) : 0),
+				totalKills, totalValue,
+				sl.has("xp_est") ? asLong(sl.get("xp_est")) : 0,
+				out);
+		}
+	}
+
+	/** Lifetime gp per consumable counter key — accumulated at each bite/dose
+	 *  (plus whatever an old cloud adoption already banked). */
 	java.util.Map<String, Long> consumableValues()
 	{
 		java.util.Map<String, Long> out = new java.util.LinkedHashMap<>();
