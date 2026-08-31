@@ -1771,9 +1771,21 @@ class ChroniclePanel extends PluginPanel
 	// Potions rows say what the habit cost.
 	private Map<String, Long> consumVals = new LinkedHashMap<>();
 
+	// The resource-scoped drop figure, refreshed per rebuild. It rides the
+	// gathered row as its margin rather than standing as a row of its own:
+	// gathered says what the hours at the rocks produced, this says what was
+	// chosen against and left where it fell, and the two are only worth reading
+	// side by side. They are never netted — subtracting one from the other reads
+	// a powerminer's whole career as roughly nothing.
+	private long resourcesDropped;
+
 	private String rowValue(Map.Entry<String, Long> e)
 	{
 		String base = StatRegistry.isGp(e.getKey()) ? gp(e.getValue()) + " gp" : fmt(e.getValue());
+		if (e.getKey().equals("resourcesGatheredValue") && resourcesDropped > 0)
+		{
+			return base + " · " + gp(resourcesDropped) + " dropped";
+		}
 		Long cv = consumVals.get(e.getKey());
 		return cv != null && cv > 0 ? base + " · " + gp(cv) + " gp" : base;
 	}
@@ -1809,6 +1821,7 @@ class ChroniclePanel extends PluginPanel
 		// ghost "Other" row. Every row shows — big sections fold like the
 		// clog's pages rather than being capped.
 		Map<String, Long> counters = counters();
+		resourcesDropped = counters.getOrDefault("resourcesDroppedValue", 0L);
 		Map<String, List<Map.Entry<String, Long>>> rowsBySection = new LinkedHashMap<>();
 		Map<String, Long> floorTotals = new LinkedHashMap<>();
 		for (Map.Entry<String, Long> e : counters.entrySet())

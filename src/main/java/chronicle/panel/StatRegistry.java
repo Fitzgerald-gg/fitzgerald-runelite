@@ -49,8 +49,14 @@ public final class StatRegistry
 		"animalsPetted", "patchesRaked", "highAlchemyCasts", "lowAlchemyCasts"));
 	// The site hides these outright: totals whose story other surfaces tell
 	// (History owns xp; the offering-xp figures double-count real Prayer xp).
+	// resourcesDroppedValue is kept out of the rows for the opposite reason — it
+	// is not suppressed but promoted, read as the margin on the row
+	// resourcesGatheredValue heads, where the two together say what neither says
+	// alone. As its own row it would be an orphan gp figure with nothing to be
+	// measured against, and would read as a second "Value dropped".
 	private static final Set<String> HIDE = new HashSet<>(Arrays.asList(
-		"totalXpGained", "bowsFletched", "demonicOfferingXp", "sinisterOfferingXp"));
+		"totalXpGained", "bowsFletched", "demonicOfferingXp", "sinisterOfferingXp",
+		"resourcesDroppedValue"));
 
 	/** One craft's claim: explicit keys and floors first, then typed suffixes. */
 	private static final class SkillSpec
@@ -156,7 +162,11 @@ public final class StatRegistry
 		LABELS.put("tilesRan", "Tiles run");
 		LABELS.put("coinsFromAlchemy", "Coins from alchemy");
 		LABELS.put("itemsDroppedValue", "Value dropped");
-		LABELS.put("resourcesGatheredValue", "Resources gathered");
+		// The site's own label for this key is "Resources gathered". The panel's
+		// row carries the PAIR — what the hours produced and what was left where
+		// it fell — and at 214px the sentence only fits if the label keeps the
+		// verb and hands the rest of the line to the two figures.
+		LABELS.put("resourcesGatheredValue", "Gathered");
 		LABELS.put("untakenLootValue", "Uncollected loot");
 		LABELS.put("untakenLootCount", "Loot left behind");
 		LABELS.put("coinsSpentAtShops", "Spent at shops");

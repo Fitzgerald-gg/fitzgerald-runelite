@@ -237,7 +237,13 @@ public class PanelPreviewTest
 		s.lifetime.put("teleportsGrandExchange", 899L);
 		s.lifetime.put("coinsFromAlchemy", 12_400_310L);
 		s.lifetime.put("coinsSpentAtShops", 1_002_113L);
-		s.lifetime.put("itemsDroppedValue", 88_120L);
+		// The pair, on one row: gathered with dropped as its margin. The resource
+		// figure is a SLICE of the whole bin, so the fixture keeps it beneath —
+		// a preview showing the part exceeding the whole is a picture of a bug
+		// that would then read as correct.
+		s.lifetime.put("itemsDroppedValue", 1_488_120L);
+		s.lifetime.put("resourcesGatheredValue", 4_233_800L);
+		s.lifetime.put("resourcesDroppedValue", 1_142_600L);
 		s.lifetime.put("consumedValue", 3_204_112L);
 		s.lifetime.put("sharksEaten", 2_113L);
 		s.lifetime.put("potionDoses", 8_442L);

@@ -45,7 +45,7 @@ import net.runelite.client.game.ItemManager;
  */
 @Singleton
 @Slf4j
-class LocalStore
+class LocalStore implements chronicle.counters.GatheredLedger
 {
 	static final int SCHEMA = 1;
 	// The journal keeps milestones indefinitely by design; this cap is a
@@ -85,6 +85,19 @@ class LocalStore
 	private long sessionUntakenValue;
 	private final java.util.LinkedHashMap<String, long[]> sessionSources = new java.util.LinkedHashMap<>();
 	private final java.util.ArrayDeque<RecentDrop> recentDrops = new java.util.ArrayDeque<>();
+
+	// A runaway guard, not a retention policy: every log, ore, fish and gem in the
+	// game together is a few hundred ids, so a set past this is evidence something
+	// other than a gather is minting entries — and the journal is written whole on
+	// every flush, so an unbounded list would grow the file forever.
+	private static final int GATHERED_CAP = 1024;
+	// The gathered-item ledger's fast half: an in-memory mirror of the record's
+	// "gathered_items", so the membership test a drop click asks costs no lock and
+	// no scan. Concurrent because the resolver writes it from the client thread
+	// while load() rebuilds it from the executor. The array on disk is the record;
+	// this is only how it is read.
+	private final java.util.Set<Integer> gatheredItems =
+		java.util.concurrent.ConcurrentHashMap.newKeySet();
 
 	/** One recent drop, panel-facing (immutable copy). */
 	static final class RecentDrop
@@ -168,6 +181,7 @@ class LocalStore
 				trackersBase = new JsonObject();
 				currentRsn = null;
 				ready = false;
+				gatheredItems.clear();
 			}
 			return;
 		}
@@ -184,6 +198,20 @@ class LocalStore
 			// session counter is never double-counted.
 			trackersBase = deepCopy(loaded.getAsJsonObject("trackers"));
 			currentRsn = rsn;
+			// Rebuilt, not merged: the mirror must describe THIS account only, or
+			// an ore the previous character mined would credit this one's drops.
+			gatheredItems.clear();
+			if (loaded.has("gathered_items") && loaded.get("gathered_items").isJsonArray())
+			{
+				for (JsonElement g : loaded.getAsJsonArray("gathered_items"))
+				{
+					long id = asLong(g);
+					if (id > 0 && gatheredItems.size() < GATHERED_CAP)
+					{
+						gatheredItems.add((int) id);
+					}
+				}
+			}
 			ready = true;
 		}
 		// This account's record opened, so whatever was wrong before belongs to
@@ -204,6 +232,10 @@ class LocalStore
 			sessionUntakenValue = 0;
 			sessionSources.clear();
 			recentDrops.clear();
+			// Not session scratch, but account scope: the next login may be a
+			// different character, and this one's ore must not vouch for theirs.
+			// load() reads it back from the record it was written to.
+			gatheredItems.clear();
 		}
 	}
 
@@ -1088,6 +1120,43 @@ class LocalStore
 			root.add("consumable_values", store);
 			root.addProperty("updated_at", nowSec());
 		}
+	}
+
+	/**
+	 * Remember an item id this account gathered. Client thread, once per resolved
+	 * gathering action — so the already-known case, which is all but the first few
+	 * of a career, takes the lock-free mirror and returns.
+	 *
+	 * <p>The record, not the session store, because the question it answers spans
+	 * sessions: an ore mined last week and binned today is still a resource
+	 * dropped, and a set that emptied at logout would call it bank junk.
+	 */
+	@Override
+	public void noteGathered(int itemId)
+	{
+		if (itemId <= 0 || !ready || gatheredItems.contains(itemId)
+			|| gatheredItems.size() >= GATHERED_CAP)
+		{
+			return;
+		}
+		synchronized (lock)
+		{
+			if (root == null || currentRsn == null || !gatheredItems.add(itemId))
+			{
+				return;
+			}
+			JsonArray ids = root.has("gathered_items") && root.get("gathered_items").isJsonArray()
+				? root.getAsJsonArray("gathered_items") : new JsonArray();
+			ids.add(itemId);
+			root.add("gathered_items", ids);
+			root.addProperty("updated_at", nowSec());
+		}
+	}
+
+	@Override
+	public boolean wasGathered(int itemId)
+	{
+		return itemId > 0 && gatheredItems.contains(itemId);
 	}
 
 	/**

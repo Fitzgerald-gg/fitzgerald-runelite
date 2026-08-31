@@ -21,6 +21,7 @@ import static chronicle.counters.StatKeys.EXAMINES;
 import static chronicle.counters.StatKeys.FLAX_GATHERED;
 import static chronicle.counters.StatKeys.ITEMS_DISCARDED;
 import static chronicle.counters.StatKeys.ITEMS_DROPPED_VALUE;
+import static chronicle.counters.StatKeys.RESOURCES_DROPPED_VALUE;
 
 /**
  * Records small, one-off item interactions that never carry their own attempt
@@ -36,11 +37,22 @@ public class ItemStatTracker implements StatTracker
 	private final Client client;
 	private final ItemManager itemManager;
 
+	// Tells a gathered resource apart from bank junk at the moment of the click.
+	// Nullable — tests build the tracker bare and the plain drop figure still flows.
+	private final GatheredLedger gatheredLedger;
+
 	public ItemStatTracker(StatStore statStore, Client client, ItemManager itemManager)
+	{
+		this(statStore, client, itemManager, null);
+	}
+
+	public ItemStatTracker(StatStore statStore, Client client, ItemManager itemManager,
+		GatheredLedger gatheredLedger)
 	{
 		this.statStore = statStore;
 		this.client = client;
 		this.itemManager = itemManager;
+		this.gatheredLedger = gatheredLedger;
 	}
 
 	@Override
@@ -88,7 +100,8 @@ public class ItemStatTracker implements StatTracker
 				qty = Math.max(1, slotItem.getQuantity());
 			}
 		}
-		final int each = itemManager.getItemPrice(itemManager.canonicalize(itemId));
+		final int canonical = itemManager.canonicalize(itemId);
+		final int each = itemManager.getItemPrice(canonical);
 		if (each <= 0)
 		{
 			return;
@@ -96,8 +109,17 @@ public class ItemStatTracker implements StatTracker
 		// Clamp the multiply so a huge stack can't overflow int before StatStore
 		// (which then saturates the running total).
 		final long value = (long) each * qty;
-		statStore.incrementStatBy(ITEMS_DROPPED_VALUE,
-			value > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) value);
+		final int banked = value > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) value;
+		statStore.incrementStatBy(ITEMS_DROPPED_VALUE, banked);
+		// The resource-scoped half of the gathered/dropped pair. This figure is
+		// read beside what the gathering skills produced, and the total above
+		// counts every bin — a bank trip clearing old clue rewards included — so
+		// pairing that total with gathered value would flatter the dropped side.
+		// Only what this account pulled out of the world itself counts here.
+		if (gatheredLedger != null && gatheredLedger.wasGathered(canonical))
+		{
+			statStore.incrementStatBy(RESOURCES_DROPPED_VALUE, banked);
+		}
 	}
 
 	@Override

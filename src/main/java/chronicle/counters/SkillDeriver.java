@@ -63,6 +63,12 @@ public class SkillDeriver
 		"FLETCHING", "CRAFTING", "HERBLORE", "HUNTER"));
 	// gathering: generic floor key + typed family suffix
 	private static final Map<String, String[]> GATHERING = new HashMap<>();
+	// The gathers whose produce is a RESOURCE the world gave up, so a gp figure
+	// means something. Cooking shares the table's shape but is deliberately out:
+	// it transforms a fish already valued when it was caught, and pricing the
+	// cooked one would count the same catch twice.
+	private static final Set<String> VALUED_GATHERING = new HashSet<>(Arrays.asList(
+		"WOODCUTTING", "MINING", "FISHING"));
 	// net-trap species by exact catch xp (merged multi-trap deltas match ×n)
 	private static final double[][] NET_TRAP_BASES = {
 		{152.0, 0}, {224.0, 1}, {272.0, 2}, {319.2, 3}, {344.0, 4}};
@@ -186,6 +192,12 @@ public class SkillDeriver
 	private final StatStore statStore;
 	private final Gson gson;
 
+	// Where a resolved gather reports the item it produced. Wired after
+	// construction (the journal it writes to is mounted per account, long after
+	// Guice builds this), so volatile: the client thread reads it on every
+	// gathering tick. Nullable — tests derive without a journal.
+	private volatile GatheredLedger gatheredLedger;
+
 	private Map<String, Map<String, String>> xpTable;
 	private Map<String, List<Rule>> itemRules;
 	private Map<String, String> objTable;
@@ -206,6 +218,11 @@ public class SkillDeriver
 		this.itemManager = itemManager;
 		this.statStore = statStore;
 		this.gson = gson;
+	}
+
+	void setGatheredLedger(GatheredLedger ledger)
+	{
+		this.gatheredLedger = ledger;
 	}
 
 	/** Derive a tuple's counters and fold them into the stat store. */
@@ -465,12 +482,14 @@ public class SkillDeriver
 		}
 		String token = "";
 		int n = 1;
+		int gained = 0;
 		if (!itemId.isEmpty())
 		{
 			token = itemToken(skill, name(itemId));
 			if (!token.isEmpty())
 			{
 				n = qty;
+				gained = canonical(itemId);
 			}
 		}
 		if (token.isEmpty() && !objId.isEmpty())
@@ -486,7 +505,65 @@ public class SkillDeriver
 		{
 			out.add(entry(token + gen[1], n));
 		}
+		if (gained > 0 && VALUED_GATHERING.contains(skill))
+		{
+			// Priced HERE, at the gather, and banked as a running total. The
+			// alternative — multiplying the typed counters by a price when the
+			// panel is read — silently re-values every hour ever spent at a rock
+			// at whatever today's market says, so a crash would erase work that
+			// was worth something when it was done.
+			int gp = valueOf(gained, n);
+			if (gp > 0)
+			{
+				out.add(entry(StatKeys.RESOURCES_GATHERED_VALUE, gp));
+			}
+			// Only the token-resolved gathers reach here, so the ledger records
+			// exactly the ids this resolver recognised as resources — the same
+			// gate the typed counters pass, which is what keeps the set bounded
+			// to a career's worth of logs, ores, fish and gems.
+			GatheredLedger ledger = gatheredLedger;
+			if (ledger != null)
+			{
+				ledger.noteGathered(gained);
+			}
+		}
 		return out;
+	}
+
+	/** An item id's canonical form, or 0 when the tuple field is not one. */
+	private int canonical(String itemId)
+	{
+		try
+		{
+			int id = Integer.parseInt(itemId);
+			return id > 0 ? itemManager.canonicalize(id) : 0;
+		}
+		catch (RuntimeException e)
+		{
+			return 0;
+		}
+	}
+
+	/** Live GE worth of {@code qty} of a canonical id; 0 for anything unpriced. */
+	private int valueOf(int canonicalId, int qty)
+	{
+		int each;
+		try
+		{
+			each = itemManager.getItemPrice(canonicalId);
+		}
+		catch (RuntimeException e)
+		{
+			return 0;
+		}
+		if (each <= 0)
+		{
+			return 0;   // untradeables and unpriced ids simply add nothing
+		}
+		// Clamp the multiply so a huge harvest can't overflow int before
+		// StatStore (which then saturates the running total).
+		long value = (long) each * Math.max(1, qty);
+		return value > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) value;
 	}
 
 	// ── skill branches ─────────────────────────────────────────────────

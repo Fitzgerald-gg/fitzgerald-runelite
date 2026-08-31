@@ -41,6 +41,11 @@ public class ChronicleCounters
 	// client thread when the tracker array is lazily built.
 	private volatile java.util.function.BiConsumer<String, Integer> consumableSink;
 
+	// The account's gathered-item ledger, wired to the journal at startUp for the
+	// same reason as the sink above. Volatile on the same grounds: it is read on
+	// the client thread when the tracker array is lazily built.
+	private volatile GatheredLedger gatheredLedger;
+
 	// Built lazily on the first event so the consumable sink above — wired at
 	// startUp, AFTER this constructor — is in hand when we build the tracker that
 	// needs it. reset() leans on the same laziness to rebuild after a blind window.
@@ -66,6 +71,18 @@ public class ChronicleCounters
 		this.consumableSink = sink;
 	}
 
+	/**
+	 * Point both halves of the resource pair at one ledger: the resolver notes
+	 * every gather into it, the drop tracker asks it whether a binned item was
+	 * one of them. The deriver is a singleton built by Guice rather than one of
+	 * the trackers, so it is handed the ledger here rather than at the lazy build.
+	 */
+	public void setGatheredLedger(GatheredLedger ledger)
+	{
+		this.gatheredLedger = ledger;
+		skillDeriver.setGatheredLedger(ledger);
+	}
+
 	private StatTracker[] trackers()
 	{
 		// Read the field once. A reset() landing between the null check and the return
@@ -76,7 +93,7 @@ public class ChronicleCounters
 		{
 			built = new StatTracker[]{
 				new GoldStatTracker(store, client),
-				new ItemStatTracker(store, client, itemManager),
+				new ItemStatTracker(store, client, itemManager, gatheredLedger),
 				new MovementStatTracker(store, client),
 				new SkillingStatTracker(store, client, skillDeriver),
 				new FoodStatTracker(store, client, itemManager, consumableSink),

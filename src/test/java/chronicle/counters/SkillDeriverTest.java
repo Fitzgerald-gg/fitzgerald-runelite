@@ -5,14 +5,18 @@ package chronicle.counters;
 
 import com.google.gson.Gson;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import net.runelite.api.ItemComposition;
 import net.runelite.client.game.ItemManager;
 import org.junit.Test;
 import org.mockito.Mockito;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Pins the LOCAL resolver against the same answers the server's
@@ -22,6 +26,11 @@ import static org.junit.Assert.assertNull;
 public class SkillDeriverTest
 {
 	private final Map<Integer, String> names = new HashMap<>();
+	// The GE as it stands at the moment of each derive; a test moves it to prove
+	// the value is banked at the gather rather than looked up afterwards.
+	private final Map<Integer, Integer> prices = new HashMap<>();
+	// Stands in for the journal's gathered-item ledger.
+	private final Set<Integer> gathered = new HashSet<>();
 	private final SkillDeriver d;
 
 	public SkillDeriverTest()
@@ -29,6 +38,8 @@ public class SkillDeriverTest
 		ItemManager im = Mockito.mock(ItemManager.class);
 		Mockito.when(im.canonicalize(Mockito.anyInt()))
 			.thenAnswer(inv -> inv.getArgument(0));
+		Mockito.when(im.getItemPrice(Mockito.anyInt()))
+			.thenAnswer(inv -> prices.getOrDefault((Integer) inv.getArgument(0), 0));
 		Mockito.when(im.getItemComposition(Mockito.anyInt())).thenAnswer(inv ->
 		{
 			ItemComposition c = Mockito.mock(ItemComposition.class);
@@ -37,6 +48,20 @@ public class SkillDeriverTest
 			return c;
 		});
 		d = new SkillDeriver(im, new StatStore(), new Gson());
+		d.setGatheredLedger(new GatheredLedger()
+		{
+			@Override
+			public void noteGathered(int itemId)
+			{
+				gathered.add(itemId);
+			}
+
+			@Override
+			public boolean wasGathered(int itemId)
+			{
+				return gathered.contains(itemId);
+			}
+		});
 	}
 
 	private Map<String, Integer> derive(String tuple)
@@ -181,5 +206,83 @@ public class SkillDeriverTest
 		assertNull(derive("RUNECRAFT|2||13446|1||"));
 		// firemaking with a missed consumed falls to the bare-xp ladder
 		assertEquals((Integer) 1, derive("FIREMAKING|303|||||").get("magicLogsBurned"));
+	}
+
+	// ── The resource pair ─────────────────────────────────────────────────
+	// These have no server answer to agree with. The server could only ever
+	// multiply a lifetime count by today's market; the value below is minted
+	// here, at the price that stood when the resource came out of the world.
+
+	@Test
+	public void aGatheredResourceIsValuedAtTheMomentItIsGathered()
+	{
+		names.put(1515, "Yew logs");
+		prices.put(1515, 240);
+		Map<String, Integer> got = derive("WOODCUTTING|175||1515|1||");
+		assertEquals((Integer) 1, got.get("logsChopped"));
+		assertEquals((Integer) 1, got.get("yewLogsChopped"));
+		assertEquals((Integer) 240, got.get("resourcesGatheredValue"));
+
+		// The market moves; the next log is worth what the market now says, and
+		// the 240 already banked is not revisited. That is the whole reason this
+		// is priced at the gather instead of multiplied out at read time — a
+		// crash would otherwise erase work that was worth something when it was done.
+		prices.put(1515, 5);
+		assertEquals((Integer) 5,
+			derive("WOODCUTTING|175||1515|1||").get("resourcesGatheredValue"));
+	}
+
+	@Test
+	public void theWholeCatchIsValuedNotTheAction()
+	{
+		names.put(3150, "Karambwanji");
+		prices.put(3150, 30);
+		// Some spots hand over several at once; the value follows the quantity the
+		// typed counter already trusts, not the number of clicks.
+		Map<String, Integer> got = derive("FISHING|5||3150|4||");
+		assertEquals((Integer) 4, got.get("karambwanjiCaught"));
+		assertEquals((Integer) 120, got.get("resourcesGatheredValue"));
+	}
+
+	@Test
+	public void anUnpricedGatherAddsNothingButIsStillRemembered()
+	{
+		names.put(434, "Clay");
+		Map<String, Integer> got = derive("MINING|5||434|1||");
+		assertEquals((Integer) 1, got.get("rocksMined"));
+		assertNull(got.get("resourcesGatheredValue"));
+		// The ledger records provenance, not worth: an item the GE cannot price is
+		// still one this account pulled out of the ground.
+		assertTrue(gathered.contains(434));
+	}
+
+	@Test
+	public void cookingIsNotAGather()
+	{
+		names.put(385, "Shark");
+		prices.put(385, 800);
+		Map<String, Integer> got = derive("COOKING|210||385|1||");
+		assertEquals((Integer) 1, got.get("foodCooked"));
+		assertEquals((Integer) 1, got.get("sharkCooked"));
+		// The fish was valued when it was caught. Valuing it again on the range
+		// would count one catch twice, and would make a cooked shark binned after
+		// a burn read as a resource dropped where it fell.
+		assertNull(got.get("resourcesGatheredValue"));
+		assertFalse(gathered.contains(385));
+	}
+
+	@Test
+	public void aGatherTheResolverCannotNameIsNotValued()
+	{
+		// The xp ladder still names the tree, but the ARRIVAL is unnamed: nothing
+		// says this nest is the resource rather than something else that happened
+		// to land in the pack on the same tick, so it is neither valued nor
+		// remembered as gathered.
+		names.put(11941, "Bird nest");
+		prices.put(11941, 4000);
+		Map<String, Integer> got = derive("WOODCUTTING|175||11941|1||");
+		assertEquals((Integer) 1, got.get("logsChopped"));
+		assertNull(got.get("resourcesGatheredValue"));
+		assertFalse(gathered.contains(11941));
 	}
 }

@@ -296,4 +296,44 @@ public class LocalStorePersistenceTest
 		store.flush(fresh);
 		assertTrue(new File(fresh, FILE).isFile());
 	}
+
+	// ── The gathered-item ledger ─────────────────────────────────────────
+
+	@Test
+	public void aGatheredItemIsRememberedAcrossSessions()
+	{
+		LocalStore store = mounted();
+		store.noteGathered(440);
+		assertTrue(store.wasGathered(440));
+		assertFalse(store.wasGathered(1333));
+		store.flush(dir);
+
+		// The whole point of keeping this in the record rather than the session
+		// store: an ore mined last week and binned today is still a resource
+		// dropped where it fell, not bank junk being cleared.
+		LocalStore next = mounted();
+		assertTrue(next.wasGathered(440));
+		assertFalse(next.wasGathered(1333));
+	}
+
+	@Test
+	public void anUnmountedStoreRemembersNoGathers()
+	{
+		// Before an account logs in there is no record to write to, and a note
+		// held in memory here would be credited to whoever mounts next.
+		LocalStore store = newStore();
+		store.noteGathered(440);
+		assertFalse(store.wasGathered(440));
+	}
+
+	@Test
+	public void loggingOutClosesTheLedgerToTheNextAccount()
+	{
+		LocalStore store = mounted();
+		store.noteGathered(440);
+		store.endSession();
+		// A different character may log in next; this one's ore must not vouch
+		// for what theirs drops.
+		assertFalse(store.wasGathered(440));
+	}
 }

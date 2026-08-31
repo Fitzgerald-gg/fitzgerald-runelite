@@ -235,6 +235,26 @@ public final class StatKeys
 	public static final String COINS_SPENT_AT_SHOPS = "coinsSpentAtShops";
 	public static final String COINS_EARNED_AT_SHOPS = "coinsEarnedAtShops";
 
+	// ── The resource pair ─────────────────────────────────────────────────
+	// Two figures read together and never netted. Gathered says what the time at
+	// the rocks produced; dropped says what was chosen against and left where it
+	// fell. Subtracting one from the other reads a powerminer's whole career as
+	// roughly nothing, and destroys both stories to get there — the same reason
+	// loot walked past is its own lens rather than a deduction from drops.
+
+	/**
+	 * Live GE value, at the moment of gathering, of everything woodcutting,
+	 * mining and fishing produced. Priced at the event like drops and
+	 * consumables: a read-time multiply would re-price a whole career at
+	 * today's GE every time the panel opened.
+	 */
+	public static final String RESOURCES_GATHERED_VALUE = "resourcesGatheredValue";
+	/**
+	 * The slice of {@link #ITEMS_DROPPED_VALUE} that this account gathered
+	 * itself, so the pair above compares like with like.
+	 */
+	public static final String RESOURCES_DROPPED_VALUE = "resourcesDroppedValue";
+
 	// ── Gathered by hand ──────────────────────────────────────────────────
 	// These award no experience, so nothing in the skill pipeline can see
 	// them; they are counted from the inventory instead.
