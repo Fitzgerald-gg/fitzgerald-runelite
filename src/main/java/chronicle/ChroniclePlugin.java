@@ -1013,6 +1013,39 @@ public class ChroniclePlugin extends Plugin
 		}
 	}
 
+	/** The earliest thing the record knows about — the honest "kept since",
+	 *  which the Loot Tracker inheritance often pushes years before the file
+	 *  itself was created. Epoch millis, or 0 when nothing is dated. */
+	long keptSince()
+	{
+		long earliest = Long.MAX_VALUE;
+		for (LocalStore.SourceRow r : localStore.dropSources())
+		{
+			if (r.firstMs > 0)
+			{
+				earliest = Math.min(earliest, r.firstMs);
+			}
+		}
+		for (JsonObject e : localStore.feedNewest(4000))
+		{
+			if (e.has("ts"))
+			{
+				long ts = e.get("ts").getAsLong();
+				if (ts > 0)
+				{
+					earliest = Math.min(earliest, ts);
+				}
+			}
+		}
+		return earliest == Long.MAX_VALUE ? 0 : earliest;
+	}
+
+	/** The combat level as the journal last saw it, or 0. */
+	int combatLevel()
+	{
+		return localStore.combatLevel();
+	}
+
 	/** The game's own skill sprites, for the History grid. */
 	net.runelite.client.game.SkillIconManager skillIcons()
 	{

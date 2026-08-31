@@ -214,6 +214,45 @@ public class JournalImportTest
 	}
 
 	@Test
+	public void theSameMomentArrivingAMillisecondApartIsOneLine()
+	{
+		// The client keeps milliseconds; an exported record keeps seconds as a
+		// float. The same log slot therefore arrives a millisecond off, and an
+		// exact-instant match wrote it twice.
+		store.record("COLLECTION", gson.fromJson(
+			"{\"itemName\":\"Zombie shirt\"}", JsonObject.class), "Tester");
+		long ts = store.feedNewest(1).get(0).get("ts").getAsLong();
+
+		store.importJournal(gson.fromJson("{\"feed\":["
+			+ "{\"ts\":" + (ts + 1) + ",\"type\":\"COLLECTION\","
+			+ " \"data\":{\"itemName\":\"Zombie shirt\",\"type\":\"COLLECTION\"}}]}",
+			JsonObject.class), "Tester");
+
+		int shirts = 0;
+		for (JsonObject e : store.feedNewest(50))
+		{
+			if (e.getAsJsonObject("data").has("itemName")
+				&& "Zombie shirt".equals(e.getAsJsonObject("data").get("itemName").getAsString()))
+			{
+				shirts++;
+			}
+		}
+		assertEquals(1, shirts);
+	}
+
+	@Test
+	public void twoSlotsInsideOneSecondStayTwoLines()
+	{
+		// A casket empties several slots in the same second, and those are
+		// genuinely different lines — the subject is what separates them.
+		store.record("COLLECTION", gson.fromJson(
+			"{\"itemName\":\"Zombie boots\"}", JsonObject.class), "Tester");
+		store.record("COLLECTION", gson.fromJson(
+			"{\"itemName\":\"Zombie shirt\"}", JsonObject.class), "Tester");
+		assertEquals(2, store.feedNewest(50).size());
+	}
+
+	@Test
 	public void anImportIntoAnUnmountedAccountIsRefused()
 	{
 		store.endSession();

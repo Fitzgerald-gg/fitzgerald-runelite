@@ -78,7 +78,7 @@ class ChroniclePanel extends PluginPanel
 
 	private enum View
 	{
-		HOME, DROPS, SLAYER, LOG, STATS, HISTORY, JOURNAL
+		HOME, DROPS, SLAYER, LOG, STATS, HISTORY, JOURNAL, MANAGE
 	}
 
 	private final ChroniclePlugin plugin;
@@ -257,6 +257,44 @@ class ChroniclePanel extends PluginPanel
 		});
 		homeTicker.start();
 
+		// Set apart from the tab group and drawn in the aside tone: this is
+		// furniture, reached on the rare occasion something has to be moved in
+		// or out, and it should not read as an eighth place to go. Not hidden
+		// either — getting your own record out has to stay findable.
+		JLabel manage = new JLabel("manage");
+		manage.setFont(FontManager.getRunescapeSmallFont());
+		manage.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker());
+		manage.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+		manage.setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2));
+		manage.setToolTipText("Import, and where your journal lives");
+		manage.addMouseListener(new java.awt.event.MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(java.awt.event.MouseEvent e)
+			{
+				view = view == View.MANAGE ? View.JOURNAL : View.MANAGE;
+				rebuild();
+			}
+
+			@Override
+			public void mouseEntered(java.awt.event.MouseEvent e)
+			{
+				manage.setForeground(accent());
+			}
+
+			@Override
+			public void mouseExited(java.awt.event.MouseEvent e)
+			{
+				manage.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker());
+			}
+		});
+		JPanel manageRow = new JPanel(new BorderLayout());
+		manageRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		manageRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		manageRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 16));
+		manageRow.add(manage, BorderLayout.EAST);
+		north.add(manageRow);
+
 		// The History tab's reads are primed now, off the EDT, rather than on
 		// the click that opens it.
 		gatherHistory();
@@ -360,6 +398,9 @@ class ChroniclePanel extends PluginPanel
 					break;
 				case JOURNAL:
 					body = buildJournal();
+					break;
+				case MANAGE:
+					body = buildManage();
 					break;
 				case HOME:
 				default:
@@ -2931,18 +2972,84 @@ class ChroniclePanel extends PluginPanel
 		}
 	}
 
+	// The kinds a reader actually looks for, and which feed types answer them.
+	// Deliberately few: a filter with a row per type is a database query, not a
+	// way to find the afternoon you got the pet.
+	private static final String[][] JOURNAL_LENSES = {
+		{"All"},
+		{"Log", "COLLECTION"},
+		{"Slayer", "SLAYER"},
+		{"Feats", "COMBAT_ACHIEVEMENT", "QUEST", "DIARY", "CLUE", "PET"},
+		{"Deaths", "DEATH"},
+		{"Sessions", "SESSION"},
+	};
+	private String journalLens = "All";
+	private int journalShown = 60;
+
 	private JPanel buildJournal()
 	{
 		JPanel p = column();
-		List<JsonObject> feed = plugin.feedNewest(50);
+		addFrontispiece(p);
+
+		JPanel lenses = new JPanel(new GridLayout(0, 3, 3, 3));
+		lenses.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		for (String[] lens : JOURNAL_LENSES)
+		{
+			boolean on = lens[0].equals(journalLens);
+			JLabel t = new JLabel(lens[0], JLabel.CENTER);
+			t.setOpaque(true);
+			t.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
+			t.setFont(FontManager.getRunescapeSmallFont());
+			t.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+			t.setForeground(on ? accent() : ColorScheme.LIGHT_GRAY_COLOR.darker());
+			t.addMouseListener(clicker(() ->
+			{
+				journalLens = lens[0];
+				journalShown = 60;
+				rebuild();
+			}));
+			lenses.add(t);
+		}
+		p.add(lenses);
+		p.add(vgap(6));
+
+		java.util.Set<String> wanted = new java.util.HashSet<>();
+		for (String[] lens : JOURNAL_LENSES)
+		{
+			if (lens[0].equals(journalLens))
+			{
+				wanted.addAll(java.util.Arrays.asList(lens).subList(1, lens.length));
+			}
+		}
+		// Read deep and narrow here rather than asking for a fixed slice: a lens
+		// over the newest fifty would show an empty page for anything rare.
+		List<JsonObject> all = plugin.feedNewest(4000);
+		List<JsonObject> feed = new ArrayList<>();
+		for (JsonObject e : all)
+		{
+			if (wanted.isEmpty() || (e.has("type")
+				&& wanted.contains(e.get("type").getAsString())))
+			{
+				feed.add(e);
+			}
+		}
 		if (feed.isEmpty())
 		{
-			p.add(note("Milestones — pets, log slots, tasks, quests, deaths — are "
-				+ "noted here as they happen."));
+			p.add(note("All".equals(journalLens)
+				? "Milestones — pets, log slots, tasks, quests, deaths — are noted "
+					+ "here as they happen."
+				: "Nothing of that kind on the record yet."));
+			return p;
 		}
+
 		String lastDay = null;
+		int mounted = 0;
 		for (JsonObject e : feed)
 		{
+			if (mounted++ >= journalShown)
+			{
+				break;
+			}
 			long ts = e.has("ts") ? e.get("ts").getAsLong() : 0;
 			String day = ts > 0 ? DAY.format(Instant.ofEpochMilli(ts)) : "";
 			if (!day.equals(lastDay))
@@ -2957,13 +3064,107 @@ class ChroniclePanel extends PluginPanel
 			}
 			p.add(row(feedLine(e), "", null));
 		}
+		if (feed.size() > journalShown)
+		{
+			p.add(vgap(6));
+			JButton more = new JButton("Read further back");
+			more.setAlignmentX(Component.LEFT_ALIGNMENT);
+			more.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+			more.addActionListener(ev ->
+			{
+				journalShown += 60;
+				rebuild();
+			});
+			p.add(more);
+		}
+		return p;
+	}
 
-		p.add(vgap(10));
-		JButton export = new JButton("Open journal folder");
-		export.addActionListener(ev -> plugin.actionOpenJournalFolder());
-		export.setAlignmentX(Component.LEFT_ALIGNMENT);
-		export.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-		p.add(export);
+	/**
+	 * The front matter. Every journal opens with a nameplate, and this one had
+	 * been opening with a list — the account's own particulars, stated once, in
+	 * the register the rest of the record is written in.
+	 */
+	private void addFrontispiece(JPanel p)
+	{
+		String rsn = plugin.displayRsn();
+		JPanel plate = card(rsn != null && !rsn.isEmpty()
+			? "The journal of " + rsn : "The journal");
+
+		long since = plugin.keptSince();
+		java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> spine = historySpine;
+		if (since > 0)
+		{
+			plate.add(row("Kept since",
+				TASK_DAY.format(Instant.ofEpochMilli(since)), accent()));
+		}
+		if (spine != null && !spine.isEmpty())
+		{
+			plate.add(row("Days written", fmt(spine.size()), null));
+		}
+		Map<String, long[]> sheet = plugin.skillSheet();
+		long[] overall = sheet.get("overall");
+		int combat = plugin.combatLevel();
+		if (overall != null && overall[0] > 0)
+		{
+			plate.add(row("Total level", fmt(overall[0])
+				+ (combat > 0 ? " · combat " + combat : ""), null));
+		}
+		int fin = plugin.clogFinished();
+		if (fin > 0)
+		{
+			plate.add(row("Collection log", fmt(fin) + " / "
+				+ fmt(Math.max(plugin.clogAvailable(), fin)), null));
+		}
+		p.add(plate);
+
+		// One margin note, and only when the record has something to remark on.
+		String note = frontispieceNote();
+		if (note != null)
+		{
+			p.add(ghostRow(note, ""));
+		}
+		p.add(vgap(6));
+	}
+
+	/** The remark under the plate: the chase that has gone longest without
+	 *  giving, or the gap the record just came back from. */
+	private String frontispieceNote()
+	{
+		if (grindsCache != null)
+		{
+			for (ChronicleApiClient.GrindRow g : grindsCache)
+			{
+				if (g.percentileDry >= 90)
+				{
+					return "still owed a " + g.item.toLowerCase(Locale.ROOT)
+						+ " at " + fmt(g.kc) + " " + g.boss.toLowerCase(Locale.ROOT);
+				}
+			}
+		}
+		List<JsonObject> recent = plugin.feedNewest(2);
+		if (recent.size() == 2)
+		{
+			long a = recent.get(0).has("ts") ? recent.get(0).get("ts").getAsLong() : 0;
+			long b = recent.get(1).has("ts") ? recent.get(1).get("ts").getAsLong() : 0;
+			long days = (a - b) / 86_400_000L;
+			if (days >= 30)
+			{
+				return "resumed after " + days + " days away";
+			}
+		}
+		return null;
+	}
+
+	/** Everything administrative, kept off the reading surface. */
+	private JPanel buildManage()
+	{
+		JPanel p = column();
+		JButton open = new JButton("Open journal folder");
+		open.addActionListener(ev -> plugin.actionOpenJournalFolder());
+		open.setAlignmentX(Component.LEFT_ALIGNMENT);
+		open.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		p.add(open);
 		p.add(vgap(4));
 		JButton importBtn = new JButton("Import a journal…");
 		importBtn.addActionListener(ev -> onImportClicked());
@@ -2976,7 +3177,6 @@ class ChroniclePanel extends PluginPanel
 			+ "computer, a record kept for you elsewhere). Everything floors, so "
 			+ "importing twice changes nothing."));
 		p.add(vgap(8));
-
 		if (plugin.cloudActive())
 		{
 			p.add(buildCloudSection());

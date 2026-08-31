@@ -201,7 +201,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			// A record written by an earlier build can carry the same item twice
 			// in one source's bag; heal it on the way in rather than making the
 			// player re-import to be rid of it.
-			int healed = dedupeSourceBags();
+			int healed = dedupeSourceBags() + dedupeFeed();
 			if (healed > 0)
 			{
 				log.debug("collapsed {} duplicate item entries", healed);
@@ -1997,6 +1997,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 				}
 			}
 			dedupeSourceBags();
+			dedupeFeed();
 			root.addProperty("updated_at", nowSec());
 		}
 		return sources + " sources · " + String.format(java.util.Locale.UK, "%,d", events)
@@ -2074,11 +2075,105 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		seg.add(key, cur);
 	}
 
-	/** Identity of a feed line for import dedup: the instant plus its kind. */
+	/**
+	 * Identity of a feed line: its kind, the SECOND it happened in, and what it
+	 * was about.
+	 *
+	 * <p>Not the exact instant. One side of an import keeps milliseconds and the
+	 * other keeps seconds as a float, so the same moment arrives a millisecond
+	 * apart and an exact match lets the same log slot be written twice. Nor the
+	 * second alone: a clue casket empties several slots inside one second, and
+	 * those are genuinely different lines.
+	 */
 	private static String feedKey(JsonObject e)
 	{
-		return (e.has("ts") ? asLong(e.get("ts")) : 0) + "|"
-			+ (e.has("type") && !e.get("type").isJsonNull() ? e.get("type").getAsString() : "");
+		long sec = (e.has("ts") ? asLong(e.get("ts")) : 0) / 1000L;
+		String kind = e.has("type") && !e.get("type").isJsonNull()
+			? e.get("type").getAsString() : "";
+		return kind + "|" + sec + "|" + feedSubject(e);
+	}
+
+	/** What a feed line is ABOUT, for identity: the thing it names, or failing
+	 *  that the whole payload. */
+	private static String feedSubject(JsonObject e)
+	{
+		if (!e.has("data") || !e.get("data").isJsonObject())
+		{
+			return "";
+		}
+		JsonObject d = e.getAsJsonObject("data");
+		for (String field : new String[]{"itemName", "petName", "task", "monster",
+			"name", "quest", "diary", "achievement"})
+		{
+			if (d.has(field) && !d.get(field).isJsonNull())
+			{
+				return d.get(field).getAsString().toLowerCase(java.util.Locale.ROOT);
+			}
+		}
+		// An imported line can carry nothing but a marker; the payload itself is
+		// then the only identity there is, minus the marker.
+		JsonObject bare = d.deepCopy();
+		bare.remove("imported");
+		bare.remove("type");
+		return bare.toString();
+	}
+
+	/**
+	 * Collapse feed lines that describe the same moment. The keys the entries
+	 * were written under can differ by a millisecond across an import, so a
+	 * record can hold one log slot twice; the fuller line survives.
+	 * Callers hold {@code lock}. Returns how many were absorbed.
+	 */
+	private int dedupeFeed()
+	{
+		if (root == null || !root.has("feed") || !root.get("feed").isJsonArray())
+		{
+			return 0;
+		}
+		JsonArray feed = root.getAsJsonArray("feed");
+		java.util.Map<String, JsonObject> best = new java.util.LinkedHashMap<>();
+		int absorbed = 0;
+		for (JsonElement e : feed)
+		{
+			if (!e.isJsonObject())
+			{
+				continue;
+			}
+			JsonObject o = e.getAsJsonObject();
+			String key = feedKey(o);
+			JsonObject held = best.get(key);
+			if (held == null)
+			{
+				best.put(key, o);
+				continue;
+			}
+			absorbed++;
+			// Keep whichever says more: a line naming its item beats a bare
+			// "imported" marker for the same instant.
+			if (payloadSize(o) > payloadSize(held))
+			{
+				best.put(key, o);
+			}
+		}
+		if (absorbed > 0)
+		{
+			java.util.List<JsonObject> kept = new java.util.ArrayList<>(best.values());
+			kept.sort(java.util.Comparator.comparingLong(
+				o -> o.has("ts") ? asLong(o.get("ts")) : 0));
+			JsonArray rebuilt = new JsonArray();
+			for (JsonObject o : kept)
+			{
+				rebuilt.add(o);
+			}
+			root.add("feed", rebuilt);
+		}
+		return absorbed;
+	}
+
+	private static int payloadSize(JsonObject e)
+	{
+		return e.has("data") && e.get("data").isJsonObject()
+			? e.getAsJsonObject("data").size() : 0;
 	}
 
 	/** Raise {@code cur[key]} to {@code inc[key]} when the incoming one is higher. */
@@ -2389,6 +2484,16 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			}
 		}
 		return true;
+	}
+
+	/** Combat level as last gathered, or 0. */
+	int combatLevel()
+	{
+		synchronized (lock)
+		{
+			return root != null && root.has("combat_level") && !root.get("combat_level").isJsonNull()
+				? (int) asLong(root.get("combat_level")) : 0;
+		}
 	}
 
 	/** The character sheet's skills: {skill: [level, xp]}, as last gathered. */

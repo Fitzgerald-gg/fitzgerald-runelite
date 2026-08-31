@@ -161,6 +161,11 @@ public class PanelPreviewTest
 			set(panel, "leftBehindItem", null);
 		}
 		// The pets page, where the journal's own marginalia shows.
+		shoot(panel, out, prefix + "-manage", "MANAGE");
+		set(panel, "journalLens", "Slayer");
+		shoot(panel, out, prefix + "-journal-slayer", "JOURNAL");
+		set(panel, "journalLens", "All");
+
 		set(panel, "histBosses", true);
 		shoot(panel, out, prefix + "-history-bosses", "HISTORY");
 		set(panel, "histBosses", false);
@@ -772,6 +777,33 @@ public class PanelPreviewTest
 		String journalWarning()
 		{
 			return null;   // the stub's journal is a fixture, never a file
+		}
+
+		@Override
+		long keptSince()
+		{
+			long earliest = Long.MAX_VALUE;
+			for (LocalStore.SourceRow r : sources)
+			{
+				if (r.firstMs > 0)
+				{
+					earliest = Math.min(earliest, r.firstMs);
+				}
+			}
+			for (JsonObject e : feed)
+			{
+				if (e.has("ts") && e.get("ts").getAsLong() > 0)
+				{
+					earliest = Math.min(earliest, e.get("ts").getAsLong());
+				}
+			}
+			return earliest == Long.MAX_VALUE ? 0 : earliest;
+		}
+
+		@Override
+		int combatLevel()
+		{
+			return 125;
 		}
 
 		@Override
