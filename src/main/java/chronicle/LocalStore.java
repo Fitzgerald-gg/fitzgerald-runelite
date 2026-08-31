@@ -1854,6 +1854,31 @@ class LocalStore
 						}
 					}
 				}
+				else if (incSl.has("tasks") && incSl.get("tasks").isJsonArray())
+				{
+					// A spine already stands here, so the incoming one is the SAME
+					// history seen from somewhere else — its segments must not be
+					// appended. What it can carry that this one lacks is detail:
+					// which monsters an assignment was made of and what it dropped,
+					// which older records never kept. Matched on the task and its
+					// moment rather than an exact timestamp: the two sides round
+					// that instant differently, so equality would match nothing.
+					for (JsonElement t : incSl.getAsJsonArray("tasks"))
+					{
+						if (!t.isJsonObject())
+						{
+							continue;
+						}
+						JsonObject incSeg = t.getAsJsonObject();
+						JsonObject seg = nearestSegment(tasks, incSeg);
+						if (seg == null)
+						{
+							continue;
+						}
+						mergeSegmentDetail(seg, incSeg, "monsters");
+						mergeSegmentDetail(seg, incSeg, "items");
+					}
+				}
 				for (String k : new String[]{"completed", "xp_est"})
 				{
 					if (incSl.has(k) && asLong(incSl.get(k)) > (sl.has(k) ? asLong(sl.get(k)) : 0))
@@ -1866,6 +1891,77 @@ class LocalStore
 		}
 		return sources + " sources · " + String.format(java.util.Locale.UK, "%,d", events)
 			+ " journal entries · " + counters + " counters";
+	}
+
+	/** How far two records of the same task instant may drift and still be it. */
+	private static final long SEGMENT_MATCH_SECONDS = 60;
+
+	/** The local segment an incoming one describes, or null if none does. */
+	private static JsonObject nearestSegment(JsonArray tasks, JsonObject inc)
+	{
+		String task = inc.has("task") ? inc.get("task").getAsString() : null;
+		if (task == null)
+		{
+			return null;
+		}
+		long ts = inc.has("ts") ? asLong(inc.get("ts")) : 0;
+		JsonObject best = null;
+		long bestGap = Long.MAX_VALUE;
+		for (JsonElement e : tasks)
+		{
+			if (!e.isJsonObject())
+			{
+				continue;
+			}
+			JsonObject seg = e.getAsJsonObject();
+			if (!seg.has("task") || !task.equalsIgnoreCase(seg.get("task").getAsString()))
+			{
+				continue;
+			}
+			long gap = Math.abs((seg.has("ts") ? asLong(seg.get("ts")) : 0) - ts);
+			if (gap <= SEGMENT_MATCH_SECONDS && gap < bestGap)
+			{
+				bestGap = gap;
+				best = seg;
+			}
+		}
+		return best;
+	}
+
+	/** Floor one segment's {@code monsters} or {@code items} map into another's. */
+	private static void mergeSegmentDetail(JsonObject seg, JsonObject inc, String key)
+	{
+		if (!inc.has(key) || !inc.get(key).isJsonObject())
+		{
+			return;
+		}
+		JsonObject cur = seg.has(key) && seg.get(key).isJsonObject()
+			? seg.getAsJsonObject(key) : new JsonObject();
+		for (java.util.Map.Entry<String, JsonElement> e : inc.getAsJsonObject(key).entrySet())
+		{
+			if (e.getValue().isJsonObject())
+			{
+				JsonObject incRow = e.getValue().getAsJsonObject();
+				JsonObject curRow = cur.has(e.getKey()) && cur.get(e.getKey()).isJsonObject()
+					? cur.getAsJsonObject(e.getKey()) : new JsonObject();
+				floorNumber(curRow, incRow, "qty");
+				floorNumber(curRow, incRow, "value");
+				if (!curRow.has("id") && incRow.has("id"))
+				{
+					curRow.add("id", incRow.get("id"));
+				}
+				cur.add(e.getKey(), curRow);
+			}
+			else
+			{
+				long v = asLong(e.getValue());
+				if (v > (cur.has(e.getKey()) ? asLong(cur.get(e.getKey())) : 0))
+				{
+					cur.addProperty(e.getKey(), v);
+				}
+			}
+		}
+		seg.add(key, cur);
 	}
 
 	/** Identity of a feed line for import dedup: the instant plus its kind. */

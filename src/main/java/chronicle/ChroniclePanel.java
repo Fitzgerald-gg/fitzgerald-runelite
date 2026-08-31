@@ -1585,7 +1585,13 @@ class ChroniclePanel extends PluginPanel
 							line.append(pet.source);
 							if (pet.kc > 0)
 							{
-								line.append(", kc ").append(fmt(pet.kc));
+								// A skilling pet has no kill count: what was
+								// recorded at the drop is the experience behind
+								// it, and calling that "kc" misreads 52,289 xp
+								// as fifty thousand kills.
+								line.append(isSkill(pet.source)
+									? ", " + fmt(pet.kc) + " xp"
+									: ", kc " + fmt(pet.kc));
 							}
 						}
 						drill.add(ghostRow(line.toString(), pet.ts > 0
@@ -1597,6 +1603,19 @@ class ChroniclePanel extends PluginPanel
 			}
 		}
 		return p;
+	}
+
+	/** True when a pet's "source" names a skill rather than something killed. */
+	private static boolean isSkill(String source)
+	{
+		for (net.runelite.api.Skill sk : net.runelite.api.Skill.values())
+		{
+			if (sk.name().equalsIgnoreCase(source))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** The journal's pet record, keyed for slot lookup. */

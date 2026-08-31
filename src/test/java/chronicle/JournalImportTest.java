@@ -113,6 +113,65 @@ public class JournalImportTest
 	}
 
 	@Test
+	public void detailBackfillsIntoSegmentsThatAlreadyExist()
+	{
+		// A spine adopted from an older record: totals, no composition.
+		store.importJournal(gson.fromJson("{\"slayer\":{\"completed\":2,\"tasks\":["
+			+ "{\"task\":\"Bloodveld\",\"kills\":120,\"value\":50000,\"ts\":1787775856},"
+			+ "{\"task\":\"Jellies\",\"kills\":90,\"value\":9000,\"ts\":1787778099}]}}",
+			JsonObject.class), "Tester");
+		assertEquals(2, store.slayerJourney().tasks.size());
+
+		// The rebuilt export describes the SAME two tasks — its instants round
+		// differently, which is why the match is a window and not equality.
+		store.importJournal(gson.fromJson("{\"slayer\":{\"completed\":2,\"tasks\":["
+			+ "{\"task\":\"Bloodveld\",\"ts\":1787775854,"
+			+ "  \"monsters\":{\"Bloodveld\":104,\"Mutated Bloodveld\":16},"
+			+ "  \"items\":{\"Dragon boots\":{\"id\":11840,\"qty\":2,\"value\":200000}}},"
+			+ "{\"task\":\"Jellies\",\"ts\":1787778098,\"monsters\":{\"Jelly\":90}}]}}",
+			JsonObject.class), "Tester");
+
+		// No segments were appended — the same history seen twice.
+		assertEquals(2, store.slayerJourney().tasks.size());
+		int bloodveld = indexOf("Bloodveld");
+		java.util.List<LocalStore.UntakenRow> mons = store.slayerTaskMonsters(bloodveld);
+		assertEquals(2, mons.size());
+		assertEquals("Bloodveld", mons.get(0).name);
+		assertEquals(104, mons.get(0).qty);
+		java.util.List<LocalStore.BagItem> bag = store.slayerTaskItems(bloodveld);
+		assertEquals(1, bag.size());
+		assertEquals("Dragon boots", bag.get(0).name);
+		assertEquals(200000L, bag.get(0).value);
+	}
+
+	private int indexOf(String task)
+	{
+		java.util.List<ChronicleApiClient.SlayerTask> t = store.slayerJourney().tasks;
+		for (int i = 0; i < t.size(); i++)
+		{
+			if (t.get(i).task.equals(task))
+			{
+				return i;
+			}
+		}
+		throw new AssertionError("no segment for " + task);
+	}
+
+	@Test
+	public void aTaskFarFromAnyLocalSegmentIsNotInvented()
+	{
+		store.importJournal(gson.fromJson("{\"slayer\":{\"tasks\":["
+			+ "{\"task\":\"Bloodveld\",\"kills\":1,\"ts\":1787775856}]}}", JsonObject.class), "Tester");
+		// Same task name, months away: a different assignment entirely, so its
+		// detail must not be folded into this one.
+		store.importJournal(gson.fromJson("{\"slayer\":{\"tasks\":["
+			+ "{\"task\":\"Bloodveld\",\"ts\":1700000000,\"monsters\":{\"Bloodveld\":99}}]}}",
+			JsonObject.class), "Tester");
+		assertEquals(1, store.slayerJourney().tasks.size());
+		assertTrue(store.slayerTaskMonsters(0).isEmpty());
+	}
+
+	@Test
 	public void anImportIntoAnUnmountedAccountIsRefused()
 	{
 		store.endSession();
