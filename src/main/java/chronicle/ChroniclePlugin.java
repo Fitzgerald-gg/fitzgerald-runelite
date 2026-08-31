@@ -176,35 +176,6 @@ public class ChroniclePlugin extends Plugin
 	private static final java.util.Set<String> PUSH_EXCLUDE = new java.util.HashSet<>(
 		java.util.Arrays.asList("untakenLootValue", "untakenLootCount", "resourcesGatheredValue"));
 
-	// The prayer-verb forensic correction (see refreshLocal): absolute values
-	// reconciled against the account's Prayer xp ledger, identical to the map the
-	// server migration applied. null = delete the contaminated key outright.
-	private static final Map<String, Long> PRAYER_VERB_FIX = new java.util.HashMap<>();
-	static
-	{
-		PRAYER_VERB_FIX.put("ashesScattered", 4L);
-		PRAYER_VERB_FIX.put("vileAshesScattered", 4L);
-		PRAYER_VERB_FIX.put("abyssalAshesScattered", null);
-		PRAYER_VERB_FIX.put("maliciousAshesScattered", null);
-		PRAYER_VERB_FIX.put("fiendishAshesScattered", null);
-		PRAYER_VERB_FIX.put("abyssalAshesSacrificed", 1093L);
-		PRAYER_VERB_FIX.put("vileAshesSacrificed", 905L);
-		PRAYER_VERB_FIX.put("maliciousAshesSacrificed", 425L);
-		PRAYER_VERB_FIX.put("fiendishAshesSacrificed", 157L);
-		PRAYER_VERB_FIX.put("bonesBuried", 23L);
-		PRAYER_VERB_FIX.put("bigBonesBuried", 8L);
-		PRAYER_VERB_FIX.put("dragonBonesBuried", 4L);
-		PRAYER_VERB_FIX.put("normalBonesBuried", 9L);
-		PRAYER_VERB_FIX.put("lavaDragonBonesBuried", 1L);
-		PRAYER_VERB_FIX.put("bonesBonesBuried", null);
-		PRAYER_VERB_FIX.put("wyrmBonesSacrificed", 258L);
-		PRAYER_VERB_FIX.put("bigBonesSacrificed", 253L);
-		PRAYER_VERB_FIX.put("superiorDragonBonesSacrificed", 201L);
-		PRAYER_VERB_FIX.put("dragonBonesSacrificed", 112L);
-		PRAYER_VERB_FIX.put("frostDragonBonesSacrificed", 105L);
-		PRAYER_VERB_FIX.put("normalBonesSacrificed", 2L);
-	}
-
 	// The wiki drop-rate book for the local dryness ledger (lazy-loaded).
 	private GrindBook grindBook;
 
@@ -316,6 +287,9 @@ public class ChroniclePlugin extends Plugin
 		if (lastState == GameState.LOGGED_IN)
 		{
 			pendingEnrolCheck = true;
+			// Enabled mid-session: no LOGGED_IN transition will arrive, so arm the
+			// teardown flag here or this session's logout does nothing at all.
+			wasLoggedIn = true;
 			// The clog fraction varps normally arrive with the LOGGED_IN
 			// transition, which has already happened — read them now.
 			clientThread.invoke(() -> clogCapture.primeFromVarps(client));
@@ -355,6 +329,11 @@ public class ChroniclePlugin extends Plugin
 		if (localName != null && localStore.isReadyFor(localName))
 		{
 			localStore.setTrackers(sessionView(), localName);
+			// Re-freeze the base at what we just folded in. The store outlives a
+			// plugin toggle while the counters do not, so without this the next
+			// recompute would be base + an empty session and roll the journal
+			// back to its login values — the same trap the cloud toggle has.
+			localStore.rebase(localName);
 			localStore.flush(localDir());
 		}
 		// While we are unregistered no events reach the trackers, so the store stops
@@ -565,6 +544,23 @@ public class ChroniclePlugin extends Plugin
 			|| "serverBaseUrl".equals(key) || "manualToken".equals(key))
 		{
 			reschedulePushLoop();
+			if ("serverBaseUrl".equals(key))
+			{
+				// A push token is issued BY one server and means nothing to another,
+				// so repointing the URL must not carry the old host's secret to the
+				// new one. Drop it; a token pasted into the settings re-seeds on the
+				// next login, and an empty one simply means no cloud.
+				clientThread.invoke(() ->
+				{
+					if (trimToNull(config.manualToken()) == null)
+					{
+						configManager.unsetRSProfileConfiguration(GROUP, KEY_TOKEN);
+					}
+					cachedToken = null;
+					cachedName = null;
+					enrolledRsn = null;
+				});
+			}
 			if ("cloudSync".equals(key) || "serverBaseUrl".equals(key))
 			{
 				// A settings write arrives on whatever thread made it — the EDT, for
@@ -709,9 +705,7 @@ public class ChroniclePlugin extends Plugin
 		}
 		// The JOURNAL is the system of record. Fold the running session into it,
 		// then mirror its lifetime absolutes upward — the server is a passive copy
-		// (the discord bot's feed), never a source. The one-shot correction runs
-		// first from here too, so no push can beat it to a freshly-loaded journal.
-		maybeMigratePrayerVerbs();
+		// (the discord bot's feed), never a source.
 		// The journal must be the one belonging to the account we are about to
 		// push AS. Between an account switch and the completion of the new
 		// journal's async load, the store still holds the previous account's
@@ -754,29 +748,6 @@ public class ChroniclePlugin extends Plugin
 			case 5: return "hcgim";
 			case 6: return "ugim";
 			default: return "";
-		}
-	}
-
-	/**
-	 * One-shot repair for the reference account: early builds minted Demonic
-	 * Offering casts as per-ash "Scattered" rows. The server's copy was
-	 * forensically reconciled from the xp ledger (2026-08-30); this applies the
-	 * identical correction to the local journal so the two records agree — and
-	 * so journal-absolute pushes can't resurrect the contaminated rows. Called
-	 * from both the refresh and the push path (whichever reaches a ready store
-	 * first applies it; the flag makes the second call a no-op). The flag is
-	 * RSProfile-scoped like every other one-shot here: the correction belongs to
-	 * one account's journal, so a client-wide flag would let whichever account
-	 * logged in first spend the single shot on behalf of the rest.
-	 */
-	private void maybeMigratePrayerVerbs()
-	{
-		if (localName != null && localStore.isReadyFor(localName)
-			&& "oxli".equals(localName.trim().toLowerCase(java.util.Locale.ROOT))
-			&& !"true".equals(configManager.getRSProfileConfiguration(GROUP, "prayerVerbMigrated")))
-		{
-			localStore.correctTrackers(PRAYER_VERB_FIX, localName);
-			configManager.setRSProfileConfiguration(GROUP, "prayerVerbMigrated", true);
 		}
 	}
 
@@ -1278,7 +1249,6 @@ public class ChroniclePlugin extends Plugin
 	private void refreshLocal()
 	{
 		gatherCharacter();
-		maybeMigratePrayerVerbs();
 		if (localName != null)
 		{
 			localStore.setTrackers(sessionView(), localName);
