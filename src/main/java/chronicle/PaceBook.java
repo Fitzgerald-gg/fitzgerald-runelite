@@ -29,11 +29,10 @@ import java.util.TreeMap;
  *
  * <p>A pace also has to admit how thin it is, so every result carries its own
  * basis — how many active days it stands on and the span they are scattered
- * across, for the panel to print. At most {@link #MAX_ACTIVE_DAYS} active days
- * count, none older than {@link #RECENCY_DAYS} days counts at all (a stale
- * pace is not a pace), and under {@link #MIN_ACTIVE_DAYS} of them there is no
- * horizon: a line through a single point is a guess with a number on it. The
- * panel says when the skill last moved instead.
+ * across, for the panel to print. At most seven active days count, none older
+ * than thirty days counts at all (a stale pace is not a pace), and under two
+ * of them there is no horizon: a line through a single point is a guess with a
+ * number on it. The panel says when the skill last moved instead.
  *
  * <p>Pure function of its arguments — the spine is handed in, so this computes
  * identically off the client thread, in a test, or over an imported past.
@@ -68,8 +67,8 @@ class PaceBook
 		/** Mean xp across the active days below — never divided by idle days. */
 		final double xpPerActiveDay;
 
-		/** How many active days that mean stands on. Under {@link #MIN_ACTIVE_DAYS}
-		 *  there is no horizon, but the figure is still true of the days it saw. */
+		/** How many active days that mean stands on. Under two of them there is
+		 *  no horizon, but the figure is still true of the days it did see. */
 		final int activeDays;
 
 		/** Calendar days those active days are scattered across, inclusive — the
