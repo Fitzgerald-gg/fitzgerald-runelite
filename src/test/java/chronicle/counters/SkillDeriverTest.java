@@ -152,6 +152,25 @@ public class SkillDeriverTest
 	}
 
 	@Test
+	public void chatChannelResiduals()
+	{
+		StatStore store = new StatStore();
+		ItemManager im = Mockito.mock(ItemManager.class);
+		SkillDeriver cd = new SkillDeriver(im, store, new Gson());
+		cd.applyChat("You fail to pick the Master Farmer's pocket.");
+		assertEquals(1, store.getStat("failedPickPockets"));
+		assertEquals(1, store.getStat("masterFarmerFailedPickpockets"));
+		cd.applyChat("You accidentally burn the shark.");
+		assertEquals(1, store.getStat("foodBurned"));
+		cd.applyChat("You plant 3 potato seeds.");
+		assertEquals(1, store.getStat("seedsPlanted"));
+		cd.applyChat("Rooftop lap count: 42.");
+		assertEquals(1, store.getStat("rooftopAgilityLaps"));
+		cd.applyChat("Your Ardougne lap count is: 100.");
+		assertEquals(1, store.getStat("normalAgilityLaps"));
+	}
+
+	@Test
 	public void absorbsAndFloors()
 	{
 		// lamps and gauntlet internals derive nothing
