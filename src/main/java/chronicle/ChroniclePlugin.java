@@ -1258,7 +1258,9 @@ public class ChroniclePlugin extends Plugin
 				{
 					historyLog.appendImported(localDir(), rsn, e.getKey(), e.getValue());
 				}
-				configManager.setConfiguration(GROUP, "cloudHistoryImported", true);
+				// the flag must match what the gate READS — a mismatch here once
+				// made this one-shot re-run (and re-append) every login
+				configManager.setConfiguration(GROUP, "cloudHistoryImported2", true);
 				if (!byDate.isEmpty())
 				{
 					chat("Chronicle: adopted " + byDate.size()
@@ -1277,7 +1279,95 @@ public class ChroniclePlugin extends Plugin
 				appendHistoryBaseline();
 			}
 		}
+		// First run only: adopt the core Loot Tracker's lifetime record — the
+		// one LOCAL archive predating any server. Reading the ACTIVE RS
+		// profile's keys keeps it own-account by construction (league and alt
+		// profiles have different keys). Purely local, no network.
+		if (localName != null && localStore.isReadyFor(localName)
+			&& !"true".equals(configManager.getConfiguration(GROUP, "lootTrackerImported")))
+		{
+			importLootTracker();
+		}
 		executor.submit(() -> localStore.flush(localDir()));
+	}
+
+	private static final com.google.gson.Gson LOOT_GSON = new com.google.gson.Gson();
+
+	/** Client thread (ItemManager pricing). One-shot; flag set on success. */
+	private void importLootTracker()
+	{
+		java.util.List<String> keys;
+		try
+		{
+			keys = configManager.getRSProfileConfigurationKeys(
+				"loottracker", configManager.getRSProfileKey(), "drops_");
+		}
+		catch (RuntimeException e)
+		{
+			log.debug("loot tracker key scan failed", e);
+			return;
+		}
+		if (keys == null)
+		{
+			return;
+		}
+		java.util.List<LocalStore.LootSeed> seeds = new java.util.ArrayList<>();
+		long events = 0;
+		for (String key : keys)
+		{
+			String raw = configManager.getConfiguration(
+				"loottracker", configManager.getRSProfileKey(), key);
+			if (raw == null || raw.isEmpty())
+			{
+				continue;
+			}
+			try
+			{
+				JsonObject o = LOOT_GSON.fromJson(raw, JsonObject.class);
+				String source = o.has("name") ? o.get("name").getAsString() : null;
+				if (source == null || source.isEmpty())
+				{
+					continue;
+				}
+				int kills = o.has("kills") ? o.get("kills").getAsInt() : 0;
+				long first = o.has("first") ? o.get("first").getAsLong() : 0;
+				long last = o.has("last") ? o.get("last").getAsLong() : 0;
+				java.util.List<LocalStore.BagItem> items = new java.util.ArrayList<>();
+				if (o.has("drops") && o.get("drops").isJsonArray())
+				{
+					com.google.gson.JsonArray arr = o.getAsJsonArray("drops");
+					for (int i = 0; i + 1 < arr.size(); i += 2)
+					{
+						int id = arr.get(i).getAsInt();
+						long qty = arr.get(i + 1).getAsLong();
+						if (id <= 0 || qty <= 0)
+						{
+							continue;
+						}
+						int canon = localStore.items().canonicalize(id);
+						String name = localStore.items().getItemComposition(canon).getName();
+						long each = localStore.items().getItemPrice(canon);
+						items.add(new LocalStore.BagItem(canon, name, qty,
+							Math.max(0, each) * qty));
+					}
+				}
+				seeds.add(new LocalStore.LootSeed(source, kills, first, last, items));
+				events += kills;
+			}
+			catch (RuntimeException e)
+			{
+				log.debug("loot tracker record parse failed: {}", key, e);
+			}
+		}
+		if (!seeds.isEmpty())
+		{
+			localStore.floorLootTracker(seeds, localName);
+			chat("Chronicle: adopted " + seeds.size() + " sources · "
+				+ String.format(java.util.Locale.UK, "%,d", events)
+				+ " loot events from your Loot Tracker.");
+			refreshPanel();
+		}
+		configManager.setConfiguration(GROUP, "lootTrackerImported", true);
 	}
 
 	/** Client thread. Appends today's closing skills+counters baseline. */

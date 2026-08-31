@@ -108,14 +108,25 @@ public class PanelPreviewTest
 		shoot(panel, out, prefix + "-slayer", "SLAYER", "LIFETIME");
 		shoot(panel, out, prefix + "-slayer", "SLAYER", "LIFETIME");
 
-		// drops with the top source expanded
+		// the pivot navigation: a source under the glass, then an item
 		List<LocalStore.SourceRow> src = stub.dropSources();
 		if (!src.isEmpty())
 		{
 			src.sort((a, b) -> Long.compare(b.value, a.value));
-			set(panel, "expandedSource", src.get(0).name);
-			shoot(panel, out, prefix + "-drops-drill", "DROPS", "LIFETIME");
-			set(panel, "expandedSource", null);
+			set(panel, "detailSource", src.get(0).name);
+			shoot(panel, out, prefix + "-source-detail", "DROPS", "LIFETIME");
+			set(panel, "detailSource", null);
+		}
+		for (LocalStore.SourceRow sr : src)
+		{
+			List<LocalStore.BagItem> bag = stub.sourceItems(sr.name);
+			if (!bag.isEmpty())
+			{
+				set(panel, "detailItem", bag.get(0).name);
+				shoot(panel, out, prefix + "-item-detail", "DROPS", "LIFETIME");
+				set(panel, "detailItem", null);
+				break;
+			}
 		}
 
 		set(panel, "dropsLeftBehind", true);

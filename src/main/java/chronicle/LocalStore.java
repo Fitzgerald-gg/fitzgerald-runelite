@@ -604,8 +604,18 @@ class LocalStore
 		final long value;
 		final Double pb;
 		final int cloudItems;
+		// Tracked-since / last-seen (epoch ms; 0 = unknown) — seeded by the
+		// Loot Tracker import's per-source range, extended as play continues.
+		final long firstMs;
+		final long lastMs;
 
 		SourceRow(String name, int kc, int loots, long value, Double pb, int cloudItems)
+		{
+			this(name, kc, loots, value, pb, cloudItems, 0, 0);
+		}
+
+		SourceRow(String name, int kc, int loots, long value, Double pb, int cloudItems,
+			long firstMs, long lastMs)
 		{
 			this.name = name;
 			this.kc = kc;
@@ -613,6 +623,8 @@ class LocalStore
 			this.value = value;
 			this.pb = pb;
 			this.cloudItems = cloudItems;
+			this.firstMs = firstMs;
+			this.lastMs = lastMs;
 		}
 	}
 
@@ -639,7 +651,9 @@ class LocalStore
 					src.has("loots") ? src.get("loots").getAsInt() : 0,
 					src.has("value") ? src.get("value").getAsLong() : 0,
 					src.has("pb") ? src.get("pb").getAsDouble() : null,
-					src.has("cloud_items") ? src.get("cloud_items").getAsInt() : 0));
+					src.has("cloud_items") ? src.get("cloud_items").getAsInt() : 0,
+					src.has("first_seen") ? src.get("first_seen").getAsLong() : 0,
+					src.has("last_seen") ? src.get("last_seen").getAsLong() : 0));
 			}
 		}
 		return out;
@@ -843,6 +857,153 @@ class LocalStore
 				if (row.value > v)
 				{
 					hit.addProperty("value", row.value);
+				}
+			}
+		}
+	}
+
+	/** One source's whole record from the core Loot Tracker's local store,
+	 *  already canonicalised and priced by the caller (client thread). */
+	static final class LootSeed
+	{
+		final String source;
+		final int kills;
+		final long firstMs;
+		final long lastMs;
+		final java.util.List<BagItem> items;
+
+		LootSeed(String source, int kills, long firstMs, long lastMs,
+			java.util.List<BagItem> items)
+		{
+			this.source = source;
+			this.kills = kills;
+			this.firstMs = firstMs;
+			this.lastMs = lastMs;
+			this.items = items;
+		}
+	}
+
+	/**
+	 * Adopt the core Loot Tracker's lifetime record — the one local archive
+	 * that predates any server (years of witnessed loot events). Everything
+	 * floors: kc and loots at the tracker's event count (a lower bound of
+	 * true KC; a higher game-reported kc survives), item qty/value by
+	 * id-then-name (a name-keyed cloud row gains its real id), source value
+	 * at the priced sum. first_seen/last_seen extend as min/max. Idempotent —
+	 * a re-run can only raise floors it already set.
+	 */
+	void floorLootTracker(java.util.List<LootSeed> seeds, String rsn)
+	{
+		if (!isReadyFor(rsn) || seeds == null)
+		{
+			return;
+		}
+		synchronized (lock)
+		{
+			JsonObject drops = root.has("drops") && root.get("drops").isJsonObject()
+				? root.getAsJsonObject("drops") : new JsonObject();
+			root.add("drops", drops);
+			for (LootSeed seed : seeds)
+			{
+				if (seed.source == null || seed.source.isEmpty())
+				{
+					continue;
+				}
+				JsonObject src = drops.has(seed.source) && drops.get(seed.source).isJsonObject()
+					? drops.getAsJsonObject(seed.source) : null;
+				if (src == null)
+				{
+					src = new JsonObject();
+					src.addProperty("kc", 0);
+					src.addProperty("loots", 0);
+					src.addProperty("value", 0);
+					src.add("items", new JsonObject());
+					drops.add(seed.source, src);
+				}
+				if (seed.kills > (src.has("kc") ? src.get("kc").getAsInt() : 0))
+				{
+					src.addProperty("kc", seed.kills);
+				}
+				if (seed.kills > (src.has("loots") ? src.get("loots").getAsInt() : 0))
+				{
+					src.addProperty("loots", seed.kills);
+				}
+				if (seed.firstMs > 0)
+				{
+					long cur = src.has("first_seen") ? src.get("first_seen").getAsLong() : Long.MAX_VALUE;
+					if (seed.firstMs < cur)
+					{
+						src.addProperty("first_seen", seed.firstMs);
+					}
+				}
+				if (seed.lastMs > 0)
+				{
+					long cur = src.has("last_seen") ? src.get("last_seen").getAsLong() : 0;
+					if (seed.lastMs > cur)
+					{
+						src.addProperty("last_seen", seed.lastMs);
+					}
+				}
+				if (!src.has("items") || !src.get("items").isJsonObject())
+				{
+					src.add("items", new JsonObject());
+				}
+				JsonObject items = src.getAsJsonObject("items");
+				long total = 0;
+				for (BagItem b : seed.items)
+				{
+					JsonObject hit = null;
+					if (b.itemId > 0 && items.has(String.valueOf(b.itemId))
+						&& items.get(String.valueOf(b.itemId)).isJsonObject())
+					{
+						hit = items.getAsJsonObject(String.valueOf(b.itemId));
+					}
+					if (hit == null)
+					{
+						// a name-keyed cloud adoption gains its real id here
+						for (java.util.Map.Entry<String, JsonElement> e : items.entrySet())
+						{
+							if (e.getValue().isJsonObject())
+							{
+								JsonObject it = e.getValue().getAsJsonObject();
+								if (it.has("name") && !it.get("name").isJsonNull()
+									&& b.name.equalsIgnoreCase(it.get("name").getAsString()))
+								{
+									hit = it;
+									if (b.itemId > 0 && e.getKey().startsWith("n:"))
+									{
+										items.remove(e.getKey());
+										hit.addProperty("id", b.itemId);
+										items.add(String.valueOf(b.itemId), hit);
+									}
+									break;
+								}
+							}
+						}
+					}
+					if (hit == null)
+					{
+						hit = new JsonObject();
+						hit.addProperty("id", b.itemId);
+						hit.addProperty("name", b.name);
+						hit.addProperty("qty", 0);
+						hit.addProperty("value", 0);
+						items.add(b.itemId > 0 ? String.valueOf(b.itemId)
+							: "n:" + b.name.toLowerCase(java.util.Locale.ROOT), hit);
+					}
+					if (b.qty > (hit.has("qty") ? hit.get("qty").getAsLong() : 0))
+					{
+						hit.addProperty("qty", b.qty);
+					}
+					if (b.value > (hit.has("value") ? hit.get("value").getAsLong() : 0))
+					{
+						hit.addProperty("value", b.value);
+					}
+					total += hit.get("value").getAsLong();
+				}
+				if (total > (src.has("value") ? src.get("value").getAsLong() : 0))
+				{
+					src.addProperty("value", total);
 				}
 			}
 		}

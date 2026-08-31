@@ -100,8 +100,15 @@ class ChroniclePanel extends PluginPanel
 
 	private Scope scope = Scope.LIFETIME;
 	private View view = View.HOME;
+	// The pivot navigation: an item or a source under the glass, overlaying
+	// the current tab. Click any item row anywhere → the item's view (total
+	// obtained + every source of it); click any source row → the source's
+	// view (kills tracked + everything it dropped). A small back-stack lets
+	// item→source→item hops unwind.
+	private String detailItem;
+	private String detailSource;
+	private final java.util.ArrayDeque<String[]> detailStack = new java.util.ArrayDeque<>();
 	private String statsFamily = StatRegistry.FAMILIES[0];
-	private String expandedSource;
 	private int dropsShown = ROW_CAP;
 	private String clogTab = "Bosses";
 	private String clogPageSel;
@@ -150,12 +157,68 @@ class ChroniclePanel extends PluginPanel
 		searchField.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
 		searchDebounce = new Timer(150, e -> onSearchChanged());
 		searchDebounce.setRepeats(false);
-		// Enter opens the view the first result group belongs to — selecting
-		// its tab clears the query and rebuilds through the normal path.
+		// Enter answers the question directly: "Fire rune" opens the item's
+		// view, "Dust devil" the source's — resolved against the journal.
+		// Anything less certain falls back to the first result group's tab.
 		searchField.addActionListener(e ->
 		{
+			String q = searchQuery();
+			if (q.isEmpty())
+			{
+				return;
+			}
+			// exact (or singular) source name wins
+			for (LocalStore.SourceRow r : plugin.dropSources())
+			{
+				if (r.name.equalsIgnoreCase(q)
+					|| (q.endsWith("s") && r.name.equalsIgnoreCase(q.substring(0, q.length() - 1))))
+				{
+					openSource(r.name);
+					return;
+				}
+			}
+			// exact item name
+			for (LocalStore.SourceRow r : plugin.dropSources())
+			{
+				for (LocalStore.BagItem b : plugin.sourceItems(r.name))
+				{
+					if (b.name.equalsIgnoreCase(q))
+					{
+						openItem(b.name);
+						return;
+					}
+				}
+			}
+			// best containing item, then containing source
+			String bestItem = null;
+			long bestVal = -1;
+			String ql = q.toLowerCase(Locale.ROOT);
+			for (LocalStore.SourceRow r : plugin.dropSources())
+			{
+				for (LocalStore.BagItem b : plugin.sourceItems(r.name))
+				{
+					if (b.name.toLowerCase(Locale.ROOT).contains(ql) && b.value > bestVal)
+					{
+						bestVal = b.value;
+						bestItem = b.name;
+					}
+				}
+			}
+			if (bestItem != null)
+			{
+				openItem(bestItem);
+				return;
+			}
+			for (LocalStore.SourceRow r : plugin.dropSources())
+			{
+				if (r.name.toLowerCase(Locale.ROOT).contains(ql))
+				{
+					openSource(r.name);
+					return;
+				}
+			}
 			MaterialTab target = searchJump != null ? tabByView.get(searchJump) : null;
-			if (!searchQuery().isEmpty() && target != null)
+			if (target != null)
 			{
 				tabGroup.select(target);
 			}
@@ -223,10 +286,12 @@ class ChroniclePanel extends PluginPanel
 		tab.setOnSelectEvent(() ->
 		{
 			view = target;
-			expandedSource = null;
 			dropsShown = ROW_CAP;
 			slayerShown = ROW_CAP;
 			drillShown.clear();
+			detailItem = null;
+			detailSource = null;
+			detailStack.clear();
 			searchField.setText("");
 			rebuild();
 			return true;
@@ -287,6 +352,14 @@ class ChroniclePanel extends PluginPanel
 		if (!searchQuery().isEmpty())
 		{
 			body = buildSearch(searchQuery());
+		}
+		else if (detailItem != null)
+		{
+			body = buildItemDetail(detailItem);
+		}
+		else if (detailSource != null)
+		{
+			body = buildSourceDetail(detailSource);
 		}
 		else
 		{
@@ -394,6 +467,9 @@ class ChroniclePanel extends PluginPanel
 				slot.setPreferredSize(new Dimension(36, 32));
 				slot.setHorizontalAlignment(JLabel.CENTER);
 				slot.setToolTipText(d.name + (d.quantity > 1 ? " ×" + fmt(d.quantity) : ""));
+				slot.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+				final String itm = d.name;
+				slot.addMouseListener(clicker(() -> openItem(itm)));
 				AsyncBufferedImage img = plugin.items().getImage(d.itemId, d.quantity, d.quantity > 1);
 				img.addTo(slot);
 				grid.add(slot);
@@ -478,16 +554,8 @@ class ChroniclePanel extends PluginPanel
 			String sub = (r.kc > 0 ? fmt(r.kc) + " kc" : fmt(r.loots) + " drops")
 				+ (r.pb != null ? " · PB " + pb(r.pb) : "");
 			card.add(row(sub, r.kc > 0 ? gp(r.value / Math.max(1, r.kc)) + " gp/kc" : "", null));
-			if (r.name.equals(expandedSource))
-			{
-				addSourceDrill(card, r);
-			}
 			final String src = r.name;
-			card.addMouseListener(clicker(() ->
-			{
-				expandedSource = src.equals(expandedSource) ? null : src;
-				rebuild();
-			}));
+			card.addMouseListener(clicker(() -> openSource(src)));
 			p.add(card);
 			p.add(vgap(4));
 		}
@@ -629,7 +697,11 @@ class ChroniclePanel extends PluginPanel
 					{
 						break;
 					}
-					card.add(row(e.getKey(), fmt(e.getValue()), null));
+					JPanel r = row(e.getKey(), fmt(e.getValue()), null);
+					r.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+					final String mob = e.getKey();
+					r.addMouseListener(clicker(() -> openSourceLoose(mob)));
+					card.add(r);
 				}
 				if (kcs.size() > 20)
 				{
@@ -665,7 +737,11 @@ class ChroniclePanel extends PluginPanel
 			}
 			JPanel card = cardPlain();
 			// In-progress is a colour cue (the accent lights the NAME too),
-			// not a suffix — text ate the card's width.
+			// not a suffix — text ate the card's width. The card is a doorway:
+			// the task's monster view holds everything it ever dropped.
+			card.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+			final String taskName = t.task;
+			card.addMouseListener(clicker(() -> openSourceLoose(taskName)));
 			card.add(row(t.task, t.totalValue > 0 ? gp(t.totalValue) + " gp" : "",
 				accent(), t.inProgress));
 			String kills = t.inProgress && t.assignment > t.kills
@@ -694,126 +770,345 @@ class ChroniclePanel extends PluginPanel
 		}
 	}
 
-	// Rows mounted per open drill; "Show more" raises it per source.
+	// Rows mounted per open source view; "Show more" raises it per source.
 	private final Map<String, Integer> drillShown = new LinkedHashMap<>();
 
-	/** The per-source drill, fully local: the journal's bag (adopted from the
-	 *  cloud ledger at login) as a sprite strip plus EVERY item as ranked
-	 *  rows, paged. The per-source cloud fetch survives only as the fallback
-	 *  for an empty bag. */
-	private void addSourceDrill(JPanel card, LocalStore.SourceRow r)
+	// ------------------------------------------------------------------
+	// The pivot navigation: item view ⇄ source view
+	// ------------------------------------------------------------------
+
+	void openItem(String name)
 	{
-		card.add(vgap(5));
-		List<LocalStore.BagItem> bag = plugin.sourceItems(r.name);
+		pushDetail();
+		detailItem = name;
+		detailSource = null;
+		searchField.setText("");
+		rebuild();
+	}
+
+	void openSource(String name)
+	{
+		pushDetail();
+		detailSource = name;
+		detailItem = null;
+		searchField.setText("");
+		rebuild();
+	}
+
+	/** Open a source by a LOOSE name (a slayer task's plural, a kill-log row):
+	 *  exact match, then the singular, then containment — else the raw name,
+	 *  whose view degrades to an honest empty state. */
+	void openSourceLoose(String name)
+	{
+		openSource(resolveSource(name));
+	}
+
+	private String resolveSource(String name)
+	{
+		List<LocalStore.SourceRow> all = plugin.dropSources();
+		for (LocalStore.SourceRow r : all)
+		{
+			if (r.name.equalsIgnoreCase(name))
+			{
+				return r.name;
+			}
+		}
+		if (name.endsWith("s"))
+		{
+			String sing = name.substring(0, name.length() - 1);
+			for (LocalStore.SourceRow r : all)
+			{
+				if (r.name.equalsIgnoreCase(sing))
+				{
+					return r.name;
+				}
+			}
+		}
+		String low = name.toLowerCase(Locale.ROOT);
+		LocalStore.SourceRow best = null;
+		for (LocalStore.SourceRow r : all)
+		{
+			String rl = r.name.toLowerCase(Locale.ROOT);
+			if ((rl.contains(low) || low.contains(rl))
+				&& (best == null || r.value > best.value))
+			{
+				best = r;
+			}
+		}
+		return best != null ? best.name : name;
+	}
+
+	private void pushDetail()
+	{
+		if (detailItem != null)
+		{
+			detailStack.push(new String[]{"i", detailItem});
+		}
+		else if (detailSource != null)
+		{
+			detailStack.push(new String[]{"s", detailSource});
+		}
+		while (detailStack.size() > 16)
+		{
+			detailStack.removeLast();
+		}
+	}
+
+	private void backDetail()
+	{
+		String[] prev = detailStack.poll();
+		if (prev == null)
+		{
+			detailItem = null;
+			detailSource = null;
+		}
+		else if ("i".equals(prev[0]))
+		{
+			detailItem = prev[1];
+			detailSource = null;
+		}
+		else
+		{
+			detailSource = prev[1];
+			detailItem = null;
+		}
+		rebuild();
+	}
+
+	private JPanel backRow()
+	{
+		JPanel r = row("< Back", "", null);
+		JLabel l = (JLabel) ((BorderLayout) r.getLayout()).getLayoutComponent(BorderLayout.CENTER);
+		l.setFont(FontManager.getRunescapeSmallFont());
+		l.setForeground(accent());
+		r.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+		r.addMouseListener(clicker(this::backDetail));
+		return r;
+	}
+
+	/** The item under the glass: total obtained, its worth, and every source
+	 *  it has come from — each source a doorway back the other way. */
+	private JPanel buildItemDetail(String name)
+	{
+		JPanel p = column();
+		p.add(backRow());
+		p.add(vgap(4));
+		long qty = 0;
+		long value = 0;
+		int itemId = 0;
+		List<Object[]> srcs = new ArrayList<>();
+		for (LocalStore.SourceRow r : plugin.dropSources())
+		{
+			for (LocalStore.BagItem b : plugin.sourceItems(r.name))
+			{
+				if (b.name.equalsIgnoreCase(name))
+				{
+					qty += b.qty;
+					value += b.value;
+					if (itemId == 0 && b.itemId > 0)
+					{
+						itemId = b.itemId;
+					}
+					srcs.add(new Object[]{r.name, b.qty, b.value});
+				}
+			}
+		}
+		JPanel head = card(name);
+		if (itemId > 0)
+		{
+			JLabel slot = new JLabel();
+			slot.setPreferredSize(new Dimension(36, 32));
+			slot.setAlignmentX(Component.LEFT_ALIGNMENT);
+			AsyncBufferedImage img = plugin.items().getImage(itemId,
+				(int) Math.min(Integer.MAX_VALUE, Math.max(1, qty)), qty > 1);
+			img.addTo(slot);
+			head.add(slot);
+		}
+		head.add(row("Obtained", "×" + fmt(qty), accent()));
+		if (value > 0)
+		{
+			head.add(row("Worth", gp(value) + " gp", null));
+		}
+		p.add(head);
+		p.add(vgap(6));
+		if (srcs.isEmpty())
+		{
+			p.add(note("The journal hasn't seen this item drop yet."));
+			return p;
+		}
+		p.add(group("From"));
+		srcs.sort((a, b) -> Long.compare((long) b[1], (long) a[1]));
+		int mounted = 0;
+		for (Object[] s : srcs)
+		{
+			if (mounted++ >= 40)
+			{
+				p.add(ghostRow("+ " + (srcs.size() - 40) + " more sources", ""));
+				break;
+			}
+			JPanel r = row((String) s[0], "×" + fmt((long) s[1])
+				+ ((long) s[2] > 0 ? " · " + gp((long) s[2]) + " gp" : ""), null);
+			r.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+			final String src = (String) s[0];
+			r.addMouseListener(clicker(() -> openSource(src)));
+			p.add(r);
+		}
+		return p;
+	}
+
+	/** The source under the glass: kills tracked, the take, and everything it
+	 *  has dropped — each item a doorway back the other way. */
+	private JPanel buildSourceDetail(String name)
+	{
+		JPanel p = column();
+		p.add(backRow());
+		p.add(vgap(4));
+		LocalStore.SourceRow sr = null;
+		for (LocalStore.SourceRow r : plugin.dropSources())
+		{
+			if (r.name.equalsIgnoreCase(name))
+			{
+				sr = r;
+				break;
+			}
+		}
+		JPanel head = card(name);
+		if (sr != null)
+		{
+			head.add(row("Kills tracked", sr.kc > 0 ? fmt(sr.kc) : fmt(sr.loots) + " drops",
+				accent()));
+			head.add(row("The take", gp(sr.value) + " gp"
+				+ (sr.kc > 0 ? " · " + gp(sr.value / Math.max(1, sr.kc)) + " gp/kc" : ""), null));
+			if (sr.pb != null)
+			{
+				head.add(row("Personal best", pb(sr.pb), null));
+			}
+			if (sr.firstMs > 0)
+			{
+				head.add(row("Tracked since",
+					TASK_DAY.format(Instant.ofEpochMilli(sr.firstMs)), null));
+			}
+		}
+		p.add(head);
+		p.add(vgap(6));
+		List<LocalStore.BagItem> bag = plugin.sourceItems(sr != null ? sr.name : name);
 		bag.sort(Comparator.comparingLong((LocalStore.BagItem b) -> b.value).reversed());
 		if (!bag.isEmpty())
 		{
-			// a strip of the ten most valuable sprites (id-ful entries only)
 			JPanel grid = new JPanel(new GridLayout(0, 5, 3, 3));
-			grid.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-			int mounted = 0;
+			grid.setBackground(ColorScheme.DARK_GRAY_COLOR);
+			int sprites = 0;
 			for (LocalStore.BagItem b : bag)
 			{
 				if (b.itemId <= 0)
 				{
 					continue;
 				}
-				if (mounted++ >= 10)
+				if (sprites++ >= 10)
 				{
 					break;
 				}
 				JLabel slot = new JLabel();
 				slot.setPreferredSize(new Dimension(36, 32));
 				slot.setHorizontalAlignment(JLabel.CENTER);
-				slot.setToolTipText(b.name + (b.qty > 1 ? " ×" + fmt(b.qty) : "")
-					+ " · " + gp(b.value) + " gp");
+				slot.setToolTipText(b.name + (b.qty > 1 ? " ×" + fmt(b.qty) : ""));
 				AsyncBufferedImage img = plugin.items().getImage(b.itemId,
 					(int) Math.min(Integer.MAX_VALUE, b.qty), b.qty > 1);
 				img.addTo(slot);
 				grid.add(slot);
 			}
-			if (mounted > 0)
+			if (sprites > 0)
 			{
-				card.add(grid);
-				card.add(vgap(4));
+				p.add(grid);
+				p.add(vgap(5));
 			}
-			int cap = drillShown.getOrDefault(r.name, 20);
-			int shown = 0;
+			p.add(group("Loot"));
+			int cap = drillShown.getOrDefault(name, 25);
+			int mounted = 0;
 			for (LocalStore.BagItem b : bag)
 			{
-				if (shown++ >= cap)
+				if (mounted++ >= cap)
 				{
 					break;
 				}
-				card.add(row(b.name + (b.qty > 1 ? " ×" + fmt(b.qty) : ""),
-					b.value > 0 ? gp(b.value) + " gp" : "", null));
+				JPanel r = row(b.name + (b.qty > 1 ? " ×" + fmt(b.qty) : ""),
+					b.value > 0 ? gp(b.value) + " gp" : "", null);
+				r.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+				final String itm = b.name;
+				r.addMouseListener(clicker(() -> openItem(itm)));
+				p.add(r);
 			}
 			if (bag.size() > cap)
 			{
 				JButton more = new JButton("Show " + Math.min(30, bag.size() - cap)
 					+ " more of " + fmt(bag.size()) + " items");
-				final String src = r.name;
+				final String key = name;
+				final int newCap = cap + 30;
 				more.addActionListener(e ->
 				{
-					drillShown.put(src, cap + 30);
+					drillShown.put(key, newCap);
 					rebuild();
 				});
-				card.add(vgap(3));
-				card.add(more);
+				p.add(vgap(3));
+				p.add(more);
 			}
-			return;
+			return p;
 		}
-		// Empty bag: fall back to the one-shot cloud fetch (BYO servers
-		// without the ledger endpoint, or pre-adoption sessions).
-		// Cache protocol: absent = never asked; null value = fetch in flight;
-		// empty list = fetch failed; non-empty = the cloud ledger's rows.
-		List<ChronicleApiClient.LedgerItem> cloud = cloudBagCache.get(r.name);
-		if (cloud != null && !cloud.isEmpty())
+		// Empty bag: the one-shot cloud fetch as a fallback (BYO servers
+		// without the whole-ledger endpoint, pre-adoption sessions).
+		if (sr != null && sr.cloudItems > 0 && plugin.cloudActive())
 		{
-			int mounted = 0;
-			for (ChronicleApiClient.LedgerItem it : cloud)
+			List<ChronicleApiClient.LedgerItem> cloud = cloudBagCache.get(sr.name);
+			if (cloud != null && !cloud.isEmpty())
 			{
-				if (mounted++ >= 20)
+				p.add(group("Loot"));
+				int mounted = 0;
+				for (ChronicleApiClient.LedgerItem it : cloud)
 				{
-					break;
+					if (mounted++ >= 25)
+					{
+						break;
+					}
+					JPanel r = row(it.name + (it.qty > 1 ? " ×" + fmt(it.qty) : ""),
+						gp(it.value) + " gp", null);
+					r.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+					final String itm = it.name;
+					r.addMouseListener(clicker(() -> openItem(itm)));
+					p.add(r);
 				}
-				card.add(row(it.name + (it.qty > 1 ? " ×" + fmt(it.qty) : ""),
-					gp(it.value) + " gp", null));
 			}
-		}
-		else if (r.cloudItems > 0 && plugin.cloudActive())
-		{
-			if (cloud != null)
+			else if (cloud != null)
 			{
-				card.add(note("Couldn't reach the cloud ledger just now."));
+				p.add(note("Couldn't reach the cloud ledger just now."));
 			}
-			else if (cloudBagCache.containsKey(r.name))
+			else if (!cloudBagCache.containsKey(sr.name))
 			{
-				card.add(note("Fetching the item list…"));
-			}
-			else
-			{
-				card.add(note("Fetching the item list…"));
-				cloudBagCache.put(r.name, null);
-				final String src = r.name;
+				p.add(note("Fetching the item list…"));
+				cloudBagCache.put(sr.name, null);
+				final String src = sr.name;
 				plugin.fetchSourceItems(src, items ->
 				{
 					cloudBagCache.put(src, items != null ? items : java.util.Collections.emptyList());
 					SwingUtilities.invokeLater(() ->
 					{
-						if (src.equals(expandedSource) && view == View.DROPS)
+						if (src.equals(detailSource))
 						{
 							rebuild();
 						}
 					});
 				});
 			}
+			else
+			{
+				p.add(note("Fetching the item list…"));
+			}
+			return p;
 		}
-		else
-		{
-			card.add(note("Items fill in as you play — the journal prices each "
-				+ "drop the moment it lands."));
-		}
+		p.add(note(sr == null
+			? "The journal has no drops from this source yet."
+			: "Items fill in as you play — the journal prices each drop the "
+			+ "moment it lands."));
+		return p;
 	}
 
 	private JPanel buildLog()
@@ -1940,8 +2235,12 @@ class ChroniclePanel extends PluginPanel
 			{
 				String name = itemNames.get(i);
 				long[] agg = itemAgg.get(name);
-				p.add(row(name + " ×" + fmt(agg[0]),
-					agg[1] > 0 ? gp(agg[1]) + " gp" : "", accent()));
+				JPanel r = row(name + " ×" + fmt(agg[0]),
+					agg[1] > 0 ? gp(agg[1]) + " gp" : "", accent());
+				r.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+				final String itm = name;
+				r.addMouseListener(clicker(() -> openItem(itm)));
+				p.add(r);
 				List<String> srcs = itemSrcs.get(name);
 				StringBuilder fromLine = new StringBuilder("from ");
 				for (int s = 0; s < Math.min(3, srcs.size()); s++)
@@ -1958,7 +2257,11 @@ class ChroniclePanel extends PluginPanel
 			for (int i = 0; i < Math.min(2, srcHits.size()); i++)
 			{
 				LocalStore.SourceRow r = srcHits.get(i);
-				p.add(row(r.name, (r.kc > 0 ? fmt(r.kc) + " kc · " : "") + gp(r.value) + " gp", null));
+				JPanel rr = row(r.name, (r.kc > 0 ? fmt(r.kc) + " kc · " : "") + gp(r.value) + " gp", null);
+				rr.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+				final String src = r.name;
+				rr.addMouseListener(clicker(() -> openSource(src)));
+				p.add(rr);
 				total++;
 			}
 		}
