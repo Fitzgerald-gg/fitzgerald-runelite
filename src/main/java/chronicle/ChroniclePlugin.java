@@ -1254,7 +1254,7 @@ public class ChroniclePlugin extends Plugin
 			localStore.setTrackers(sessionView(), localName);
 			// The calendar spine: one closing baseline per day, appended — the
 			// History tab and the year cards are subtractions over this stream.
-			if (historyLog.dayRolledOver())
+			if (historyLog.dayRolledOver(localName))
 			{
 				appendHistoryBaseline();
 			}

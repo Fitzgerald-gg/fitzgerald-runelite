@@ -9,9 +9,11 @@
 package chronicle.counters;
 
 import net.runelite.api.Client;
+import net.runelite.api.GameState;
 import net.runelite.api.InventoryID;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.ItemID;
+import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
@@ -95,6 +97,19 @@ public class GoldStatTracker implements StatTracker
 			statStore.incrementStatBy(COINS_EARNED_AT_SHOPS, change);
 		}
 		coinsLastTick = coins;
+	}
+
+	@Override
+	public void onGameStateChanged(GameStateChanged event)
+	{
+		if (event.getGameState() != GameState.LOGGED_IN)
+		{
+			// A dropped connection tears the shop down without a WidgetClosed, so the
+			// arm would otherwise outlive the session that set it. The pack changes
+			// unobserved while away — and the next login may be a different account
+			// entirely — so the reading must not survive to be measured against.
+			coinsLastTick = IDLE;
+		}
 	}
 
 	/** Coins in the backpack, or {@link #IDLE} if the container isn't available. */

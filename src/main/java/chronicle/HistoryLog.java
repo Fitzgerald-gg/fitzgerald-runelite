@@ -36,9 +36,13 @@ class HistoryLog
 		this.gson = gson;
 	}
 
-	// The last date a baseline was appended for, per this client session —
-	// enough to make the day-rollover append fire exactly once.
-	private volatile String lastAppendedDate;
+	// The last date a baseline was appended for, per this client session — enough
+	// to make the day-rollover append fire exactly once. Keyed by the account's
+	// stream rather than held as one date: two characters played on the same day
+	// each need their own opening line, and a single field would let whichever
+	// logged in first answer for both, leaving the second's spine with nothing to
+	// subtract from for that day.
+	private final Map<String, String> lastAppendedDate = new java.util.concurrent.ConcurrentHashMap<>();
 
 	/** Append today's closing baseline. Call at login-load, day rollover, logout.
 	 *  Both maps are long-valued: total xp outgrows an int, and the reader takes
@@ -78,7 +82,7 @@ class HistoryLog
 				w.write(gson.toJson(line));
 				w.write('\n');
 			}
-			lastAppendedDate = today;
+			lastAppendedDate.put(LocalStore.slug(rsn), today);
 		}
 		catch (Exception e)   // best-effort; the next append retries
 		{
@@ -192,10 +196,16 @@ class HistoryLog
 		}
 	}
 
-	/** True once per calendar day: the caller should append a fresh baseline. */
-	boolean dayRolledOver()
+	/** True once per calendar day for this account: the caller should append a
+	 *  fresh baseline. The account has to be named, because the gate it consults
+	 *  is the one keyed to that account's own stream. */
+	boolean dayRolledOver(String rsn)
 	{
+		if (rsn == null || rsn.isEmpty())
+		{
+			return false;   // nothing to key on, and append() would refuse it anyway
+		}
 		String today = LocalDate.now(ZoneId.systemDefault()).toString();
-		return !today.equals(lastAppendedDate);
+		return !today.equals(lastAppendedDate.get(LocalStore.slug(rsn)));
 	}
 }

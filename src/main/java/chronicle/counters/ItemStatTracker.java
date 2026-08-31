@@ -121,7 +121,17 @@ public class ItemStatTracker implements StatTracker
 		{
 			// "You pick a cabbage." / "You pick some flax." — the produce is the
 			// trailing word, i.e. from the last space up to the closing period.
-			final String picked = message.substring(message.lastIndexOf(" ") + 1, message.indexOf("."));
+			// Every spam, game and message-box line carrying the phrase arrives
+			// here, including sentences that run on past the pick, so the period
+			// is looked for after that space rather than assumed to be the first
+			// one on the line. A line offering no such period is not a pick.
+			final int from = message.lastIndexOf(' ') + 1;
+			final int dot = message.indexOf('.', from);
+			if (dot < 0)
+			{
+				return;
+			}
+			final String picked = message.substring(from, dot);
 			if ("cabbage".equals(picked))
 			{
 				statStore.incrementStat(CABBAGES_PICKED);

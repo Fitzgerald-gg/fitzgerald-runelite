@@ -401,10 +401,11 @@ class ChroniclePanel extends PluginPanel
 	private JPanel buildHome()
 	{
 		JPanel p = column();
-		// The heartbeat, alone: capture is alive and stays on this computer.
+		// The heartbeat, alone: a lit dot and a plain word. This is an
+		// adventurer's log, not a diary — the word says what it does.
 		JPanel hdr = new JPanel(new BorderLayout());
 		hdr.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		JLabel state = new JLabel("journaling");
+		JLabel state = new JLabel("● logging");
 		state.setForeground(ACCENT_SESSION);
 		state.setFont(FontManager.getRunescapeSmallFont());
 		hdr.add(state, BorderLayout.EAST);
