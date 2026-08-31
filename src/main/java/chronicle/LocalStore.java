@@ -189,6 +189,13 @@ class LocalStore
 		}
 		if (FEED_TYPES.contains(type))
 		{
+			// A new log slot counts the moment it drops — the stored log gains
+			// the item and the finished tally, instead of waiting for the
+			// player to next open their collection log in game.
+			if ("COLLECTION".equals(type))
+			{
+				recordClogSlot(data);
+			}
 			JsonObject entry = new JsonObject();
 			entry.addProperty("ts", System.currentTimeMillis());
 			entry.addProperty("type", type);
@@ -1316,6 +1323,44 @@ class LocalStore
 	}
 
 	/** The journal-held clog fraction: {finished, available}, zero when unknown. */
+	/** A fresh COLLECTION event lights its slot immediately: the item joins
+	 *  clog_items and the finished tally rises when it's genuinely new. The
+	 *  next full in-game log open reconciles everything via mergeClog. */
+	private void recordClogSlot(JsonObject data)
+	{
+		String name = data.has("itemName") && !data.get("itemName").isJsonNull()
+			? data.get("itemName").getAsString() : null;
+		if (name == null || name.isEmpty())
+		{
+			return;
+		}
+		synchronized (lock)
+		{
+			JsonObject cl = root.has("collection_log") && root.get("collection_log").isJsonObject()
+				? root.getAsJsonObject("collection_log") : new JsonObject();
+			root.add("collection_log", cl);
+			JsonObject items = cl.has("clog_items") && cl.get("clog_items").isJsonObject()
+				? cl.getAsJsonObject("clog_items") : new JsonObject();
+			cl.add("clog_items", items);
+			boolean known = false;
+			for (java.util.Map.Entry<String, JsonElement> e : items.entrySet())
+			{
+				if (e.getKey().equalsIgnoreCase(name))
+				{
+					known = true;
+					break;
+				}
+			}
+			if (!known)
+			{
+				items.addProperty(name, 1);
+				long fin = cl.has("finished") ? cl.get("finished").getAsLong() : 0;
+				cl.addProperty("finished", fin + 1);
+			}
+			root.addProperty("updated_at", nowSec());
+		}
+	}
+
 	int[] clogFraction()
 	{
 		synchronized (lock)

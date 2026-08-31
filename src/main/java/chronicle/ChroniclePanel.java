@@ -456,6 +456,9 @@ class ChroniclePanel extends PluginPanel
 			JPanel card = card("Recent drops");
 			JPanel grid = new JPanel(new GridLayout(0, 5, 3, 3));
 			grid.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+			// BoxLayout drifts mixed alignments: a CENTER-aligned grid beside
+			// the LEFT-aligned caption pushed the caption to the right.
+			grid.setAlignmentX(Component.LEFT_ALIGNMENT);
 			int shown = 0;
 			for (LocalStore.RecentDrop d : recent)
 			{
@@ -1232,9 +1235,10 @@ class ChroniclePanel extends PluginPanel
 			}
 			Long kc = kcs.get(page.toLowerCase(Locale.ROOT));
 			boolean open = page.equals(clogPageSel);
+			boolean complete = got == slots.size() && !slots.isEmpty();
 			JPanel rowP = row(page, got + "/" + slots.size()
 				+ (kc != null && kc > 0 ? " · " + fmt(kc) + " kc" : ""),
-				got == slots.size() && !slots.isEmpty() ? ACCENT_SESSION : null);
+				complete ? ACCENT_SESSION : null, complete);
 			rowP.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
 			rowP.addMouseListener(clicker(() ->
 			{
