@@ -226,6 +226,14 @@ public class StatStore
 	 * <p>Server-derived counters are filtered out here rather than at the call site,
 	 * so there is exactly one place that decides what leaves the client.
 	 */
+	/** Every total, detached — the journal and session views read this; the
+	 *  network path stays on {@link #pushable()} (server-owned keys are the
+	 *  server's own derivations and must never be echoed back). */
+	public Map<String, Integer> snapshotAll()
+	{
+		return new HashMap<>(totals);
+	}
+
 	public Map<String, Integer> pushable()
 	{
 		Map<String, Integer> out = new HashMap<>();

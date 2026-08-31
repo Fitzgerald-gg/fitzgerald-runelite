@@ -34,6 +34,7 @@ public class ChronicleCounters
 	private final StatStore store;
 	private final SkillChatBuffer skillBuffer;
 	private final ItemManager itemManager;
+	private final SkillDeriver skillDeriver;
 
 	// Optional: RuneLite's core XP Tracker plugin. Absent in a dev-mode client
 	// (or if the user disables XP Tracker) — SkillingStatTracker null-guards its
@@ -48,13 +49,14 @@ public class ChronicleCounters
 
 	@Inject
 	ChronicleCounters(Client client, ChronicleConfig config, StatStore store,
-		SkillChatBuffer skillBuffer, ItemManager itemManager)
+		SkillChatBuffer skillBuffer, ItemManager itemManager, SkillDeriver skillDeriver)
 	{
 		this.client = client;
 		this.config = config;
 		this.store = store;
 		this.skillBuffer = skillBuffer;
 		this.itemManager = itemManager;
+		this.skillDeriver = skillDeriver;
 	}
 
 	private StatTracker[] trackers()
@@ -65,7 +67,7 @@ public class ChronicleCounters
 				new GoldStatTracker(store, client),
 				new ItemStatTracker(store, client, itemManager),
 				new MovementStatTracker(store, client),
-				new SkillingStatTracker(store, client, xpTrackerService, skillBuffer),
+				new SkillingStatTracker(store, client, xpTrackerService, skillBuffer, skillDeriver),
 				new FoodStatTracker(store, client, itemManager),
 				new NPCStatTracker(store),
 				new ExperienceStatTracker(store),

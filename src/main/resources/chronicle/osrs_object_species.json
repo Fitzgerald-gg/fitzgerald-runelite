@@ -1,0 +1,6 @@
+{
+ "_comment": "Chat-free skilling: game-object id \u2192 resource token, an OPTIONAL accelerator for identifying the specific tree/rock when power-skilling (item dropped on a full inventory, so no itemId) AND the xp is a collision. Seeded EMPTY on purpose: RuneLite only reliably enumerates tree STUMPS, not live objects, so shipping guessed live-object ids would risk mis-mapping. Instead the plugin forwards the RAW clicked object id in the action tuple; anything the itemId/xp paths can't resolve is logged to skill_unmapped WITH its object id, which surfaces the real ids to add here (hot-reloaded, no restart, no plugin release). Format: {\"<objectId>\": \"<token>\"} e.g. {\"1276\": \"normal\", \"10820\": \"oak\"}. Verify each id against the targeted game revision before adding.",
+ "objects": {
+  "30985": "volcanicAsh"
+ }
+}

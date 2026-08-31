@@ -47,6 +47,9 @@ public class SkillingStatTracker implements StatTracker
 	private final Client client;
 	private final XpTrackerService xpService;
 	private final SkillChatBuffer skillBuffer;
+	// Local-first: the same tuple derives typed counters HERE, instantly —
+	// the buffered copy still travels for cloud users (floor-merge reconciles).
+	private final SkillDeriver deriver;
 
 	// Every non-combat skill rides the XP tuple. Combat (Att/Str/Def/Range/Magic/HP)
 	// + Slayer are handled by the kill/loot subsystem, not here.
@@ -88,12 +91,14 @@ public class SkillingStatTracker implements StatTracker
 	};
 
 	public SkillingStatTracker(StatStore statStore, Client client,
-	                           XpTrackerService xpTrackerService, SkillChatBuffer skillBuffer)
+	                           XpTrackerService xpTrackerService, SkillChatBuffer skillBuffer,
+	                           SkillDeriver deriver)
 	{
 		this.statStore = statStore;
 		this.client = client;
 		this.xpService = xpTrackerService;
 		this.skillBuffer = skillBuffer;
+		this.deriver = deriver;
 	}
 
 	@Override
@@ -227,8 +232,10 @@ public class SkillingStatTracker implements StatTracker
 				for (int delta : e.getValue())
 				{
 					// 7-field tuple; targetName may contain spaces but never '|'.
-					skillBuffer.addAction(skill.name() + "|" + delta + "|" + objStr
-						+ "|" + gainStr + "|" + qtyStr + "|" + target + "|" + consStr);
+					String tuple = skill.name() + "|" + delta + "|" + objStr
+						+ "|" + gainStr + "|" + qtyStr + "|" + target + "|" + consStr;
+					skillBuffer.addAction(tuple);
+					deriver.apply(tuple);
 				}
 			}
 			tickDrops.clear();

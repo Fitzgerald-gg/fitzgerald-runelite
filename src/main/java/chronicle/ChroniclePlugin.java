@@ -619,7 +619,7 @@ public class ChroniclePlugin extends Plugin
 			seedCounters(token, name);
 			return;
 		}
-		Map<String, Integer> snapshot = harvest();
+		Map<String, Integer> snapshot = statStore.pushable();
 		if (snapshot.isEmpty())
 		{
 			return;   // nothing tracked yet on this account — nothing to push
@@ -828,7 +828,7 @@ public class ChroniclePlugin extends Plugin
 		// Account boundary for the achievement gate too: the next login must
 		// sync its own snapshot even if it happens to serialize identically.
 		achievementSync.reset();
-		Map<String, Integer> fresh = harvest();
+		Map<String, Integer> fresh = statStore.pushable();
 		if (!fresh.isEmpty())
 		{
 			cachedSnapshot = fresh;
@@ -928,7 +928,9 @@ public class ChroniclePlugin extends Plugin
 	 */
 	Map<String, Integer> harvest()
 	{
-		return statStore.pushable();
+		// ALL totals — including the locally derived typed skilling keys the
+		// push path must filter out (see StatStore.pushable).
+		return statStore.snapshotAll();
 	}
 
 	/**

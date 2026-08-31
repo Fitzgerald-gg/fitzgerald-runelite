@@ -1,0 +1,280 @@
+{
+ "_comment": "Chat-free skilling: integer XP-delta \u2192 resource token, the POWER-SKILLING fallback (item dropped on a full inventory \u2192 no itemId). RuneLite's StatChanged.getXp() is the FLOORED integer career total, so a fractional base (oak 37.5) surfaces as alternating +37/+38 deltas \u2014 hence fractional bases have BOTH the floor and ceil integer as keys pointing to the same token (37\u2192oak, 38\u2192oak). Keyed by the raw integer XP delta. STRING value = unambiguous token \u2192 <token>+<suffix>. {\"members\":[...]} = a TRUE collision (>1 keyed resource share this delta) \u2192 server bumps only the generic total + logs the tuple; the itemId path resolves these exactly when banking. Suffixes: WOODCUTTING\u2192LogsChopped, MINING\u2192Mined, FISHING\u2192Caught, COOKING\u2192Cooked. Verified vs OSRS Wiki 2026-07-18. Unknown delta \u2192 generic+log, then add a row (hot-reloaded). || AGILITY / HUNTER / HUNTER_BIRDHOUSES / FARMING values are FULL counter keys read verbatim by their code branches (the original four skills stay token+family-suffix). FIREMAKING types the consumed-capture misses; the consumed-item path stays primary.",
+ "WOODCUTTING": {
+  "25": "normal",
+  "37": "oak",
+  "38": "oak",
+  "67": "willow",
+  "68": "willow",
+  "85": "teak",
+  "100": "maple",
+  "125": "mahogany",
+  "175": "yew",
+  "250": "magic",
+  "380": "redwood"
+ },
+ "MINING": {
+  "26": "limestone",
+  "27": "limestone",
+  "35": "ironOre",
+  "40": "silverOre",
+  "50": "coal",
+  "65": {
+   "members": [
+    "goldOre",
+    "gemRock"
+   ]
+  },
+  "80": "mithrilOre",
+  "95": "adamantiteOre",
+  "125": "runiteOre",
+  "240": "amethyst",
+  "5": {
+   "members": [
+    "basalt",
+    "clay",
+    "daeyaltShard",
+    "pureEssence",
+    "teSalt",
+    "urtSalt"
+   ]
+  },
+  "17": {
+   "members": [
+    "copperOre",
+    "tinOre"
+   ]
+  },
+  "18": {
+   "members": [
+    "copperOre",
+    "tinOre"
+   ]
+  },
+  "12": "denseEssenceBlock"
+ },
+ "FISHING": {
+  "8": "harpoonFish",
+  "9": "harpoonFish",
+  "10": "shrimp",
+  "20": "sardine",
+  "26": "minnow",
+  "27": "minnow",
+  "30": "herring",
+  "38": "seaTurtle",
+  "40": "anchovies",
+  "45": "cod",
+  "60": "pike",
+  "69": "mantaRay",
+  "90": "lobster",
+  "105": "sacredEel",
+  "110": "shark",
+  "130": "darkCrab",
+  "50": {
+   "members": [
+    "trout",
+    "leapingTrout",
+    "karambwan"
+   ]
+  },
+  "70": {
+   "members": [
+    "salmon",
+    "leapingSalmon"
+   ]
+  },
+  "80": {
+   "members": [
+    "tuna",
+    "leapingSturgeon"
+   ]
+  },
+  "100": {
+   "members": [
+    "bass",
+    "swordfish"
+   ]
+  },
+  "120": {
+   "members": [
+    "monkfish",
+    "anglerfish"
+   ]
+  }
+ },
+ "COOKING": {
+  "70": "trout",
+  "90": "salmon",
+  "120": "lobster",
+  "140": "swordfish",
+  "150": "monkfish",
+  "190": "karambwan",
+  "210": "shark",
+  "230": "anglerfish",
+  "30": {
+   "members": [
+    "shrimp",
+    "anchovies",
+    "lavaEel"
+   ]
+  },
+  "40": "sardine",
+  "50": "herring",
+  "60": "mackerel",
+  "75": "cod",
+  "80": "pike",
+  "95": "slimyEel",
+  "110": "rainbowFish",
+  "115": "caveEel",
+  "130": "bass",
+  "160": "jubbly",
+  "211": "seaTurtle",
+  "212": "seaTurtle",
+  "215": "darkCrab",
+  "216": "mantaRay",
+  "217": "mantaRay",
+  "100": {
+   "members": [
+    "tuna",
+    "chompy"
+   ]
+  }
+ },
+ "FIREMAKING": {
+  "60": "oak",
+  "90": "willow",
+  "96": "blisterwood",
+  "105": "teak",
+  "120": "jatoba",
+  "125": "arcticPine",
+  "135": "maple",
+  "157": "mahogany",
+  "158": "mahogany",
+  "180": "camphor",
+  "202": "yew",
+  "203": "yew",
+  "220": "ironwood",
+  "221": "ironwood",
+  "268": "rosewood",
+  "303": "magic",
+  "304": "magic",
+  "350": "redwood",
+  "40": {
+   "members": [
+    "normal",
+    "acheyTree"
+   ]
+  }
+ },
+ "AGILITY": {
+  "79": "draynorLaps",
+  "143": "varrockLaps",
+  "144": "varrockLaps",
+  "175": "canifisLaps",
+  "241": "faladorLaps",
+  "435": "seersLaps",
+  "540": "pollnivneachLaps",
+  "666": "pollnivneachLaps",
+  "475": "rellekkaLaps",
+  "615": "rellekkaLaps",
+  "625": "ardougneLaps",
+  "300": "apeAtollLaps",
+  "46": "barbarianOutpostLaps",
+  "47": "barbarianOutpostLaps",
+  "498": "wildernessLaps",
+  "499": "wildernessLaps",
+  "1037": "prifddinasLaps",
+  "1038": "prifddinasLaps",
+  "106": "shayzienBasicLaps",
+  "400": "shayzienAdvancedLaps",
+  "341": "colossalWyrmBasicLaps",
+  "342": "colossalWyrmBasicLaps",
+  "662": "colossalWyrmAdvancedLaps",
+  "380": "werewolfLaps",
+  "575": "sepulchreFloor1Cleared",
+  "925": "sepulchreFloor2Cleared",
+  "935": "sepulchreFloor2Cleared",
+  "1600": "sepulchreFloor3Cleared",
+  "2875": "sepulchreFloor4Cleared",
+  "5725": "sepulchreFloor5Cleared"
+ },
+ "HUNTER": {
+  "30": "polarKebbitsTrapped",
+  "34": "crimsonSwiftsTrapped",
+  "36": "commonKebbitsTrapped",
+  "47": "goldenWarblersTrapped",
+  "48": "feldipWeaselsTrapped",
+  "61": "copperLongtailsTrapped",
+  "62": "copperLongtailsTrapped",
+  "64": "ceruleanTwitchesTrapped",
+  "65": "ceruleanTwitchesTrapped",
+  "66": "desertDevilsTrapped",
+  "95": "tropicalWagtailsTrapped",
+  "96": "tropicalWagtailsTrapped",
+  "102": "wildKebbitsTrapped",
+  "103": "wildKebbitsTrapped",
+  "134": "barbTailedKebbitsTrapped",
+  "135": "barbTailedKebbitsTrapped",
+  "147": "pricklyKebbitsTrapped",
+  "148": "pricklyKebbitsTrapped",
+  "160": "sabreToothedKebbitsTrapped",
+  "177": "pyreFoxesTrapped",
+  "178": "pyreFoxesTrapped",
+  "180": "spinedLarupiasTrapped",
+  "240": "hornedGraahksTrapped",
+  "300": "sabreToothedKyattsTrapped",
+  "348": "razorBackedKebbitsTrapped",
+  "349": "razorBackedKebbitsTrapped",
+  "380": "sunlightAntelopesTrapped",
+  "450": "moonlightAntelopesTrapped",
+  "1000": "maniacalMonkeysTrapped"
+ },
+ "HUNTER_BIRDHOUSES": {
+  "112": "regularBirdhousesEmptied",
+  "168": "oakBirdhousesEmptied",
+  "224": "willowBirdhousesEmptied",
+  "280": "teakBirdhousesEmptied",
+  "369": "mapleBirdhousesEmptied",
+  "480": "mahoganyBirdhousesEmptied",
+  "612": "yewBirdhousesEmptied",
+  "969": "magicBirdhousesEmptied",
+  "1200": "redwoodBirdhousesEmptied"
+ },
+ "FARMING": {
+  "481": "oakChecked",
+  "482": "oakChecked",
+  "1481": "willowChecked",
+  "1482": "willowChecked",
+  "3448": "mapleChecked",
+  "3449": "mapleChecked",
+  "7150": "yewChecked",
+  "7151": "yewChecked",
+  "13913": "magicChecked",
+  "13914": "magicChecked",
+  "1221": "appleChecked",
+  "1222": "appleChecked",
+  "1778": "bananaChecked",
+  "1779": "bananaChecked",
+  "2505": "orangeChecked",
+  "2506": "orangeChecked",
+  "2946": "curryChecked",
+  "2947": "curryChecked",
+  "4662": "pineappleChecked",
+  "4663": "pineappleChecked",
+  "6218": "papayaChecked",
+  "6219": "papayaChecked",
+  "10260": "palmChecked",
+  "10261": "palmChecked",
+  "17475": "dragonfruitChecked",
+  "7325": "teakChecked",
+  "15783": "mahoganyChecked",
+  "12225": "calquatChecked",
+  "12226": "calquatChecked",
+  "13366": "crystalChecked",
+  "19500": "spiritChecked",
+  "19501": "spiritChecked",
+  "19502": "spiritChecked",
+  "14330": "celastrusChecked",
+  "22680": "redwoodChecked"
+ }
+}
