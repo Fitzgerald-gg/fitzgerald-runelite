@@ -1059,12 +1059,16 @@ public class ChroniclePlugin extends Plugin
 				appendHistoryBaseline();
 			}
 		}
-		// First run only: adopt the core Loot Tracker's lifetime record — the
-		// one LOCAL archive predating any server. Reading the ACTIVE RS
-		// profile's keys keeps it own-account by construction (league and alt
-		// profiles have different keys). Purely local, no network.
+		// First run PER ACCOUNT: adopt the core Loot Tracker's lifetime record —
+		// the one LOCAL archive predating any server, so an install late in an
+		// account's life starts years deep. Reading the ACTIVE RS profile's keys
+		// keeps it own-account by construction (league and alt profiles have
+		// different keys); the one-shot flag is RSProfile-scoped for the same
+		// reason — each account inherits its own archive, not just whichever
+		// logged in first. Purely local, no network; the floors are idempotent,
+		// so a re-run can never double anything.
 		if (localName != null && localStore.isReadyFor(localName)
-			&& !"true".equals(configManager.getConfiguration(GROUP, "lootTrackerImported")))
+			&& !"true".equals(configManager.getRSProfileConfiguration(GROUP, "lootTrackerImported")))
 		{
 			importLootTracker();
 		}
@@ -1074,7 +1078,7 @@ public class ChroniclePlugin extends Plugin
 		// kept locally (LOOT slayer stamps open segments; SLAYER events close them).
 		if (cloudActive() && !slayerImportTried
 			&& localName != null && localStore.isReadyFor(localName)
-			&& !"true".equals(configManager.getConfiguration(GROUP, "slayerJourneyImported")))
+			&& !"true".equals(configManager.getRSProfileConfiguration(GROUP, "slayerJourneyImported")))
 		{
 			slayerImportTried = true;
 			final String who = localName;
@@ -1083,7 +1087,7 @@ public class ChroniclePlugin extends Plugin
 				if (j != null && localStore.isReadyFor(who))
 				{
 					localStore.adoptSlayerJourney(j, who);
-					configManager.setConfiguration(GROUP, "slayerJourneyImported", true);
+					configManager.setRSProfileConfiguration(GROUP, "slayerJourneyImported", true);
 					refreshPanel();
 				}
 			}));
@@ -1167,7 +1171,7 @@ public class ChroniclePlugin extends Plugin
 				+ " loot events from your Loot Tracker.");
 			refreshPanel();
 		}
-		configManager.setConfiguration(GROUP, "lootTrackerImported", true);
+		configManager.setRSProfileConfiguration(GROUP, "lootTrackerImported", true);
 	}
 
 	/** Client thread. Appends today's closing skills+counters baseline. */
