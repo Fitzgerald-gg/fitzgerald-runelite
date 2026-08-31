@@ -56,8 +56,9 @@ class LocalStore
 	// max() rather than a sum (matches CombatStatTracker's setStat semantics).
 	static final java.util.Set<String> MAX_KEYS = new java.util.HashSet<>(
 		java.util.Arrays.asList("highestHit", "highestHitTaken"));
-	// Notable one-off events that belong in the dated feed (LOOT is aggregated
-	// into drops instead; GROUP_STORAGE / LOOT_UNTAKEN are cloud-only niceties).
+	// Notable one-off events that belong in the dated feed (LOOT aggregates
+	// into drops, LOOT_UNTAKEN into the untaken ledger — both recorded locally,
+	// just not as feed lines; GROUP_STORAGE is a cloud-only nicety).
 	private static final java.util.Set<String> FEED_TYPES = new java.util.HashSet<>(java.util.Arrays.asList(
 		"PET", "COLLECTION", "COMBAT_ACHIEVEMENT", "QUEST", "DIARY", "CLUE", "DEATH", "SLAYER"));
 

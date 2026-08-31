@@ -572,10 +572,15 @@ public class ChronicleEventCapture
 	@Subscribe
 	public void onItemSpawned(ItemSpawned event)
 	{
-		// Only the local player's own kill loot: OWNERSHIP_SELF, dropped within a
-		// few ticks of a kill (so manual drops and other players' loot are ignored).
+		// Only the local player's own kill loot, dropped within a few ticks of a
+		// kill (so manual drops and other players' loot are ignored). GROUP
+		// ownership is accepted alongside SELF because a group ironman's OWN
+		// drops arrive GROUP-stamped — the exact reason the Left behind ledger
+		// sat empty on a GIM account (GroundItemsPlugin upstream does the same);
+		// the kill-armed reconcile below still discards group-mates' loot.
 		TileItem it = event.getItem();
-		if (it == null || it.getOwnership() != SELF_OWNED)
+		if (it == null || (it.getOwnership() != SELF_OWNED
+			&& it.getOwnership() != TileItem.OWNERSHIP_GROUP))
 		{
 			return;
 		}
