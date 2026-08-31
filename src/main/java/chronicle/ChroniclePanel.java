@@ -54,12 +54,13 @@ import net.runelite.client.util.LinkBrowser;
 
 /**
  * The journal's face: a persistent search field, a global Lifetime/Session
- * scope chip, and six tabs — Home · Drops · Log · Stats · History · Journal.
+ * and seven tabs — Home is the SESSION view (adaptive: cards earn their
+ * place by this session's data), everything else reads the lifetime journal.
  *
  * <p>Search answers inline from anywhere; the tabs are the browsing spine; the
- * scope chip re-answers every tab at once, with the accent colour carrying the
- * state (orange = lifetime, green = session). Every list mounts a bounded
- * number of rows; views rebuild on tab switch, scope switch, and (Home only)
+ * accent colour carries the state (orange = the journal, green = the live
+ * session on Home). Every list mounts a bounded
+ * number of rows; views rebuild on tab switch and (Home only)
  * a slow timer — never per game tick.
  */
 class ChroniclePanel extends PluginPanel
@@ -73,11 +74,6 @@ class ChroniclePanel extends PluginPanel
 	private static final Color ACCENT_RED = new Color(196, 84, 74);
 	private static final int ROW_CAP = 30;
 	private static final long XP_99 = 13_034_431L;
-
-	private enum Scope
-	{
-		LIFETIME, SESSION
-	}
 
 	private enum View
 	{
@@ -93,12 +89,9 @@ class ChroniclePanel extends PluginPanel
 	private final MaterialTabGroup tabGroup = new MaterialTabGroup();
 	private final Map<View, MaterialTab> tabByView = new java.util.EnumMap<>(View.class);
 	private final IconTextField searchField = new IconTextField();
-	private final JLabel scopeLifetime = new JLabel("Lifetime", JLabel.CENTER);
-	private final JLabel scopeSession = new JLabel("Session", JLabel.CENTER);
 	private final Timer searchDebounce;
 	private final Timer homeTicker;
 
-	private Scope scope = Scope.LIFETIME;
 	private View view = View.HOME;
 	// The pivot navigation: an item or a source under the glass, overlaying
 	// the current tab. Click any item row anywhere → the item's view (total
@@ -138,17 +131,6 @@ class ChroniclePanel extends PluginPanel
 		JPanel north = new JPanel();
 		north.setLayout(new BoxLayout(north, BoxLayout.Y_AXIS));
 		north.setBackground(ColorScheme.DARK_GRAY_COLOR);
-
-		// ── scope chip (built here, added after the tabs — mock order) ────
-		JPanel chip = new JPanel(new GridLayout(1, 2, 4, 0));
-		chip.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		chip.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
-		styleScopeHalf(scopeLifetime);
-		styleScopeHalf(scopeSession);
-		scopeLifetime.addMouseListener(clicker(() -> setScope(Scope.LIFETIME)));
-		scopeSession.addMouseListener(clicker(() -> setScope(Scope.SESSION)));
-		chip.add(scopeLifetime);
-		chip.add(scopeSession);
 
 		// ── search ────────────────────────────────────────────────────────
 		searchField.setIcon(IconTextField.Icon.SEARCH);
@@ -243,7 +225,7 @@ class ChroniclePanel extends PluginPanel
 				searchDebounce.restart();
 			}
 		});
-		// ── tabs first (the mock's order), then search, then the scope chip ──
+		// ── tabs first (the mock's order), then search ──
 		tabGroup.setLayout(new GridLayout(1, 7, 2, 0));
 		addTab("tab_home.png", "Home", View.HOME);
 		addTab("tab_drops.png", "Drops", View.DROPS);
@@ -255,8 +237,6 @@ class ChroniclePanel extends PluginPanel
 		north.add(tabGroup);
 		north.add(vgap(7));
 		north.add(searchField);
-		north.add(vgap(6));
-		north.add(chip);
 		north.add(vgap(8));
 
 		add(north, BorderLayout.NORTH);
@@ -310,16 +290,7 @@ class ChroniclePanel extends PluginPanel
 
 	private Color accent()
 	{
-		return scope == Scope.SESSION ? ACCENT_SESSION : ACCENT_LIFETIME;
-	}
-
-	private void setScope(Scope s)
-	{
-		if (scope != s)
-		{
-			scope = s;
-			rebuild();
-		}
+		return ACCENT_LIFETIME;
 	}
 
 	private String searchQuery()
@@ -329,12 +300,6 @@ class ChroniclePanel extends PluginPanel
 
 	private Map<String, Long> counters()
 	{
-		if (scope == Scope.SESSION)
-		{
-			Map<String, Long> out = new LinkedHashMap<>();
-			plugin.sessionDisplayCounters().forEach((k, v) -> out.put(k, v.longValue()));
-			return out;
-		}
 		return plugin.lifetimeCounters();
 	}
 
@@ -346,7 +311,6 @@ class ChroniclePanel extends PluginPanel
 
 	private void rebuild()
 	{
-		styleScopeState();
 		display.removeAll();
 		JPanel body;
 		if (!searchQuery().isEmpty())
@@ -408,28 +372,46 @@ class ChroniclePanel extends PluginPanel
 	// Views
 	// ------------------------------------------------------------------
 
+	// Session counters the adaptive strip pins first, in reading order —
+	// everything else the session stirred follows, ranked.
+	private static final String[] HOME_PINNED = {
+		"totalXpGained", "damageDealt", "consumedValue"
+	};
+
+	private static String homeLabel(String key)
+	{
+		switch (key)
+		{
+			case "totalXpGained":
+				return "Xp gained";
+			case "consumedValue":
+				return "Consumed";
+			default:
+				return StatRegistry.label(key);
+		}
+	}
+
 	private JPanel buildHome()
 	{
 		JPanel p = column();
-		String rsn = plugin.displayRsn();
+		// The heartbeat, alone: capture is alive and stays on this computer.
 		JPanel hdr = new JPanel(new BorderLayout());
 		hdr.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		JLabel name = new JLabel(rsn != null && !rsn.isEmpty() ? rsn : "Chronicle");
-		name.setFont(FontManager.getRunescapeBoldFont());
-		JLabel state = new JLabel(scope == Scope.SESSION ? "session" : "journaling");
-		state.setForeground(accent());
+		JLabel state = new JLabel("journaling");
+		state.setForeground(ACCENT_SESSION);
 		state.setFont(FontManager.getRunescapeSmallFont());
-		hdr.add(name, BorderLayout.WEST);
 		hdr.add(state, BorderLayout.EAST);
-		hdr.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+		hdr.setMaximumSize(new Dimension(Integer.MAX_VALUE, 16));
 		p.add(hdr);
-		p.add(vgap(6));
+		p.add(vgap(4));
 
+		// The slayer card earns its place: only when this session actually
+		// produced an on-task kill — a skiller never sees it.
 		ChronicleEventCapture.SlayerView task = plugin.slayerView();
-		if (task != null)
+		if (task != null && plugin.slayerSeenThisSession())
 		{
 			JPanel card = card("Slayer task");
-			card.add(row(task.task, task.remaining + " left", accent()));
+			card.add(row(task.task, task.remaining + " left", ACCENT_SESSION));
 			if (task.initial > 0)
 			{
 				card.add(progress(1f - (float) task.remaining / task.initial));
@@ -438,15 +420,66 @@ class ChroniclePanel extends PluginPanel
 			p.add(vgap(6));
 		}
 
+		// The adaptive strip: whatever this session stirred, and nothing
+		// else. Pinned marquee rows first, then the rest ranked by size.
 		JPanel strip = card("This session");
 		Map<String, Integer> sess = plugin.sessionCounters();
-		strip.add(row("Damage dealt", fmt(sess.getOrDefault("damageDealt", 0)), null));
-		strip.add(row("Drops taken",
-			plugin.sessionLoots() + " · " + gp(plugin.sessionLootValue()) + " gp", null));
+		int mounted = 0;
+		java.util.Set<String> shownKeys = new java.util.HashSet<>();
+		for (String key : HOME_PINNED)
+		{
+			long v = sess.getOrDefault(key, 0);
+			if (v > 0)
+			{
+				strip.add(row(homeLabel(key),
+					StatRegistry.isGp(key) ? gp(v) + " gp"
+						: ("totalXpGained".equals(key) ? "+" + gp(v) : fmt(v)),
+					ACCENT_SESSION));
+				shownKeys.add(key);
+				mounted++;
+			}
+		}
+		if (plugin.sessionLoots() > 0)
+		{
+			strip.add(row("Drops taken",
+				plugin.sessionLoots() + " · " + gp(plugin.sessionLootValue()) + " gp",
+				ACCENT_SESSION));
+			mounted++;
+		}
 		long[] untaken = plugin.sessionUntakenTally();
-		strip.add(row("Left behind", fmt(untaken[0]) + " · " + gp(untaken[1]) + " gp", null));
-		strip.add(row("Consumed", gp(sess.getOrDefault("consumedValue", 0)) + " gp", null));
-		strip.add(row("Tiles run", fmt(sess.getOrDefault("tilesRan", 0)), null));
+		if (untaken[0] > 0)
+		{
+			strip.add(row("Left behind", fmt(untaken[0]) + " · " + gp(untaken[1]) + " gp", null));
+			mounted++;
+		}
+		List<Map.Entry<String, Integer>> movers = new ArrayList<>();
+		for (Map.Entry<String, Integer> e : plugin.sessionDisplayCounters().entrySet())
+		{
+			if (e.getValue() > 0 && !shownKeys.contains(e.getKey())
+				&& !StatRegistry.hidden(e.getKey())
+				&& !StatRegistry.isFloor(e.getKey()))
+			{
+				movers.add(e);
+			}
+		}
+		movers.sort(Map.Entry.<String, Integer>comparingByValue().reversed());
+		int moverCap = Math.max(0, 12 - mounted);
+		for (int i = 0; i < Math.min(moverCap, movers.size()); i++)
+		{
+			Map.Entry<String, Integer> e = movers.get(i);
+			long v = e.getValue();
+			strip.add(row(StatRegistry.label(e.getKey()),
+				StatRegistry.isGp(e.getKey()) ? gp(v) + " gp" : fmt(v), null));
+			mounted++;
+		}
+		if (movers.size() > moverCap)
+		{
+			strip.add(ghostRow("…and " + fmt(movers.size() - moverCap) + " more stirred", ""));
+		}
+		if (mounted == 0)
+		{
+			strip.add(row("A fresh page", "", null));
+		}
 		p.add(strip);
 		p.add(vgap(6));
 
@@ -482,16 +515,6 @@ class ChroniclePanel extends PluginPanel
 			p.add(vgap(6));
 		}
 
-		int avail = plugin.clogAvailable();
-		if (avail > 0)
-		{
-			JPanel card = card("Collection log");
-			int fin = plugin.clogFinished();
-			card.add(row(fmt(fin) + " / " + fmt(avail),
-				Math.round(100f * fin / avail) + "%", null));
-			card.add(progress((float) fin / avail));
-			p.add(card);
-		}
 		return p;
 	}
 
@@ -525,23 +548,11 @@ class ChroniclePanel extends PluginPanel
 		{
 			return buildLeftBehind(p);
 		}
-		if (scope == Scope.SESSION)
-		{
-			JPanel card = card("This session");
-			card.add(row("Drops taken",
-				plugin.sessionLoots() + " · " + gp(plugin.sessionLootValue()) + " gp", accent()));
-			p.add(card);
-			p.add(vgap(6));
-		}
-		// Session scope ranks only this session's take; lifetime is the journal.
-		List<LocalStore.SourceRow> sources = scope == Scope.SESSION
-			? plugin.sessionSourceRows() : plugin.dropSources();
+		List<LocalStore.SourceRow> sources = plugin.dropSources();
 		sources.sort(Comparator.comparingLong((LocalStore.SourceRow r) -> r.value).reversed());
 		if (sources.isEmpty())
 		{
-			p.add(note(scope == Scope.SESSION
-				? "Nothing taken yet this session."
-				: "Drops appear here as you play — every kill, priced as it lands."));
+			p.add(note("Drops appear here as you play — every kill, priced as it lands."));
 			return p;
 		}
 		int shown = 0;
@@ -579,14 +590,6 @@ class ChroniclePanel extends PluginPanel
 	/** The uncollected ledger: ghost economics, looked at by choice. */
 	private JPanel buildLeftBehind(JPanel p)
 	{
-		long[] sess = plugin.sessionUntakenTally();
-		if (scope == Scope.SESSION)
-		{
-			JPanel card = card("This session");
-			card.add(row("Left behind", fmt(sess[0]) + " items · " + gp(sess[1]) + " gp", accent()));
-			p.add(card);
-			p.add(vgap(6));
-		}
 		List<LocalStore.UntakenRow> rows = plugin.untakenSources();
 		rows.sort(Comparator.comparingLong((LocalStore.UntakenRow r) -> r.value).reversed());
 		long totalQty = 0;
@@ -642,6 +645,10 @@ class ChroniclePanel extends PluginPanel
 		}
 		return p;
 	}
+
+	// The dryness ledger, fetched once per session on first source open.
+	private List<ChronicleApiClient.GrindRow> grindsCache;
+	private boolean grindsFetching;
 
 	// The journey fetches once per session on first open; null = not yet asked.
 	private ChronicleApiClient.SlayerJourney journeyCache;
@@ -1016,6 +1023,34 @@ class ChroniclePanel extends PluginPanel
 				head.add(row("Tracked since",
 					TASK_DAY.format(Instant.ofEpochMilli(sr.firstMs)), null));
 			}
+			// The chase, when the dryness ledger knows one for this source.
+			if (grindsCache == null && !grindsFetching && plugin.cloudActive())
+			{
+				grindsFetching = true;
+				final String src = sr.name;
+				plugin.fetchGrinds(rows2 -> SwingUtilities.invokeLater(() ->
+				{
+					grindsFetching = false;
+					grindsCache = rows2 != null ? rows2 : new ArrayList<>();
+					if (src.equals(detailSource))
+					{
+						rebuild();
+					}
+				}));
+			}
+			if (grindsCache != null)
+			{
+				for (ChronicleApiClient.GrindRow g : grindsCache)
+				{
+					if (g.boss.equalsIgnoreCase(sr.name))
+					{
+						head.add(row("Chasing " + g.item,
+							fmt(g.kc) + " / " + fmt(g.rate) + " kc",
+							g.percentileDry >= 90 ? ACCENT_RED : null));
+						break;
+					}
+				}
+			}
 		}
 		p.add(head);
 		p.add(vgap(6));
@@ -1354,9 +1389,21 @@ class ChroniclePanel extends PluginPanel
 	// starts folded, the clog browser's own idiom. Keyed family:section.
 	private final java.util.Set<String> statsExpanded = new java.util.HashSet<>();
 
+	// Server-priced gp per consumable key, refreshed per rebuild — Food and
+	// Potions rows say what the habit cost.
+	private Map<String, Long> consumVals = new LinkedHashMap<>();
+
+	private String rowValue(Map.Entry<String, Long> e)
+	{
+		String base = StatRegistry.isGp(e.getKey()) ? gp(e.getValue()) + " gp" : fmt(e.getValue());
+		Long cv = consumVals.get(e.getKey());
+		return cv != null && cv > 0 ? base + " · " + gp(cv) + " gp" : base;
+	}
+
 	private JPanel buildStats()
 	{
 		JPanel p = column();
+		consumVals = plugin.consumableValues();
 		JPanel pills = new JPanel(new GridLayout(0, 2, 3, 3));
 		pills.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		for (String fam : StatRegistry.FAMILIES)
@@ -1403,9 +1450,7 @@ class ChroniclePanel extends PluginPanel
 		}
 		if (rowsBySection.isEmpty() && floorTotals.isEmpty())
 		{
-			p.add(note(scope == Scope.SESSION
-				? "Nothing in this facet yet this session."
-				: "Nothing tracked in this facet yet."));
+			p.add(note("Nothing tracked in this facet yet."));
 			return p;
 		}
 
@@ -1431,7 +1476,7 @@ class ChroniclePanel extends PluginPanel
 			{
 				for (Map.Entry<String, Long> e : rows)
 				{
-					p.add(row(StatRegistry.rowLabel(e.getKey()), value(e), null));
+					p.add(row(StatRegistry.rowLabel(e.getKey()), rowValue(e), null));
 				}
 				continue;
 			}
@@ -1470,14 +1515,24 @@ class ChroniclePanel extends PluginPanel
 				p.add(group(sec));
 				for (Map.Entry<String, Long> e : rows)
 				{
-					p.add(row(StatRegistry.rowLabel(e.getKey()), value(e), null));
+					p.add(row(StatRegistry.rowLabel(e.getKey()), rowValue(e), null));
 				}
 				continue;
 			}
 
 			String stateKey = statsFamily + ":" + sec;
 			boolean open = statsExpanded.contains(stateKey);
-			JPanel head = row(sec.toUpperCase(Locale.ROOT), fmt(total),
+			long secGp = 0;
+			for (Map.Entry<String, Long> e : rows)
+			{
+				Long cv = consumVals.get(e.getKey());
+				if (cv != null)
+				{
+					secGp += cv;
+				}
+			}
+			JPanel head = row(sec.toUpperCase(Locale.ROOT),
+				fmt(total) + (secGp > 0 ? " · " + gp(secGp) + " gp" : ""),
 				open ? accent() : null);
 			JLabel headName = (JLabel) ((BorderLayout) head.getLayout())
 				.getLayoutComponent(BorderLayout.CENTER);
@@ -1502,7 +1557,7 @@ class ChroniclePanel extends PluginPanel
 				{
 					for (Map.Entry<String, Long> e : rows)
 					{
-						p.add(row(StatRegistry.rowLabel(e.getKey()), value(e), null));
+						p.add(row(StatRegistry.rowLabel(e.getKey()), rowValue(e), null));
 					}
 					if (ghost > 0)
 					{
@@ -1627,7 +1682,7 @@ class ChroniclePanel extends PluginPanel
 				long sum = 0;
 				for (Map.Entry<String, Long> e : byVerb.get(verb))
 				{
-					p.add(row(StatRegistry.rowLabel(e.getKey()), value(e), null));
+					p.add(row(StatRegistry.rowLabel(e.getKey()), rowValue(e), null));
 					sum += e.getValue();
 				}
 				long verbGhost = verbTotal.get(verb) - sum;
@@ -2417,6 +2472,28 @@ class ChroniclePanel extends PluginPanel
 				String k = str(d, "killerName", "");
 				return k.isEmpty() ? "Died" : "Died to " + k;
 			}
+			case "SESSION":
+			{
+				long mins = d.has("minutes") ? d.get("minutes").getAsLong() : 0;
+				long xp = d.has("xp") ? d.get("xp").getAsLong() : 0;
+				long drops = d.has("drops") ? d.get("drops").getAsLong() : 0;
+				long dropsGp = d.has("dropsGp") ? d.get("dropsGp").getAsLong() : 0;
+				StringBuilder line = new StringBuilder("Session — ");
+				line.append(mins >= 60 ? (mins / 60) + "h " + (mins % 60) + "m" : mins + "m");
+				if (xp > 0)
+				{
+					line.append(" · +").append(gp(xp)).append(" xp");
+				}
+				if (drops > 0)
+				{
+					line.append(" · ").append(fmt(drops)).append(" drops");
+					if (dropsGp > 0)
+					{
+						line.append(" (").append(gp(dropsGp)).append(" gp)");
+					}
+				}
+				return line.toString();
+			}
 			case "SLAYER":
 			{
 				// Cloud-adopted entries carry the server's field names; the
@@ -2440,21 +2517,6 @@ class ChroniclePanel extends PluginPanel
 	// Small Swing helpers
 	// ------------------------------------------------------------------
 
-	private void styleScopeHalf(JLabel l)
-	{
-		l.setOpaque(true);
-		l.setFont(FontManager.getRunescapeSmallFont());
-		l.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		l.setBorder(BorderFactory.createEmptyBorder(3, 0, 3, 0));
-	}
-
-	private void styleScopeState()
-	{
-		scopeLifetime.setForeground(scope == Scope.LIFETIME
-			? ACCENT_LIFETIME : ColorScheme.LIGHT_GRAY_COLOR.darker());
-		scopeSession.setForeground(scope == Scope.SESSION
-			? ACCENT_SESSION : ColorScheme.LIGHT_GRAY_COLOR.darker());
-	}
 
 	private static JPanel column()
 	{

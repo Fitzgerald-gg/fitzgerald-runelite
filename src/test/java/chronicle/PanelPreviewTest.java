@@ -99,14 +99,12 @@ public class PanelPreviewTest
 		edt(() -> holder[0] = new ChroniclePanel(stub));
 		ChroniclePanel panel = holder[0];
 
-		shoot(panel, out, prefix + "-home-lifetime", "HOME", "LIFETIME");
-		shoot(panel, out, prefix + "-home-session", "HOME", "SESSION");
-		shoot(panel, out, prefix + "-drops-lifetime", "DROPS", "LIFETIME");
-		shoot(panel, out, prefix + "-drops-session", "DROPS", "SESSION");
+		shoot(panel, out, prefix + "-home", "HOME");
+		shoot(panel, out, prefix + "-drops", "DROPS");
 		// slayer's journey lands via invokeLater after the first paint — the
 		// second shot renders the settled view over the same file
-		shoot(panel, out, prefix + "-slayer", "SLAYER", "LIFETIME");
-		shoot(panel, out, prefix + "-slayer", "SLAYER", "LIFETIME");
+		shoot(panel, out, prefix + "-slayer", "SLAYER");
+		shoot(panel, out, prefix + "-slayer", "SLAYER");
 
 		// the pivot navigation: a source under the glass, then an item
 		List<LocalStore.SourceRow> src = stub.dropSources();
@@ -114,7 +112,7 @@ public class PanelPreviewTest
 		{
 			src.sort((a, b) -> Long.compare(b.value, a.value));
 			set(panel, "detailSource", src.get(0).name);
-			shoot(panel, out, prefix + "-source-detail", "DROPS", "LIFETIME");
+			shoot(panel, out, prefix + "-source-detail", "DROPS");
 			set(panel, "detailSource", null);
 		}
 		for (LocalStore.SourceRow sr : src)
@@ -123,27 +121,26 @@ public class PanelPreviewTest
 			if (!bag.isEmpty())
 			{
 				set(panel, "detailItem", bag.get(0).name);
-				shoot(panel, out, prefix + "-item-detail", "DROPS", "LIFETIME");
+				shoot(panel, out, prefix + "-item-detail", "DROPS");
 				set(panel, "detailItem", null);
 				break;
 			}
 		}
 
 		set(panel, "dropsLeftBehind", true);
-		shoot(panel, out, prefix + "-drops-leftbehind", "DROPS", "LIFETIME");
-		shoot(panel, out, prefix + "-drops-leftbehind-session", "DROPS", "SESSION");
+		shoot(panel, out, prefix + "-drops-leftbehind", "DROPS");
 		set(panel, "dropsLeftBehind", false);
 
-		shoot(panel, out, prefix + "-log", "LOG", "LIFETIME");
+		shoot(panel, out, prefix + "-log", "LOG");
 		set(panel, "clogPageSel", firstClogPage(panel));
-		shoot(panel, out, prefix + "-log-drill", "LOG", "LIFETIME");
+		shoot(panel, out, prefix + "-log-drill", "LOG");
 		set(panel, "clogPageSel", null);
 
 		for (String fam : chronicle.panel.StatRegistry.FAMILIES)
 		{
 			set(panel, "statsFamily", fam);
 			String slug = fam.toLowerCase().replaceAll("[^a-z]+", "-");
-			shoot(panel, out, prefix + "-stats-" + slug, "STATS", "LIFETIME");
+			shoot(panel, out, prefix + "-stats-" + slug, "STATS");
 		}
 		// one craft opened, to see rows + the ghost "Other" reconciliation —
 		// Prayer additionally opens its verb folds (the second drill level)
@@ -152,28 +149,27 @@ public class PanelPreviewTest
 		expandSection(panel, "Skilling:Prayer");
 		expandSection(panel, "Skilling:Prayer:AshesScattered");
 		expandSection(panel, "Skilling:Prayer:BonesBuried");
-		shoot(panel, out, prefix + "-stats-skilling-open", "STATS", "LIFETIME");
+		shoot(panel, out, prefix + "-stats-skilling-open", "STATS");
 		collapseAll(panel);
 		// the roads: Teleports fold open with Destinations nested inside
 		set(panel, "statsFamily", "Ledger & Roads");
 		expandSection(panel, "Ledger & Roads:Teleports");
 		expandSection(panel, "Ledger & Roads:Destinations");
-		shoot(panel, out, prefix + "-stats-roads-open", "STATS", "LIFETIME");
+		shoot(panel, out, prefix + "-stats-roads-open", "STATS");
 		collapseAll(panel);
 		set(panel, "statsFamily", chronicle.panel.StatRegistry.FAMILIES[0]);
-		shoot(panel, out, prefix + "-stats-session", "STATS", "SESSION");
 
 		for (String g : new String[]{"Day", "Week", "Month", "Year"})
 		{
 			set(panel, "histGranularity", g);
-			shoot(panel, out, prefix + "-history-" + g.toLowerCase(), "HISTORY", "LIFETIME");
+			shoot(panel, out, prefix + "-history-" + g.toLowerCase(), "HISTORY");
 		}
 
-		shoot(panel, out, prefix + "-journal", "JOURNAL", "LIFETIME");
+		shoot(panel, out, prefix + "-journal", "JOURNAL");
 
 		// search results view
 		setSearch(panel, "dragon");
-		shoot(panel, out, prefix + "-search", "HOME", "LIFETIME");
+		shoot(panel, out, prefix + "-search", "HOME");
 		setSearch(panel, "");
 	}
 
@@ -289,6 +285,10 @@ public class PanelPreviewTest
 			System.currentTimeMillis() / 1000.0 - 900_000, 2_012_113L, false));
 		s.journey = new ChronicleApiClient.SlayerJourney(214, 48_231, 61_204_113L,
 			8_204_113L, tasks);
+		s.consumVals.put("sharksEaten", 1_985_000L);
+		s.consumVals.put("potionDoses", 3_204_000L);
+		s.grinds.add(new ChronicleApiClient.GrindRow("Abyssal demons", "Abyssal head",
+			4_112, 6_000, 51.0));
 		s.clogFinished = 412;
 		s.clogAvailable = 1_568;
 
@@ -402,6 +402,8 @@ public class PanelPreviewTest
 		LocalStore store;   // set for the real-journal variant
 		boolean cloud;
 		ChronicleApiClient.SlayerJourney journey;
+		Map<String, Long> consumVals = new LinkedHashMap<>();
+		List<ChronicleApiClient.GrindRow> grinds = new ArrayList<>();
 		private final ItemManager itemManager;
 
 		StubPlugin(ItemManager im)
@@ -547,6 +549,25 @@ public class PanelPreviewTest
 		}
 
 		@Override
+		boolean slayerSeenThisSession()
+		{
+			return slayer != null;
+		}
+
+		@Override
+		java.util.Map<String, Long> consumableValues()
+		{
+			return new LinkedHashMap<>(consumVals);
+		}
+
+		@Override
+		void fetchGrinds(
+			java.util.function.Consumer<java.util.List<ChronicleApiClient.GrindRow>> onDone)
+		{
+			onDone.accept(new ArrayList<>(grinds));
+		}
+
+		@Override
 		String enrolledRsn()
 		{
 			return rsn;
@@ -620,13 +641,12 @@ public class PanelPreviewTest
 		return bosses == null || bosses.isEmpty() ? null : bosses.keySet().iterator().next();
 	}
 
-	private void shoot(ChroniclePanel panel, File out, String name, String view, String scope)
+	private void shoot(ChroniclePanel panel, File out, String name, String view)
 		throws Exception
 	{
 		edt(() ->
 		{
 			setEnum(panel, "view", "chronicle.ChroniclePanel$View", view);
-			setEnum(panel, "scope", "chronicle.ChroniclePanel$Scope", scope);
 			Method rebuild = ChroniclePanel.class.getDeclaredMethod("rebuild");
 			rebuild.setAccessible(true);
 			rebuild.invoke(panel);

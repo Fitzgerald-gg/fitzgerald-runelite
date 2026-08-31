@@ -60,7 +60,8 @@ class LocalStore
 	// into drops, LOOT_UNTAKEN into the untaken ledger — both recorded locally,
 	// just not as feed lines; GROUP_STORAGE is a cloud-only nicety).
 	private static final java.util.Set<String> FEED_TYPES = new java.util.HashSet<>(java.util.Arrays.asList(
-		"PET", "COLLECTION", "COMBAT_ACHIEVEMENT", "QUEST", "DIARY", "CLUE", "DEATH", "SLAYER"));
+		"PET", "COLLECTION", "COMBAT_ACHIEVEMENT", "QUEST", "DIARY", "CLUE", "DEATH", "SLAYER",
+		"SESSION"));   // the logout diary line — local-only, never pushed
 
 	private final ItemManager itemManager;
 	private final Gson gson;
@@ -1245,6 +1246,56 @@ class LocalStore
 				e.addProperty("value", value);
 			}
 		}
+	}
+
+	/** Floor the server-priced per-key consumable values ({key: gp}). */
+	void floorConsumableValues(java.util.List<String[]> rows, String rsn)
+	{
+		if (!isReadyFor(rsn) || rows == null)
+		{
+			return;
+		}
+		synchronized (lock)
+		{
+			JsonObject store = root.has("consumable_values") && root.get("consumable_values").isJsonObject()
+				? root.getAsJsonObject("consumable_values") : new JsonObject();
+			root.add("consumable_values", store);
+			for (String[] row : rows)
+			{
+				long v = Long.parseLong(row[1]);
+				long cur = store.has(row[0]) ? store.get(row[0]).getAsLong() : 0;
+				if (v > cur)
+				{
+					store.addProperty(row[0], v);
+				}
+			}
+		}
+	}
+
+	/** Server-priced gp per consumable counter key (empty when never adopted). */
+	java.util.Map<String, Long> consumableValues()
+	{
+		java.util.Map<String, Long> out = new java.util.LinkedHashMap<>();
+		synchronized (lock)
+		{
+			if (root != null && root.has("consumable_values")
+				&& root.get("consumable_values").isJsonObject())
+			{
+				for (java.util.Map.Entry<String, JsonElement> e
+					: root.getAsJsonObject("consumable_values").entrySet())
+				{
+					try
+					{
+						out.put(e.getKey(), e.getValue().getAsLong());
+					}
+					catch (RuntimeException ignored)
+					{
+						// non-numeric — skip
+					}
+				}
+			}
+		}
+		return out;
 	}
 
 	/** The per-item side of the uncollected ledger (adopted + any local adds). */

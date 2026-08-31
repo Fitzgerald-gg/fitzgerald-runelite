@@ -672,6 +672,7 @@ public class ChronicleEventCapture
 			}
 			data.addProperty("slayerTask", task);
 			lastSlayerTask = task;   // authoritative identity for the completion streak line
+			slayerSeenThisSession = true;   // an on-task kill happened — Home shows the card
 			data.addProperty("slayerTaskRemaining", slayerService.getRemainingAmount());
 			data.addProperty("slayerTaskInitial", slayerService.getInitialAmount());
 			String loc = slayerService.getTaskLocation();
@@ -684,6 +685,20 @@ public class ChronicleEventCapture
 		{
 			// Slayer service unavailable — skip the stamp.
 		}
+	}
+
+	// True once an on-task kill was stamped this session; Home's slayer card
+	// gates on it so non-slayers never see it. Reset at the account boundary.
+	private volatile boolean slayerSeenThisSession;
+
+	boolean slayerSeenThisSession()
+	{
+		return slayerSeenThisSession;
+	}
+
+	void resetSessionFlags()
+	{
+		slayerSeenThisSession = false;
 	}
 
 	/** The core Slayer plugin's current task name, or null if unavailable/none. */

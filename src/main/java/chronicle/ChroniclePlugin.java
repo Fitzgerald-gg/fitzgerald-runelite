@@ -155,6 +155,8 @@ public class ChroniclePlugin extends Plugin
 	private volatile java.util.List<ChronicleApiClient.SourceItemRow> pendingBagsAdopt;
 	// The uncollected ledger, floored into the untaken store each login.
 	private volatile ChronicleApiClient.UntakenLedger pendingUntakenAdopt;
+	// Server-priced consumable values ({key: gp}), floored each login.
+	private volatile java.util.List<String[]> pendingConsumablesAdopt;
 	// True while the stashed feed adoption is the one-shot DEEP import —
 	// its config flag is only written once the adopt actually applies.
 	private volatile boolean pendingFeedDeep;
@@ -398,6 +400,7 @@ public class ChroniclePlugin extends Plugin
 		// on-disk record so the record keeps accumulating across sessions. No
 		// enrolment, no network — cloud sync below is additive when configured.
 		localName = name;
+		sessionStartMs = System.currentTimeMillis();
 		if (!cloudActive())
 		{
 			statusLine = "Journaling locally — nothing leaves this computer.";
@@ -738,6 +741,13 @@ public class ChroniclePlugin extends Plugin
 				pendingUntakenAdopt = ledger;
 				clientThread.invoke(this::refreshLocal);
 			});
+			// Server-priced consumables, so Food and Potions rows can say what
+			// the habit cost.
+			api.fetchConsumables(config.serverBaseUrl(), name, rows ->
+			{
+				pendingConsumablesAdopt = rows;
+				clientThread.invoke(this::refreshLocal);
+			});
 			clientThread.invoke(this::refreshLocal);   // the counter floor, likewise
 			countersSeeded = true;
 			resetSeedBackoff();
@@ -780,15 +790,18 @@ public class ChroniclePlugin extends Plugin
 		{
 			localStore.setTrackers(sessionView(), localName);
 			appendHistoryBaseline();
+			recordSessionLine();
 		}
 		executor.submit(() -> localStore.flush(localDir()));
 		localStore.endSession();
+		eventCapture.resetSessionFlags();
 		pendingServerFloor = null;   // account boundary — never floor the next login's journal
 		pendingDropsAdopt = null;
 		pendingFeedAdopt = null;
 		pendingHistoryAdopt = null;
 		pendingBagsAdopt = null;
 		pendingUntakenAdopt = null;
+		pendingConsumablesAdopt = null;
 		pendingFeedDeep = false;
 		// Re-seed from the server on the next login (another device may have
 		// advanced the totals). The final push below still uses the in-memory
@@ -1112,6 +1125,58 @@ public class ChroniclePlugin extends Plugin
 		return localStore.untakenItems();
 	}
 
+	java.util.Map<String, Long> consumableValues()
+	{
+		return localStore.consumableValues();
+	}
+
+	/** The dryness ledger (panel fetches once per session on demand). */
+	void fetchGrinds(java.util.function.Consumer<java.util.List<ChronicleApiClient.GrindRow>> onDone)
+	{
+		String rsn = displayRsn();
+		if (!cloudActive() || rsn == null || rsn.isEmpty())
+		{
+			onDone.accept(null);
+			return;
+		}
+		api.fetchGrinds(config.serverBaseUrl(), rsn, onDone);
+	}
+
+	/** True once this session produced an on-task slayer kill. */
+	boolean slayerSeenThisSession()
+	{
+		return eventCapture.slayerSeenThisSession();
+	}
+
+	private volatile long sessionStartMs;
+
+	/**
+	 * The logout diary line: one dated feed entry closing the session — the
+	 * habit of a journal without the labour of one. Local-only, never pushed;
+	 * skipped when the session was too slight to be worth a line.
+	 */
+	private void recordSessionLine()
+	{
+		long mins = sessionStartMs > 0
+			? (System.currentTimeMillis() - sessionStartMs) / 60_000 : 0;
+		Map<String, Integer> sess = sessionView();
+		long xp = sess.getOrDefault("totalXpGained", 0);
+		int drops = localStore.sessionLoots();
+		long dropsGp = localStore.sessionLootValue();
+		long consumedGp = sess.getOrDefault("consumedValue", 0);
+		if (mins < 5 && xp == 0 && drops == 0)
+		{
+			return;
+		}
+		JsonObject data = new JsonObject();
+		data.addProperty("minutes", mins);
+		data.addProperty("xp", xp);
+		data.addProperty("drops", drops);
+		data.addProperty("dropsGp", dropsGp);
+		data.addProperty("consumedGp", consumedGp);
+		localStore.record("SESSION", data, localName);
+	}
+
 	long[] sessionUntakenTally()
 	{
 		return localStore.sessionUntakenTally();
@@ -1248,6 +1313,12 @@ public class ChroniclePlugin extends Plugin
 			pendingUntakenAdopt = null;
 			localStore.floorUntaken(untaken.bySource, untaken.byItem, localName);
 			refreshPanel();
+		}
+		java.util.List<String[]> consum = pendingConsumablesAdopt;
+		if (consum != null && localName != null && localStore.isReadyFor(localName))
+		{
+			pendingConsumablesAdopt = null;
+			localStore.floorConsumableValues(consum, localName);
 		}
 		java.util.List<ChronicleApiClient.FeedEvent> feed = pendingFeedAdopt;
 		if (feed != null && localName != null && localStore.isReadyFor(localName))

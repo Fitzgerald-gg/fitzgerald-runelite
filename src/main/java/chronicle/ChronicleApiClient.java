@@ -902,6 +902,149 @@ public class ChronicleApiClient
 		});
 	}
 
+	/** Fetch the server-priced consumables breakdown (per counter KEY), so the
+	 *  Food and Potions rows can say what the habit cost. */
+	public void fetchConsumables(String baseUrl, String rsn,
+		Consumer<java.util.List<String[]>> onDone)
+	{
+		HttpUrl url = resolve(baseUrl, "api/counters/" + rsn);
+		if (url == null)
+		{
+			onDone.accept(null);
+			return;
+		}
+		Request request = new Request.Builder().url(url).get().build();
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("consumables fetch failed", e);
+				onDone.accept(null);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				java.util.List<String[]> out = null;
+				try (Response r = response)
+				{
+					if (r.code() == 200)
+					{
+						JsonObject o = gson.fromJson(r.body().charStream(), JsonObject.class);
+						JsonObject c = o != null && o.has("consumables")
+							&& o.get("consumables").isJsonObject()
+							? o.getAsJsonObject("consumables") : null;
+						out = new java.util.ArrayList<>();
+						if (c != null)
+						{
+							for (String field : new String[]{"potions", "food"})
+							{
+								if (!c.has(field) || !c.get(field).isJsonArray())
+								{
+									continue;
+								}
+								for (JsonElement el : c.getAsJsonArray(field))
+								{
+									if (!el.isJsonObject())
+									{
+										continue;
+									}
+									JsonObject row = el.getAsJsonObject();
+									String key = str(row, "key");
+									if (!key.isEmpty())
+									{
+										out.add(new String[]{key,
+											String.valueOf(num(row, "value").longValue())});
+									}
+								}
+							}
+						}
+					}
+				}
+				catch (RuntimeException e)
+				{
+					log.debug("consumables parse failed", e);
+				}
+				onDone.accept(out);
+			}
+		});
+	}
+
+	/** One dry chase from the cloud's grinds ledger. */
+	public static final class GrindRow
+	{
+		public final String boss;
+		public final String item;
+		public final long kc;
+		public final long rate;
+		public final double percentileDry;
+
+		GrindRow(String boss, String item, long kc, long rate, double percentileDry)
+		{
+			this.boss = boss;
+			this.item = item;
+			this.kc = kc;
+			this.rate = rate;
+			this.percentileDry = percentileDry;
+		}
+	}
+
+	/** Fetch the dryness ledger — kc since the chase's last (or first) unique. */
+	public void fetchGrinds(String baseUrl, String rsn,
+		Consumer<java.util.List<GrindRow>> onDone)
+	{
+		HttpUrl url = resolve(baseUrl, "api/osrs/grinds/" + rsn);
+		if (url == null)
+		{
+			onDone.accept(null);
+			return;
+		}
+		Request request = new Request.Builder().url(url).get().build();
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("grinds fetch failed", e);
+				onDone.accept(null);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				java.util.List<GrindRow> out = null;
+				try (Response r = response)
+				{
+					if (r.code() == 200)
+					{
+						JsonObject o = gson.fromJson(r.body().charStream(), JsonObject.class);
+						out = new java.util.ArrayList<>();
+						if (o != null && o.has("grinds") && o.get("grinds").isJsonArray())
+						{
+							for (JsonElement el : o.getAsJsonArray("grinds"))
+							{
+								if (!el.isJsonObject())
+								{
+									continue;
+								}
+								JsonObject g = el.getAsJsonObject();
+								out.add(new GrindRow(str(g, "boss"), str(g, "item"),
+									num(g, "kc").longValue(), num(g, "rate").longValue(),
+									num(g, "percentile_dry").doubleValue()));
+							}
+						}
+					}
+				}
+				catch (RuntimeException e)
+				{
+					log.debug("grinds parse failed", e);
+				}
+				onDone.accept(out);
+			}
+		});
+	}
+
 	/** The cloud's uncollected-loot ledger: per-source and per-item rows. */
 	public static final class UntakenLedger
 	{
