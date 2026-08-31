@@ -112,7 +112,6 @@ class ChroniclePanel extends PluginPanel
 	// granularity pills; set by clicking the period label, cleared by any pill.
 	private java.time.LocalDate histFrom;
 	private java.time.LocalDate histTo;
-	private boolean womImportRunning;
 	// The bundled 1,921-slot taxonomy: tab -> page -> ordered slot names.
 	// Parsed once on first Log open (~40KB).
 	private static Map<String, Map<String, List<String>>> taxonomy;
@@ -1503,14 +1502,6 @@ class ChroniclePanel extends PluginPanel
 		p.add(stepper);
 		p.add(vgap(6));
 
-		// A thin record answers with the import, not a footnote: until the
-		// journal holds a few days (or the import has run), the button leads.
-		boolean thin = !plugin.womImported() && hist.size() < 3;
-		if (thin)
-		{
-			p.add(womImportButton());
-			p.add(vgap(6));
-		}
 
 		// baselines bounding the period: closing state the day before it began,
 		// and the last close inside it
@@ -1523,7 +1514,8 @@ class ChroniclePanel extends PluginPanel
 			if (hist.isEmpty())
 			{
 				empty = "The record starts today — baselines close at each login, "
-					+ "day rollover and logout. Import your deeper past above.";
+					+ "day rollover and logout. Cloud sync adopts your server's "
+					+ "archive automatically.";
 			}
 			else if (!hist.isEmpty() && hist.firstKey().isBefore(pStart)
 				&& ("Day".equals(histGranularity) || "Week".equals(histGranularity)))
@@ -1677,40 +1669,7 @@ class ChroniclePanel extends PluginPanel
 			}
 		}
 
-		if (!plugin.womImported() && !thin)
-		{
-			p.add(womImportButton());
-		}
 		return p;
-	}
-
-	private JButton womImportButton()
-	{
-		// Label stays narrow: a child wider than the viewport flips the whole
-		// GridBag column into minimum-size mode and squashes every row (the
-		// clipped-pills bug). The consent dialog names Wise Old Man in full.
-		JButton importBtn = new JButton(womImportRunning
-			? "Importing…" : "Import your past…");
-		importBtn.setToolTipText("Fetches your public Wise Old Man history — asks first");
-		importBtn.setEnabled(!womImportRunning);
-		importBtn.addActionListener(e ->
-		{
-			int ok = JOptionPane.showConfirmDialog(this,
-				"Fetch your public Wise Old Man snapshots (a one-time import)\n"
-					+ "and write them into your local history?",
-				"Import your past", JOptionPane.OK_CANCEL_OPTION);
-			if (ok == JOptionPane.OK_OPTION)
-			{
-				womImportRunning = true;
-				rebuild();
-				plugin.actionImportWom(() -> SwingUtilities.invokeLater(() ->
-				{
-					womImportRunning = false;
-					rebuild();
-				}));
-			}
-		});
-		return importBtn;
 	}
 
 	/** The site's any-two-dates gains, panel edition: a small dialog, ISO or

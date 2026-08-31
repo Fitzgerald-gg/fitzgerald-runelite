@@ -507,12 +507,6 @@ public class PanelPreviewTest
 		}
 
 		@Override
-		boolean womImported()
-		{
-			return false;
-		}
-
-		@Override
 		boolean cloudActive()
 		{
 			return cloud;
@@ -572,12 +566,6 @@ public class PanelPreviewTest
 			java.util.function.Consumer<java.util.List<ChronicleApiClient.LedgerItem>> onDone)
 		{
 			onDone.accept(null);
-		}
-
-		@Override
-		void actionImportWom(Runnable onDone)
-		{
-			onDone.run();
 		}
 
 		@Override

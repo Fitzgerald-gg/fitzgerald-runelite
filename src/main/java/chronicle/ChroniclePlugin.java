@@ -1077,57 +1077,6 @@ public class ChroniclePlugin extends Plugin
 			: new java.util.TreeMap<>();
 	}
 
-	/**
-	 * The one-shot "import your past" action: fetch the account's public Wise
-	 * Old Man snapshots and write them through the history stream's own door.
-	 * User-initiated only; degrades to a plain chat line when no profile exists.
-	 */
-	void actionImportWom(Runnable onDone)
-	{
-		final String rsn = localName != null ? localName : enrolledRsn;
-		if (rsn == null || rsn.isEmpty())
-		{
-			chat("Chronicle: log in first, then import your past.");
-			onDone.run();
-			return;
-		}
-		api.fetchWomSnapshots(rsn, snaps -> executor.submit(() ->
-		{
-			if (snaps == null)
-			{
-				chat("Chronicle: couldn't reach Wise Old Man — try again in a moment.");
-			}
-			else if (snaps.isEmpty())
-			{
-				chat("Chronicle: no Wise Old Man profile found for " + rsn
-					+ " — your history starts today.");
-			}
-			else
-			{
-				// Snapshots arrive newest-first with several per day — keep each
-				// date's latest close (first seen), write in calendar order.
-				java.util.TreeMap<String, Map<String, Long>> byDate = new java.util.TreeMap<>();
-				for (ChronicleApiClient.WomSnapshot snap : snaps)
-				{
-					byDate.putIfAbsent(snap.date, snap.skills);
-				}
-				for (Map.Entry<String, Map<String, Long>> e : byDate.entrySet())
-				{
-					historyLog.appendImported(localDir(), rsn, e.getKey(), e.getValue());
-				}
-				configManager.setConfiguration(GROUP, "womImported", true);
-				chat("Chronicle: imported " + byDate.size()
-					+ " days of history from Wise Old Man.");
-			}
-			onDone.run();
-		}));
-	}
-
-	boolean womImported()
-	{
-		return "true".equals(configManager.getConfiguration(GROUP, "womImported"));
-	}
-
 	JsonObject clogSnapshot()
 	{
 		return localStore.clogSnapshot();

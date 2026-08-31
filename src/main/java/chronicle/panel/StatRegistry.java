@@ -163,6 +163,8 @@ public final class StatRegistry
 		LABELS.put("damageDealtMelee", "— by melee");
 		LABELS.put("damageDealtRanged", "— by ranged");
 		LABELS.put("damageDealtMagic", "— by magic");
+		LABELS.put("teleportsFairyRing", "— by fairy ring");
+		LABELS.put("teleportsSpiritTree", "— by spirit tree");
 
 		// Destinations are place names: Title Case, with the punctuation the
 		// camelCase split can't recover — the site's TELE_NAMES, verbatim.
@@ -302,7 +304,11 @@ public final class StatRegistry
 		}
 		if (fam.equals("Ledger & Roads"))
 		{
-			if (key.startsWith("teleportsVia") || key.equals("teleportsTotal") || key.equals("teleports"))
+			// Fairy rings and spirit trees are transport NETWORKS — a means,
+			// not a place — so they sit with the means, not the destinations.
+			if (key.startsWith("teleportsVia") || key.equals("teleportsTotal")
+				|| key.equals("teleports") || key.equals("teleportsFairyRing")
+				|| key.equals("teleportsSpiritTree"))
 			{
 				return "Teleports";
 			}
