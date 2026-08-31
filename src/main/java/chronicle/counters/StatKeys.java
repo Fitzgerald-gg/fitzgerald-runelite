@@ -215,8 +215,8 @@ public final class StatKeys
 	public static final String VENOM_DAMAGE_TAKEN = "venomDamageTaken";
 
 	// ── Consumables ───────────────────────────────────────────────────────
-	// FOOD_EATEN is the generic floor beneath the server-derived <food>Eaten
-	// family, so it deliberately shares that family's wording.
+	// FOOD_EATEN is the generic floor beneath the typed <food>Eaten family,
+	// so it deliberately shares that family's wording.
 
 	public static final String FOOD_EATEN = "foodEaten";
 	public static final String POTION_DOSES = "potionDoses";

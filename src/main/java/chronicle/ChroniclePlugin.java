@@ -711,15 +711,12 @@ public class ChroniclePlugin extends Plugin
 	}
 
 	/**
-	 * The current in-memory counter snapshot — absolute totals for this session,
-	 * seeded from the server on login and incremented natively by the counter
-	 * trackers ({@link chronicle.counters.ChronicleCounters}). No
-	 * RuneLite config is read or written for counters.
+	 * The current in-memory counter snapshot — this session's increments,
+	 * counted from zero by the trackers ({@link chronicle.counters.ChronicleCounters})
+	 * and the local resolver. No RuneLite config is read or written for counters.
 	 */
 	Map<String, Integer> harvest()
 	{
-		// ALL totals — including the locally derived typed skilling keys the
-		// push path must filter out (see StatStore.pushable).
 		return statStore.snapshotAll();
 	}
 
@@ -1041,13 +1038,9 @@ public class ChroniclePlugin extends Plugin
 		}
 		localStore.setCharacter(name, accountTypeTag(client.getVarbitValue(VarbitID.IRONMAN)),
 			harvestSkills(), lp.getCombatLevel(), clogCapture.snapshot(), achievementSync.snapshot());
-		// The client-computed counters fold into the lifetime trackers — as the
-		// SESSION view, never raw absolutes: harvest() still contains the seeded
-		// server share, and writing it here stacked base+seeded+delta into the
-		// journal until the later setTrackers pass corrected it (a transient
-		// doubling any read in between could see). The server-derived
-		// per-resource skilling counters aren't available offline, so they
-		// don't appear in local mode.
+		// The session's counters fold into the lifetime trackers through the
+		// SESSION view (max-keys as absolutes, noise dropped) — the journal's
+		// additive base does the lifetime arithmetic.
 		localStore.setTrackers(sessionView(), name);
 	}
 

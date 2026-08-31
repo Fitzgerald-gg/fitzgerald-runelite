@@ -33,11 +33,9 @@ import net.runelite.client.game.ItemManager;
  *
  * <p>This is what makes "local-first" true for skilling: a player with cloud
  * sync off gets every typed counter (shafts cut, gems cut, laps run) the
- * instant they act. For cloud users the server still derives its own copy
- * from the same tuples; the two reconcile by floor-merge and, deriving from
- * identical inputs with identical rules, agree. Locally derived keys are
- * server-owned for PUSH purposes ({@link StatStore#pushable()} filters them)
- * so this derivation is never echoed onto the server's.
+ * instant they act. This is the ONLY derivation: the journal folds these in
+ * and, with cloud sync on, its lifetime absolutes mirror upward (the server
+ * floor-merges, so an old server-derived copy can never regress the record).
  *
  * <p>One local advantage: item names resolve through {@link ItemManager}
  * (every id, untradeables included) rather than the server's tradeable-only
