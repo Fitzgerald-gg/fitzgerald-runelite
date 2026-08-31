@@ -162,9 +162,26 @@ public class ClogCapture
 				dirty = true;
 			}
 		}
-		else if (state == GameState.LOGIN_SCREEN || state == GameState.HOPPING)
+		else if (state == GameState.LOGIN_SCREEN)
 		{
 			reset();
+		}
+		else if (state == GameState.HOPPING)
+		{
+			// A hop is not an account boundary: the same account comes back with the
+			// same log and the same totals, so the accreted model and its dirty flag
+			// must survive it — the full-log capture is the one expensive thing the
+			// player triggers by hand, and the push that carries it can be a full
+			// interval away. Only the scene-scoped bookkeeping goes: the kill-log
+			// widgets leave with the old world, and a transmit still streaming is
+			// closed out where it stands rather than left waiting on a tick deadline
+			// the hop can strand (a partial set merges upward like any other —
+			// clog data only grows).
+			killLogTicks = -1;
+			if (clogFlushTick > 0)
+			{
+				settleTransmit();
+			}
 		}
 	}
 
@@ -254,12 +271,7 @@ public class ClogCapture
 		// Full-log transmit finished (no new item for a few ticks) → publish it.
 		if (clogFlushTick > 0 && client.getTickCount() >= clogFlushTick)
 		{
-			clogFlushTick = -1;
-			clogRetrieving = false;
-			if (!clogItems.isEmpty())
-			{
-				dirty = true;
-			}
+			settleTransmit();
 		}
 
 		// The Slayer-log rows are built a tick or two after the interface loads, so
@@ -277,6 +289,21 @@ public class ClogCapture
 		else
 		{
 			killLogTicks++;
+		}
+	}
+
+	/**
+	 * Close out a full-log transmit: the re-trigger guard opens again for the next
+	 * open, and whatever arrived becomes publishable. Reached by the quiet-tick
+	 * deadline, or by a world hop cutting the burst short.
+	 */
+	private void settleTransmit()
+	{
+		clogFlushTick = -1;
+		clogRetrieving = false;
+		if (!clogItems.isEmpty())
+		{
+			dirty = true;
 		}
 	}
 

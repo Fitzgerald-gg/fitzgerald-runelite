@@ -54,7 +54,9 @@ import net.runelite.client.ui.NavigationButton;
 		+ "collection log, clues, quests, diaries, combat achievements, slayer, pets, "
 		+ "deaths and lifetime counters — kept on your own computer. Optional cloud sync "
 		+ "(off by default, server field blank) can additionally send it to a "
-		+ "Chronicle-compatible server you configure; screenshots are a separate opt-in.",
+		+ "Chronicle-compatible server you configure; uploading screenshots — pictures "
+		+ "of the whole client window, any on-screen chat and nearby players included "
+		+ "— is a separate opt-in on top of that.",
 	tags = {"chronicle", "journal", "stats", "tracker", "loot", "slayer", "collection", "osrs"}
 )
 // The Slayer plugin's service supplies the active task so we can tag on-task
@@ -334,7 +336,20 @@ public class ChroniclePlugin extends Plugin
 			// recompute would be base + an empty session and roll the journal
 			// back to its login values — the same trap the cloud toggle has.
 			localStore.rebase(localName);
-			localStore.flush(localDir());
+			// The fold above is lock-guarded and has to happen here, before the
+			// stores are dropped; the write is an fsync and an atomic move, and a
+			// settings-panel toggle stops the plugin ON THE EDT — disk work belongs
+			// on neither the Swing thread nor the client's. The executor outlives a
+			// toggle, so hand it over there; the client-exit path is not something
+			// the pool outlives, so that one keeps its write inline.
+			if (javax.swing.SwingUtilities.isEventDispatchThread())
+			{
+				executor.submit(() -> localStore.flush(localDir()));
+			}
+			else
+			{
+				localStore.flush(localDir());
+			}
 		}
 		// While we are unregistered no events reach the trackers, so the store stops
 		// tracking reality — and the player may switch accounts before toggling us
@@ -889,7 +904,10 @@ public class ChroniclePlugin extends Plugin
 			JsonObject o = new JsonObject();
 			o.addProperty("level", client.getRealSkillLevel(s));
 			o.addProperty("xp", client.getSkillExperience(s));
-			skills.add(s.name().toLowerCase(), o);
+			// ROOT, never the default locale: this key IS the shape the journal,
+			// the history spine and the panel all read back, and a Turkish-locale
+			// JVM would file MINING under a dotless "mınıng" nothing looks for.
+			skills.add(s.name().toLowerCase(java.util.Locale.ROOT), o);
 		}
 		JsonObject overall = new JsonObject();
 		overall.addProperty("level", client.getTotalLevel());
@@ -1123,8 +1141,11 @@ public class ChroniclePlugin extends Plugin
 	 */
 	private void recordSessionLine()
 	{
+		// Wall-clock, so an NTP correction or a resumed VM can move the start ahead
+		// of now mid-session. Floored: a clock that jumps backwards should read as
+		// a short session, never as a diary line of negative minutes.
 		long mins = sessionStartMs > 0
-			? (System.currentTimeMillis() - sessionStartMs) / 60_000 : 0;
+			? Math.max(0, (System.currentTimeMillis() - sessionStartMs) / 60_000) : 0;
 		Map<String, Integer> sess = sessionView();
 		long xp = sess.getOrDefault("totalXpGained", 0);
 		int drops = localStore.sessionLoots();
@@ -1210,17 +1231,32 @@ public class ChroniclePlugin extends Plugin
 		return out;
 	}
 
+	// Settled once per client run: every flush, load and history append asks for
+	// the journal directory, and the adoption below is a one-shot that must not be
+	// re-decided under a running session.
+	private static volatile File journalDir;
+
 	private static File localDir()
 	{
-		File dir = new File(net.runelite.client.RuneLite.RUNELITE_DIR, "chronicle");
-		// One-shot: adopt the pre-rename journal directory. Falls back to the
-		// old directory if the rename fails (locked file, odd filesystem) so an
-		// existing journal is never abandoned mid-session.
-		File legacy = new File(net.runelite.client.RuneLite.RUNELITE_DIR, "fitzgerald");
-		if (legacy.isDirectory() && !dir.exists() && !legacy.renameTo(dir))
+		File cached = journalDir;
+		if (cached != null)
 		{
-			return legacy;
+			return cached;
 		}
+		File dir = new File(net.runelite.client.RuneLite.RUNELITE_DIR, "chronicle");
+		// One-shot: adopt the pre-rename journal directory. A failed rename means
+		// one of two things. Either the new directory is already there — two
+		// clients started together both find it missing and race for it, and the
+		// loser has to converge on the winner's directory rather than spend its
+		// whole run writing into one nothing will ever read again. Or the move
+		// itself could not be made (locked file, odd filesystem), in which case the
+		// old directory is still where the journal is and we keep using it.
+		File legacy = new File(net.runelite.client.RuneLite.RUNELITE_DIR, "fitzgerald");
+		if (legacy.isDirectory() && !dir.exists() && !legacy.renameTo(dir) && !dir.isDirectory())
+		{
+			dir = legacy;
+		}
+		journalDir = dir;
 		return dir;
 	}
 
@@ -1249,7 +1285,11 @@ public class ChroniclePlugin extends Plugin
 	private void refreshLocal()
 	{
 		gatherCharacter();
-		if (localName != null)
+		// Only once the journal is actually mounted: a baseline's counters come
+		// from it, so a day closed while nothing is mounted (the record still
+		// loading, or declined) would append a line of zeroes that every later
+		// subtraction over the spine reads as a collapse.
+		if (localName != null && localStore.isReadyFor(localName))
 		{
 			localStore.setTrackers(sessionView(), localName);
 			// The calendar spine: one closing baseline per day, appended — the
@@ -1501,6 +1541,16 @@ public class ChroniclePlugin extends Plugin
 	String statusLine()
 	{
 		return statusLine;
+	}
+
+	/**
+	 * Why the journal is not keeping the record — a write that failed, or a file
+	 * a newer build wrote — or null while it is. Panel-facing, and never about
+	 * the server: the on-disk record is the one that matters, cloud or not.
+	 */
+	String journalWarning()
+	{
+		return localStore.journalWarning();
 	}
 
 	/** Point the player at their own journal on disk — the export IS the file. */

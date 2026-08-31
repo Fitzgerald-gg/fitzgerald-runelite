@@ -11,6 +11,7 @@ package chronicle.counters;
 import chronicle.ChronicleConfig;
 import javax.inject.Inject;
 import javax.inject.Singleton;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.ChatMessage;
@@ -25,6 +26,7 @@ import net.runelite.api.events.WidgetLoaded;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 
+@Slf4j
 @Singleton
 public class ChronicleCounters
 {
@@ -111,123 +113,94 @@ public class ChronicleCounters
 		trackers = null;
 	}
 
+	/**
+	 * Hand one event to every tracker, each in isolation.
+	 *
+	 * <p>Trackers read live game text and half-built widget trees, so one of them
+	 * throwing on a line it did not expect is a question of when, not whether. The
+	 * bus would catch that and the client would carry on, but the throw unwinds this
+	 * loop on its way out: every tracker positioned after the one that failed never
+	 * sees the event, and nothing says so — the counters for those subsystems simply
+	 * stop moving. Catching per tracker keeps a bad parse to the one counter it
+	 * belongs to. Errors are left to propagate; only a tracker's own bad reasoning is
+	 * ours to absorb.
+	 */
+	private void fanOut(java.util.function.Consumer<StatTracker> delivery)
+	{
+		if (!active())
+		{
+			return;
+		}
+		for (StatTracker t : trackers())
+		{
+			try
+			{
+				delivery.accept(t);
+			}
+			catch (RuntimeException ex)
+			{
+				log.debug("{} failed on an event", t.getClass().getSimpleName(), ex);
+			}
+		}
+	}
+
 	@Subscribe
 	public void onMenuOptionClicked(MenuOptionClicked e)
 	{
-		if (active())
-		{
-			for (StatTracker t : trackers())
-			{
-				t.onMenuOptionClicked(e);
-			}
-		}
+		fanOut(t -> t.onMenuOptionClicked(e));
 	}
 
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded e)
 	{
-		if (active())
-		{
-			for (StatTracker t : trackers())
-			{
-				t.onWidgetLoaded(e);
-			}
-		}
+		fanOut(t -> t.onWidgetLoaded(e));
 	}
 
 	@Subscribe
 	public void onWidgetClosed(WidgetClosed e)
 	{
-		if (active())
-		{
-			for (StatTracker t : trackers())
-			{
-				t.onWidgetClosed(e);
-			}
-		}
+		fanOut(t -> t.onWidgetClosed(e));
 	}
 
 	@Subscribe
 	public void onGameTick(GameTick e)
 	{
-		if (active())
-		{
-			for (StatTracker t : trackers())
-			{
-				t.onGameTick(e);
-			}
-		}
+		fanOut(t -> t.onGameTick(e));
 	}
 
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged e)
 	{
-		if (active())
-		{
-			for (StatTracker t : trackers())
-			{
-				t.onGameStateChanged(e);
-			}
-		}
+		fanOut(t -> t.onGameStateChanged(e));
 	}
 
 	@Subscribe
 	public void onChatMessage(ChatMessage e)
 	{
-		if (active())
-		{
-			for (StatTracker t : trackers())
-			{
-				t.onChatMessage(e);
-			}
-		}
+		fanOut(t -> t.onChatMessage(e));
 	}
 
 	@Subscribe
 	public void onHitsplatApplied(HitsplatApplied e)
 	{
-		if (active())
-		{
-			for (StatTracker t : trackers())
-			{
-				t.onHitsplatApplied(e);
-			}
-		}
+		fanOut(t -> t.onHitsplatApplied(e));
 	}
 
 	@Subscribe
 	public void onAnimationChanged(AnimationChanged e)
 	{
-		if (active())
-		{
-			for (StatTracker t : trackers())
-			{
-				t.onAnimationChanged(e);
-			}
-		}
+		fanOut(t -> t.onAnimationChanged(e));
 	}
 
 	@Subscribe
 	public void onStatChanged(StatChanged e)
 	{
-		if (active())
-		{
-			for (StatTracker t : trackers())
-			{
-				t.onStatChanged(e);
-			}
-		}
+		fanOut(t -> t.onStatChanged(e));
 	}
 
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged e)
 	{
-		if (active())
-		{
-			for (StatTracker t : trackers())
-			{
-				t.onItemContainerChanged(e);
-			}
-		}
+		fanOut(t -> t.onItemContainerChanged(e));
 	}
 }

@@ -654,6 +654,12 @@ public class PanelPreviewTest
 		}
 
 		@Override
+		String journalWarning()
+		{
+			return null;   // the stub's journal is a fixture, never a file
+		}
+
+		@Override
 		com.google.gson.Gson gson()
 		{
 			return new Gson();   // the stub has no injector

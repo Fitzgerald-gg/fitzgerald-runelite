@@ -1512,6 +1512,11 @@ public class ChronicleEventCapture
 		body.addProperty("eventId", UUID.randomUUID().toString());
 		body.add("data", data);
 
+		// A frame is the whole client window, not a crop of the moment: whatever chat
+		// is open and whoever is standing nearby is in the picture. Everything else
+		// this plugin sends is the local account's own data by construction, and only
+		// a picture can carry someone else's — which is why this is its own opt-in on
+		// top of cloud sync, and why the config item says in full what one contains.
 		if (config.captureScreenshots() && screenshotWorthy(type, data))
 		{
 			try

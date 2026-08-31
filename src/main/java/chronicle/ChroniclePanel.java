@@ -405,13 +405,22 @@ class ChroniclePanel extends PluginPanel
 		// adventurer's log, not a diary — the word says what it does.
 		JPanel hdr = new JPanel(new BorderLayout());
 		hdr.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		JLabel state = new JLabel("● logging");
-		state.setForeground(ACCENT_SESSION);
+		// Everything below this line is served from memory, so a journal that has
+		// stopped reaching disk looks exactly as alive as one that hasn't. The
+		// heartbeat is the one place that can say otherwise.
+		String stalled = plugin.journalWarning();
+		JLabel state = new JLabel(stalled == null ? "● logging" : "● not saving");
+		state.setForeground(stalled == null ? ACCENT_SESSION : ColorScheme.PROGRESS_ERROR_COLOR);
 		state.setFont(FontManager.getRunescapeSmallFont());
 		hdr.add(state, BorderLayout.EAST);
 		hdr.setMaximumSize(new Dimension(Integer.MAX_VALUE, 16));
 		p.add(hdr);
 		p.add(vgap(4));
+		if (stalled != null)
+		{
+			p.add(note(stalled));
+			p.add(vgap(6));
+		}
 
 		// The slayer card earns its place: only when this session actually
 		// produced an on-task kill — a skiller never sees it.

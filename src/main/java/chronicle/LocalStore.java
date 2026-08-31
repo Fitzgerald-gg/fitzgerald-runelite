@@ -71,6 +71,11 @@ class LocalStore
 	private JsonObject trackersBase;  // lifetime counters frozen at load; +session = lifetime
 	private String currentRsn;        // whose model root holds
 	private volatile boolean ready;   // true once an account's file has been loaded
+	// Why the journal is not currently keeping the record — a write that failed,
+	// or a file this build is too old to open. Null while all is well. The panel
+	// reads it: a journal that stopped reaching disk still looks alive in memory,
+	// and the loss would otherwise surface only at the next login.
+	private volatile String journalWarning;
 
 	// Session-scope tallies for the panel's strip + recent-drop icon row —
 	// in-memory only, reset at the account boundary. Guarded by lock.
@@ -138,6 +143,34 @@ class LocalStore
 				setAside(f, "corrupt");
 			}
 		}
+		long fileSchema = loaded != null ? asLong(loaded.get("schema")) : 0;
+		if (fileSchema > SCHEMA)
+		{
+			// The stamp normalise() writes is only worth writing if it is also
+			// read. A record from a later build carries shapes this one has never
+			// heard of; mounting it would read them under today's assumptions,
+			// stamp the version back down and rewrite the file on the next flush —
+			// a client rollback would quietly eat the record. So mount nothing and
+			// write nothing: the file stays exactly as the build that wrote it left
+			// it, and the panel says why there is nothing to show. A LOWER stamp is
+			// where a migration would run; there has not been one yet.
+			log.warn("journal {} is schema {}; this build reads {}",
+				f.getName(), fileSchema, SCHEMA);
+			journalWarning = "This journal was written by a newer version of Chronicle. "
+				+ "Update the plugin to open it — nothing on disk has been changed.";
+			synchronized (lock)
+			{
+				// Empty rather than null: the panel's reads only test for a model,
+				// and one going null underneath them would throw on the EDT. With
+				// no currentRsn, flush() can never write this placeholder over the
+				// record it stands in for.
+				root = skeleton(rsn);
+				trackersBase = new JsonObject();
+				currentRsn = null;
+				ready = false;
+			}
+			return;
+		}
 		if (loaded == null)
 		{
 			loaded = skeleton(rsn);
@@ -153,6 +186,10 @@ class LocalStore
 			currentRsn = rsn;
 			ready = true;
 		}
+		// This account's record opened, so whatever was wrong before belongs to
+		// the last one. A disk still refusing writes re-states itself on the very
+		// next flush.
+		journalWarning = null;
 	}
 
 	/** The account has logged out; a different one must not record onto its model. */
@@ -477,9 +514,9 @@ class LocalStore
 	// ------------------------------------------------------------------
 
 	/**
-	 * Write the JSON record and regenerate the self-contained page. Returns the
-	 * page file (for opening), or null if there's nothing to write yet. The lock
-	 * is held only to serialise the model; both disk writes happen outside it.
+	 * Write the JSON record, or do nothing while no account is mounted. The lock
+	 * is held only to serialise the model; the disk write happens outside it, so
+	 * the client thread never waits on I/O.
 	 */
 	void flush(File dir)
 	{
@@ -501,10 +538,18 @@ class LocalStore
 				log.debug("could not create local dir {}", dir);
 			}
 			writeAtomic(jsonPath(dir, rsn), json);
+			journalWarning = null;
 		}
-		catch (Exception e)   // noqa: best-effort; a failed write just retries next tick
+		catch (Exception e)   // noqa: the model is intact in memory; the next tick retries
 		{
-			log.debug("local flush failed", e);
+			// A full, read-only or locked directory drops every write while the
+			// panel — served from memory — goes on looking live, and the loss only
+			// shows at the next login, when the record rolls back to the last write
+			// that landed. The journal is the system of record, so a journal that
+			// is no longer being written has to say so where it is read.
+			log.warn("local flush failed", e);
+			journalWarning = "Could not write the journal to disk — check free space and "
+				+ "permissions on " + dir.getAbsolutePath() + ".";
 		}
 	}
 
@@ -574,6 +619,12 @@ class LocalStore
 	net.runelite.client.game.ItemManager items()
 	{
 		return itemManager;
+	}
+
+	/** Why the journal is not keeping the record, or null while it is. */
+	String journalWarning()
+	{
+		return journalWarning;
 	}
 
 	/** Lifetime counters as the journal knows them (base + this session). */
@@ -1657,7 +1708,13 @@ class LocalStore
 
 	static String slug(String rsn)
 	{
-		String s = rsn == null ? "" : rsn.trim().toLowerCase().replaceAll("[^a-z0-9]+", "-");
+		// The slug is a file identity — the journal, its history spine and the
+		// rename comparison are all filed under it — so it has to be a function of
+		// the name alone. The default locale is not: under a Turkish one, lowering
+		// 'I' yields a dotless 'ı' that the ASCII class below then strips, and the
+		// same account would mount a blank record beside its real one.
+		String s = rsn == null ? ""
+			: rsn.trim().toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]+", "-");
 		s = s.replaceAll("(^-+|-+$)", "");
 		return s.isEmpty() ? "profile" : s;
 	}

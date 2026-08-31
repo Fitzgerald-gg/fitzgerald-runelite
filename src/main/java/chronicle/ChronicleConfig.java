@@ -24,8 +24,9 @@ public interface ChronicleConfig extends Config
 
 	@ConfigSection(
 		name = "Advanced",
-		description = "Cloud sync + screenshots. Everything here is OFF/blank by default — "
-			+ "Chronicle is a local journal unless you point it somewhere.",
+		description = "Cloud sync, screenshots, and how often the journal is written. "
+			+ "Every network feature here is OFF/blank by default — Chronicle is a "
+			+ "local journal unless you point it somewhere.",
 		position = 1,
 		closedByDefault = true
 	)
@@ -95,9 +96,15 @@ public interface ChronicleConfig extends Config
 		description = "Cloud sync only: attach a screenshot to notable events "
 			+ "(rare/valuable drops, pets, collection-log unlocks, level 99s, deaths, "
 			+ "clues, quests, diaries, combat achievements) and upload it with the "
-			+ "event. Off by default; does nothing without cloud sync.",
+			+ "event. The picture is your whole client window as it looked at that "
+			+ "moment — so it can include any chat on screen (public, clan, friends "
+			+ "and private messages) and the names of players standing near you. Off "
+			+ "by default; does nothing without cloud sync.",
 		warning = "This feature submits your IP address to a 3rd-party server not "
-			+ "controlled or verified by the RuneLite developers",
+			+ "controlled or verified by the RuneLite developers. Each screenshot is "
+			+ "your entire client window, so whatever is on screen at that moment — "
+			+ "open chat, private messages included, and nearby players' names — is "
+			+ "uploaded with it.",
 		position = 13,
 		section = advancedSection
 	)
@@ -106,11 +113,21 @@ public interface ChronicleConfig extends Config
 		return false;
 	}
 
+	// The scheduled cycle harvests once and feeds both sinks: it always folds the
+	// running session into the journal and writes it out, and mirrors that upward
+	// only when cloud sync is on. So this interval is a LOCAL durability setting
+	// first — the window a crash can cost you — and a network cadence second; it
+	// must never read as a cloud-only knob, or a local-only install lengthens it
+	// to quieten network traffic it does not have and widens its own write window.
 	@ConfigItem(
 		keyName = "pushIntervalMinutes",
-		name = "Push interval",
-		description = "Cloud sync only: how often lifetime stat counters are pushed "
-			+ "to the configured server.",
+		name = "Journal write interval",
+		description = "How often the running session is folded into the on-disk "
+			+ "journal and written out (the day's history baseline lands on the same "
+			+ "beat). This is the most a crash or a power cut can cost you, so "
+			+ "shorter is safer; the journal is also written at logout and when the "
+			+ "plugin stops. With cloud sync on, the upward push rides this same "
+			+ "cadence — with it off, the setting is purely local.",
 		position = 14,
 		section = advancedSection
 	)

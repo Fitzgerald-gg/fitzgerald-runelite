@@ -35,16 +35,19 @@ zero.
 
 Off by default, blank by default. If you point the plugin at a Chronicle-compatible server
 (*Advanced → Cloud server* + a token issued by that server's operator), it will **additionally
-send a copy of your journal upward** on the push interval and at logout. That is the entire
+send a copy of your journal upward** on the journal's write interval and at logout. That is the entire
 relationship:
 
 - **One-way.** The plugin never reads anything back. Panels, counters, history and dryness are
   identical with sync on or off. If the server vanishes, you lose nothing.
-- **Your own account only.** The plugin never submits other players' data.
+- **Your own account only.** The plugin never submits another player's stats, drops or activity.
 - **What travels:** your display name, event data (raw item IDs/quantities), counter absolutes,
   per-skill XP, collection-log and achievement snapshots — and, if you separately opt in,
-  screenshots of notable moments. No password, email, bank PIN, or private-message content is
-  ever read or transmitted.
+  screenshots of notable moments. No password, email or bank PIN is ever read or transmitted.
+- **What a screenshot is.** Chronicle never reads your chat into an event. But a screenshot is a
+  picture of your **whole client window** at that moment, so any chat open on screen — public,
+  clan, friends, private messages — and the names of players standing near you are in the image.
+  That is why it is a second opt-in, off by default, on top of cloud sync itself.
 
 > **With cloud sync enabled, the plugin transmits your player data (and your IP address) to the
 > server you configure — a third-party server not controlled or verified by the RuneLite
@@ -63,16 +66,18 @@ from anywhere.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| Push interval | 5 min | How often the journal refreshes to disk (and pushes, when cloud sync is on). |
+| Journal write interval (Advanced) | 5 min | How often the session is folded into the journal and written to disk — and pushed upward, when cloud sync is on. |
 | Enable cloud sync (Advanced) | **off** | Additionally mirror the journal upward to the server below. |
 | Cloud server (Advanced) | *blank* | Base URL of a Chronicle-compatible server. Blank = no network, ever. |
 | Cloud token (Advanced) | *blank* | The push token for this account, issued by that server's operator. |
-| Upload screenshots (Advanced) | **off** | Cloud sync only: attach a screenshot to notable events. Separate opt-in. |
+| Upload screenshots (Advanced) | **off** | Cloud sync only: attach a picture of your whole client window — on-screen chat and nearby players included — to notable events. Separate opt-in. |
 
 ## Dependencies
 
-- Depends on RuneLite's built-in **Slayer** plugin (declared via `@PluginDependency`) so kills can
-  be tagged on-task. If you disable Slayer, the side panel prompts you; the rest keeps working.
+- Depends on two of RuneLite's built-in plugins, both declared via `@PluginDependency`: **Slayer**,
+  so kills can be tagged on-task, and **Loot Tracker**, whose event carries chest and casket loot
+  (and whose stored archive a late install inherits its history from). Disable either and the side
+  panel says so; the rest keeps working.
 - No third-party plugins are required.
 
 ## Build & install
