@@ -25,7 +25,6 @@ import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
-import okhttp3.MultipartBody;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -43,7 +42,6 @@ import okhttp3.ResponseBody;
 public class ChronicleApiClient
 {
 	private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
-	private static final MediaType PNG = MediaType.get("image/png");
 
 	// The server base URL is the player's own setting, so a reply is never
 	// assumed to be well behaved. Anything past this ceiling is dropped unread
@@ -235,7 +233,36 @@ public class ChronicleApiClient
 	 */
 	public void postEvent(String baseUrl, String token, JsonObject event)
 	{
-		postEvent(baseUrl, token, event, null);
+		HttpUrl url = resolve(baseUrl, "api/events/" + token);
+		if (url == null)
+		{
+			log.debug("postEvent: bad server URL {}", baseUrl);
+			return;
+		}
+		Request request = new Request.Builder()
+			.url(url)
+			.post(RequestBody.create(JSON, gson.toJson(event)))
+			.build();
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("event push failed", e);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try (Response r = response)
+				{
+					if (!r.isSuccessful())
+					{
+						log.debug("event push HTTP {}", r.code());
+					}
+				}
+			}
+		});
 	}
 
 	/**
@@ -533,54 +560,6 @@ public class ChronicleApiClient
 		return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsNumber() : 0;
 	}
 
-	/** As above, but attaches a PNG screenshot as multipart (the server keeps or
-	 *  prunes it per its per-event screenshot policy). Null/empty png → JSON body. */
-	public void postEvent(String baseUrl, String token, JsonObject event, @Nullable byte[] png)
-	{
-		HttpUrl url = resolve(baseUrl, "api/events/" + token);
-		if (url == null)
-		{
-			log.debug("postEvent: bad server URL {}", baseUrl);
-			return;
-		}
-		RequestBody body;
-		if (png != null && png.length > 0)
-		{
-			body = new MultipartBody.Builder()
-				.setType(MultipartBody.FORM)
-				.addFormDataPart("event", gson.toJson(event))
-				.addFormDataPart("file", "screenshot.png", RequestBody.create(PNG, png))
-				.build();
-		}
-		else
-		{
-			body = RequestBody.create(JSON, gson.toJson(event));
-		}
-		Request request = new Request.Builder()
-			.url(url)
-			.post(body)
-			.build();
-		http.newCall(request).enqueue(new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.debug("event push failed", e);
-			}
-
-			@Override
-			public void onResponse(Call call, Response response)
-			{
-				try (Response r = response)
-				{
-					if (!r.isSuccessful() && r.code() != 204)
-					{
-						log.debug("event push returned http {}", r.code());
-					}
-				}
-			}
-		});
-	}
 
 	// ── Self-service profile management (token-authed) ─────────────────────
 	// The token proves ownership; the in-game name must belong to it, which the

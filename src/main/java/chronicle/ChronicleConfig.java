@@ -90,29 +90,6 @@ public interface ChronicleConfig extends Config
 		return "";
 	}
 
-	@ConfigItem(
-		keyName = "captureScreenshots",
-		name = "Upload screenshots",
-		description = "Cloud sync only: attach a screenshot to notable events "
-			+ "(rare/valuable drops, pets, collection-log unlocks, level 99s, deaths, "
-			+ "clues, quests, diaries, combat achievements) and upload it with the "
-			+ "event. The picture is your whole client window as it looked at that "
-			+ "moment — so it can include any chat on screen (public, clan, friends "
-			+ "and private messages) and the names of players standing near you. Off "
-			+ "by default; does nothing without cloud sync.",
-		warning = "This feature submits your IP address to a 3rd-party server not "
-			+ "controlled or verified by the RuneLite developers. Each screenshot is "
-			+ "your entire client window, so whatever is on screen at that moment — "
-			+ "open chat, private messages included, and nearby players' names — is "
-			+ "uploaded with it.",
-		position = 13,
-		section = advancedSection
-	)
-	default boolean captureScreenshots()
-	{
-		return false;
-	}
-
 	// The scheduled cycle harvests once and feeds both sinks: it always folds the
 	// running session into the journal and writes it out, and mirrors that upward
 	// only when cloud sync is on. So this interval is a LOCAL durability setting

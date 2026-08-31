@@ -10,9 +10,6 @@ package chronicle;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import java.awt.Image;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -23,10 +20,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import javax.imageio.ImageIO;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -59,11 +54,9 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.NpcLootReceived;
 import net.runelite.client.events.ServerNpcLoot;
-import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemStack;
 import net.runelite.client.plugins.loottracker.LootReceived;
 import net.runelite.client.plugins.slayer.SlayerPluginService;
-import net.runelite.client.ui.DrawManager;
 import net.runelite.client.util.Text;
 import net.runelite.http.api.loottracker.LootRecordType;
 
@@ -182,14 +175,7 @@ public class ChronicleEventCapture
 	private final ConfigManager configManager;
 	private final ChronicleConfig config;
 	private final ChronicleApiClient api;
-	private final DrawManager drawManager;
 	private final LocalStore localStore;
-	// Prices are read here for one decision only — whether a drop is worth a frame.
-	// Nothing priced is put on the wire; the payload stays raw ids and quantities.
-	private final ItemManager itemManager;
-	// RuneLite's shared pool. Only the screenshot encode and its push are handed to
-	// it, so it is never held for long.
-	private final ScheduledExecutorService executor;
 
 	// Optional: provided by RuneLite's core Slayer plugin. Absent in a dev-mode
 	// client (or if the user disables Slayer) — stays null and we skip the stamp.
@@ -364,18 +350,14 @@ public class ChronicleEventCapture
 
 	@Inject
 	ChronicleEventCapture(Client client, ClientThread clientThread, ConfigManager configManager,
-		ChronicleConfig config, ChronicleApiClient api, DrawManager drawManager, LocalStore localStore,
-		ItemManager itemManager, ScheduledExecutorService executor)
+		ChronicleConfig config, ChronicleApiClient api, LocalStore localStore)
 	{
 		this.client = client;
 		this.clientThread = clientThread;
 		this.configManager = configManager;
 		this.config = config;
 		this.api = api;
-		this.drawManager = drawManager;
 		this.localStore = localStore;
-		this.itemManager = itemManager;
-		this.executor = executor;
 	}
 
 	/** True once the core Slayer plugin's service is wired (via @PluginDependency).
@@ -1078,9 +1060,8 @@ public class ChronicleEventCapture
 			data.addProperty("killerName", killer);
 		}
 		// Value / items-kept valuation is deferred: it needs inventory +
-		// skull/prayer snapshots sent raw for the server to value. For now the
-		// death itself is recorded; the screenshot policy keys on valueLost when
-		// present. (See REBUILD_V2.md.)
+		// skull/prayer snapshots, which are not captured today. The death itself
+		// is recorded.
 		emit("DEATH", data);
 	}
 
@@ -1512,135 +1493,7 @@ public class ChronicleEventCapture
 		body.addProperty("eventId", UUID.randomUUID().toString());
 		body.add("data", data);
 
-		// A frame is the whole client window, not a crop of the moment: whatever chat
-		// is open and whoever is standing nearby is in the picture. Everything else
-		// this plugin sends is the local account's own data by construction, and only
-		// a picture can carry someone else's — which is why this is its own opt-in on
-		// top of cloud sync, and why the config item says in full what one contains.
-		if (config.captureScreenshots() && screenshotWorthy(type, data))
-		{
-			try
-			{
-				// Capture the next rendered frame, then send event + PNG together.
-				// The frame comes back ON THE RENDER THREAD, and encoding a 1080p
-				// client window to PNG there stalls the game for tens of
-				// milliseconds — a visible hitch on every boss kill — so the encode
-				// and the push both move to the shared pool. The image handed over
-				// is that frame's own copy, so reading it off the client thread is
-				// safe (RuneLite's own screenshot plugin hands it over the same way).
-				drawManager.requestNextFrameListener(image ->
-					executor.submit(() -> api.postEvent(base, token, body, toPng(image))));
-				return;
-			}
-			catch (RuntimeException e)
-			{
-				log.debug("screenshot request failed; sending metadata only", e);
-			}
-		}
 		api.postEvent(base, token, body);
 	}
 
-	/** Client-side pre-filter so we don't screenshot every trivial event. The
-	 *  server still enforces the authoritative per-event policy (and prunes
-	 *  e.g. loot below its gp/rarity thresholds). */
-	private boolean screenshotWorthy(String type, JsonObject data)
-	{
-		// Narrow client-side pre-filter matching the server's keep-policy: only a
-		// max-level milestone, a death, a pet, or a valuable/KC'd drop is worth a
-		// frame. The server still prunes loot below its own gp floor.
-		switch (type)
-		{
-			case "PET":
-			case "DEATH":
-				return true;
-			case "LEVEL":
-				return data.has("level") && data.get("level").getAsInt() >= 99;
-			case "LOOT":
-				// A boss/KC drop is always a candidate; so is any drop valuable
-				// enough on its own, priced here through ItemManager so a slayer
-				// unique — or anything from a source that prints no kill count —
-				// still earns a frame. The server stays authoritative and prunes
-				// anything below its own gp floor.
-				return data.has("killCount") || lootValueWorthy(data);
-			default:
-				return false;   // collection / quest / diary / CA / clue → metadata only
-		}
-	}
-
-	/** Client-side value floor for screenshotting a drop that carries no KC.
-	 *  Matches the server's default `dink_drop_screenshot_min_gp`; the server
-	 *  stays authoritative and prunes anything below its own configured floor. */
-	private static final long SCREENSHOT_LOOT_MIN_GP = 1_000_000L;
-
-	/** True when the drop's own GE value (Σ price × quantity) clears the floor —
-	 *  so a valuable non-boss drop still earns a frame even with no KC. The wire
-	 *  payload carries ids and quantities only; the price is read here, on the
-	 *  client thread, purely to make this one decision. */
-	private boolean lootValueWorthy(JsonObject data)
-	{
-		if (!data.has("items") || !data.get("items").isJsonArray())
-		{
-			return false;
-		}
-		JsonArray items = data.getAsJsonArray("items");
-		long total = 0L;
-		for (int i = 0; i < items.size(); i++)
-		{
-			if (!items.get(i).isJsonObject())
-			{
-				continue;
-			}
-			JsonObject it = items.get(i).getAsJsonObject();
-			if (!it.has("id") || it.get("id").isJsonNull())
-			{
-				continue;
-			}
-			long qty = it.has("quantity") && !it.get("quantity").isJsonNull()
-				? it.get("quantity").getAsLong() : 0L;
-			long price;
-			try
-			{
-				// Canonicalised so a noted or placeholder id resolves to the thing
-				// itself, exactly as the journal prices it.
-				price = itemManager.getItemPrice(itemManager.canonicalize(it.get("id").getAsInt()));
-			}
-			catch (RuntimeException ex)
-			{
-				continue;   // an id the cache doesn't know is worth nothing here
-			}
-			total += price * qty;
-			if (total >= SCREENSHOT_LOOT_MIN_GP)
-			{
-				return true;
-			}
-		}
-		return false;
-	}
-
-	private static byte[] toPng(Image image)
-	{
-		try
-		{
-			BufferedImage bi;
-			if (image instanceof BufferedImage)
-			{
-				bi = (BufferedImage) image;
-			}
-			else
-			{
-				bi = new BufferedImage(image.getWidth(null), image.getHeight(null),
-					BufferedImage.TYPE_INT_ARGB);
-				java.awt.Graphics g = bi.getGraphics();
-				g.drawImage(image, 0, 0, null);
-				g.dispose();
-			}
-			ByteArrayOutputStream baos = new ByteArrayOutputStream();
-			ImageIO.write(bi, "png", baos);
-			return baos.toByteArray();
-		}
-		catch (Exception e)
-		{
-			return null;
-		}
-	}
 }

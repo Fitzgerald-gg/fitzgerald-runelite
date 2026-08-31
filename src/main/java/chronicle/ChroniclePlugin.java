@@ -54,9 +54,7 @@ import net.runelite.client.ui.NavigationButton;
 		+ "collection log, clues, quests, diaries, combat achievements, slayer, pets, "
 		+ "deaths and lifetime counters — kept on your own computer. Optional cloud sync "
 		+ "(off by default, server field blank) can additionally send it to a "
-		+ "Chronicle-compatible server you configure; uploading screenshots — pictures "
-		+ "of the whole client window, any on-screen chat and nearby players included "
-		+ "— is a separate opt-in on top of that.",
+		+ "Chronicle-compatible server you configure.",
 	tags = {"chronicle", "journal", "stats", "tracker", "loot", "slayer", "collection", "osrs"}
 )
 // The Slayer plugin's service supplies the active task so we can tag on-task
@@ -224,7 +222,7 @@ public class ChroniclePlugin extends Plugin
 		if (configManager.getConfiguration(GROUP, "migrated") == null)
 		{
 			for (String key : new String[]{"serverBaseUrl", "manualToken",
-				"captureScreenshots", "pushIntervalMinutes"})
+				"pushIntervalMinutes"})
 			{
 				String v = configManager.getConfiguration(legacyGroup, key);
 				if (v != null)

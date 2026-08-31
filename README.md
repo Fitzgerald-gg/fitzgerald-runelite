@@ -42,12 +42,11 @@ relationship:
   identical with sync on or off. If the server vanishes, you lose nothing.
 - **Your own account only.** The plugin never submits another player's stats, drops or activity.
 - **What travels:** your display name, event data (raw item IDs/quantities), counter absolutes,
-  per-skill XP, collection-log and achievement snapshots — and, if you separately opt in,
-  screenshots of notable moments. No password, email or bank PIN is ever read or transmitted.
-- **What a screenshot is.** Chronicle never reads your chat into an event. But a screenshot is a
-  picture of your **whole client window** at that moment, so any chat open on screen — public,
-  clan, friends, private messages — and the names of players standing near you are in the image.
-  That is why it is a second opt-in, off by default, on top of cloud sync itself.
+  per-skill XP, and collection-log and achievement snapshots. No password, email or bank PIN is
+  ever read or transmitted.
+- **No images, ever.** Chronicle takes no screenshots. Nothing it sends can contain another
+  player's name or a line of your chat — every field is your own account's data by construction.
+  If you want screenshots of big moments, RuneLite's own Screenshot plugin does that job.
 
 > **With cloud sync enabled, the plugin transmits your player data (and your IP address) to the
 > server you configure — a third-party server not controlled or verified by the RuneLite
@@ -70,7 +69,6 @@ from anywhere.
 | Enable cloud sync (Advanced) | **off** | Additionally mirror the journal upward to the server below. |
 | Cloud server (Advanced) | *blank* | Base URL of a Chronicle-compatible server. Blank = no network, ever. |
 | Cloud token (Advanced) | *blank* | The push token for this account, issued by that server's operator. |
-| Upload screenshots (Advanced) | **off** | Cloud sync only: attach a picture of your whole client window — on-screen chat and nearby players included — to notable events. Separate opt-in. |
 
 ## Dependencies
 
