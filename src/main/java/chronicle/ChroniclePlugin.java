@@ -151,6 +151,8 @@ public class ChroniclePlugin extends Plugin
 	// The 4th adoption: month-end xp baselines from the cloud's snapshot
 	// archive, one-shot (flag cloudHistoryImported). Stash→apply like the rest.
 	private volatile java.util.List<ChronicleApiClient.WomSnapshot> pendingHistoryAdopt;
+	// The whole per-source item ledger, floored into the local bags each login.
+	private volatile java.util.List<ChronicleApiClient.SourceItemRow> pendingBagsAdopt;
 	// True while the stashed feed adoption is the one-shot DEEP import —
 	// its config flag is only written once the adopt actually applies.
 	private volatile boolean pendingFeedDeep;
@@ -705,12 +707,13 @@ public class ChroniclePlugin extends Plugin
 				pendingFeedAdopt = events;
 				clientThread.invoke(this::refreshLocal);
 			});
-			// The xp archive adopts once too: month-end baselines back to the
-			// server's first snapshot, walked via the public gains endpoint —
-			// History answers for 2023, not just since this build.
-			if (!"true".equals(configManager.getConfiguration(GROUP, "cloudHistoryImported")))
+			// The xp archive adopts once too — v2 pulls the server's DAILY
+			// series in one call (the snapshots endpoint, token-authed for
+			// full depth), so Day and Week history answer everywhere the
+			// archive has days, not just month ends.
+			if (!"true".equals(configManager.getConfiguration(GROUP, "cloudHistoryImported2")))
 			{
-				api.fetchServerHistory(config.serverBaseUrl(), name, snaps ->
+				api.fetchServerHistoryDaily(config.serverBaseUrl(), name, token, snaps ->
 				{
 					if (snaps != null && !snaps.isEmpty())
 					{
@@ -719,6 +722,13 @@ public class ChroniclePlugin extends Plugin
 					}
 				});
 			}
+			// The whole per-source item ledger floors into the local bags each
+			// login — item questions answer locally, no drill-time fetches.
+			api.fetchAllSourceItems(config.serverBaseUrl(), name, rows ->
+			{
+				pendingBagsAdopt = rows;
+				clientThread.invoke(this::refreshLocal);
+			});
 			clientThread.invoke(this::refreshLocal);   // the counter floor, likewise
 			countersSeeded = true;
 			resetSeedBackoff();
@@ -768,6 +778,7 @@ public class ChroniclePlugin extends Plugin
 		pendingDropsAdopt = null;
 		pendingFeedAdopt = null;
 		pendingHistoryAdopt = null;
+		pendingBagsAdopt = null;
 		pendingFeedDeep = false;
 		// Re-seed from the server on the next login (another device may have
 		// advanced the totals). The final push below still uses the in-memory
@@ -1260,6 +1271,12 @@ public class ChroniclePlugin extends Plugin
 		{
 			pendingDropsAdopt = null;
 			localStore.floorDropSources(adopt, localName);
+		}
+		java.util.List<ChronicleApiClient.SourceItemRow> bags = pendingBagsAdopt;
+		if (bags != null && localName != null && localStore.isReadyFor(localName))
+		{
+			pendingBagsAdopt = null;
+			localStore.floorSourceBags(bags, localName);
 		}
 		java.util.List<ChronicleApiClient.FeedEvent> feed = pendingFeedAdopt;
 		if (feed != null && localName != null && localStore.isReadyFor(localName))

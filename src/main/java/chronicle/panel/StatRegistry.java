@@ -84,7 +84,8 @@ public final class StatRegistry
 		new SkillSpec("Fletching", new String[]{"LogsFletched"}, NONE,
 			new String[]{"dartsFletched", "arrowsFletched", "boltsFletched", "boltsUnfinished",
 				"javelinsFletched", "boltTips", "crossbowsStrung", "crossbowsUnstrung",
-				"crossbowStocksCut", "bowsStrung", "logsFletched"}),
+				"crossbowStocksCut", "bowsStrung", "logsFletched",
+				"arrowShaftsFletched", "headlessArrowsFletched"}),
 		new SkillSpec("Crafting", NONE, NONE,
 			new String[]{"gemsCut", "glassBlown", "leatherCrafted", "dhideCrafted",
 				"jewelleryCrafted", "potteryMade", "battlestavesCrafted", "itemsSpun"}),
@@ -102,9 +103,11 @@ public final class StatRegistry
 			// "Harvested" sweep can't steal it — the implingsCaught precedent.
 			new String[]{"implingsCaught", "chompyBirdsPlucked", "herbiboarsHarvested"}),
 		new SkillSpec("Prayer",
-			new String[]{"BonesBuried", "AshesScattered", "HeadsReanimated"},
-			new String[]{"bonesBuried", "ashesScattered", "headsReanimated"},
-			new String[]{"bonesSacrificed", "ashesSacrificed"}),
+			new String[]{"BonesBuried", "AshesScattered", "HeadsReanimated",
+				"BonesSacrificed", "AshesSacrificed", "BonesOffered"},
+			new String[]{"bonesBuried", "ashesScattered", "headsReanimated",
+				"bonesOffered", "bonesSacrificed", "ashesSacrificed"},
+			NONE),
 		new SkillSpec("Construction", NONE, NONE, new String[]{"constructionBuilds"}));
 
 	// Explicit claims resolve before any suffix sweep — a broad suffix

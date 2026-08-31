@@ -72,6 +72,7 @@ class ChroniclePanel extends PluginPanel
 	private static final Color ACCENT_SESSION = new Color(85, 163, 90);
 	private static final Color ACCENT_RED = new Color(196, 84, 74);
 	private static final int ROW_CAP = 30;
+	private static final long XP_99 = 13_034_431L;
 
 	private enum Scope
 	{
@@ -107,6 +108,10 @@ class ChroniclePanel extends PluginPanel
 	private String histGranularity = "Week";
 	// The period's END date (inclusive); the stepper moves it by one granule.
 	private java.time.LocalDate histCursor = java.time.LocalDate.now();
+	// Exact-dates mode (the site's any-two-dates gains): non-null overrides the
+	// granularity pills; set by clicking the period label, cleared by any pill.
+	private java.time.LocalDate histFrom;
+	private java.time.LocalDate histTo;
 	private boolean womImportRunning;
 	// The bundled 1,921-slot taxonomy: tab -> page -> ordered slot names.
 	// Parsed once on first Log open (~40KB).
@@ -222,6 +227,7 @@ class ChroniclePanel extends PluginPanel
 			expandedSource = null;
 			dropsShown = ROW_CAP;
 			slayerShown = ROW_CAP;
+			drillShown.clear();
 			searchField.setText("");
 			rebuild();
 			return true;
@@ -689,8 +695,13 @@ class ChroniclePanel extends PluginPanel
 		}
 	}
 
-	/** The per-source drill: local bag as sprites; the cloud ledger's item
-	 *  rows fetched on first expand when the bag holds less than the cloud. */
+	// Rows mounted per open drill; "Show more" raises it per source.
+	private final Map<String, Integer> drillShown = new LinkedHashMap<>();
+
+	/** The per-source drill, fully local: the journal's bag (adopted from the
+	 *  cloud ledger at login) as a sprite strip plus EVERY item as ranked
+	 *  rows, paged. The per-source cloud fetch survives only as the fallback
+	 *  for an empty bag. */
 	private void addSourceDrill(JPanel card, LocalStore.SourceRow r)
 	{
 		card.add(vgap(5));
@@ -698,12 +709,17 @@ class ChroniclePanel extends PluginPanel
 		bag.sort(Comparator.comparingLong((LocalStore.BagItem b) -> b.value).reversed());
 		if (!bag.isEmpty())
 		{
+			// a strip of the ten most valuable sprites (id-ful entries only)
 			JPanel grid = new JPanel(new GridLayout(0, 5, 3, 3));
 			grid.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 			int mounted = 0;
 			for (LocalStore.BagItem b : bag)
 			{
-				if (mounted++ >= 25)
+				if (b.itemId <= 0)
+				{
+					continue;
+				}
+				if (mounted++ >= 10)
 				{
 					break;
 				}
@@ -712,51 +728,73 @@ class ChroniclePanel extends PluginPanel
 				slot.setHorizontalAlignment(JLabel.CENTER);
 				slot.setToolTipText(b.name + (b.qty > 1 ? " ×" + fmt(b.qty) : "")
 					+ " · " + gp(b.value) + " gp");
-				if (b.itemId > 0)
-				{
-					AsyncBufferedImage img = plugin.items().getImage(b.itemId,
-						(int) Math.min(Integer.MAX_VALUE, b.qty), b.qty > 1);
-					img.addTo(slot);
-				}
+				AsyncBufferedImage img = plugin.items().getImage(b.itemId,
+					(int) Math.min(Integer.MAX_VALUE, b.qty), b.qty > 1);
+				img.addTo(slot);
 				grid.add(slot);
 			}
-			card.add(grid);
+			if (mounted > 0)
+			{
+				card.add(grid);
+				card.add(vgap(4));
+			}
+			int cap = drillShown.getOrDefault(r.name, 20);
+			int shown = 0;
+			for (LocalStore.BagItem b : bag)
+			{
+				if (shown++ >= cap)
+				{
+					break;
+				}
+				card.add(row(b.name + (b.qty > 1 ? " ×" + fmt(b.qty) : ""),
+					b.value > 0 ? gp(b.value) + " gp" : "", null));
+			}
+			if (bag.size() > cap)
+			{
+				JButton more = new JButton("Show " + Math.min(30, bag.size() - cap)
+					+ " more of " + fmt(bag.size()) + " items");
+				final String src = r.name;
+				more.addActionListener(e ->
+				{
+					drillShown.put(src, cap + 30);
+					rebuild();
+				});
+				card.add(vgap(3));
+				card.add(more);
+			}
+			return;
 		}
+		// Empty bag: fall back to the one-shot cloud fetch (BYO servers
+		// without the ledger endpoint, or pre-adoption sessions).
 		// Cache protocol: absent = never asked; null value = fetch in flight;
 		// empty list = fetch failed; non-empty = the cloud ledger's rows.
 		List<ChronicleApiClient.LedgerItem> cloud = cloudBagCache.get(r.name);
 		if (cloud != null && !cloud.isEmpty())
 		{
-			card.add(vgap(4));
 			int mounted = 0;
 			for (ChronicleApiClient.LedgerItem it : cloud)
 			{
-				if (mounted++ >= 15)
+				if (mounted++ >= 20)
 				{
 					break;
 				}
 				card.add(row(it.name + (it.qty > 1 ? " ×" + fmt(it.qty) : ""),
 					gp(it.value) + " gp", null));
 			}
-			if (cloud.size() > 15)
-			{
-				card.add(note(fmt(cloud.size() - 15) + " more on your cloud ledger"));
-			}
 		}
-		else if (r.cloudItems > bag.size() && plugin.cloudActive())
+		else if (r.cloudItems > 0 && plugin.cloudActive())
 		{
 			if (cloud != null)
 			{
-				card.add(note("Couldn't reach the cloud ledger — items the journal "
-					+ "witnessed are shown above."));
+				card.add(note("Couldn't reach the cloud ledger just now."));
 			}
 			else if (cloudBagCache.containsKey(r.name))
 			{
-				card.add(note("Fetching the full item list…"));
+				card.add(note("Fetching the item list…"));
 			}
 			else
 			{
-				card.add(note("Fetching the full item list…"));
+				card.add(note("Fetching the item list…"));
 				cloudBagCache.put(r.name, null);
 				final String src = r.name;
 				plugin.fetchSourceItems(src, items ->
@@ -772,7 +810,7 @@ class ChroniclePanel extends PluginPanel
 				});
 			}
 		}
-		else if (bag.isEmpty())
+		else
 		{
 			card.add(note("Items fill in as you play — the journal prices each "
 				+ "drop the moment it lands."));
@@ -1358,10 +1396,13 @@ class ChroniclePanel extends PluginPanel
 			pill.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
 			pill.setFont(FontManager.getRunescapeSmallFont());
 			pill.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-			pill.setForeground(g.equals(histGranularity) ? accent() : ColorScheme.LIGHT_GRAY_COLOR.darker());
+			pill.setForeground(g.equals(histGranularity) && histFrom == null
+				? accent() : ColorScheme.LIGHT_GRAY_COLOR.darker());
 			pill.addMouseListener(clicker(() ->
 			{
 				histGranularity = g;
+				histFrom = null;
+				histTo = null;
 				rebuild();
 			}));
 			pills.add(pill);
@@ -1369,34 +1410,45 @@ class ChroniclePanel extends PluginPanel
 		p.add(pills);
 		p.add(vgap(5));
 
-		// the period under the cursor
+		// the period under the cursor — or the exact dates the player typed
 		java.time.LocalDate end = histCursor;
 		java.time.LocalDate start;
 		String label;
-		switch (histGranularity)
+		if (histFrom != null && histTo != null)
 		{
-			case "Day":
-				start = end;
-				label = end.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"));
-				break;
-			case "Month":
-				start = end.withDayOfMonth(1);
-				end = start.plusMonths(1).minusDays(1);
-				label = start.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"));
-				break;
-			case "Year":
-				start = end.withDayOfYear(1);
-				end = start.plusYears(1).minusDays(1);
-				label = String.valueOf(start.getYear());
-				break;
-			case "Week":
-			default:
-				start = end.minusDays(6);
-				label = start.format(java.time.format.DateTimeFormatter.ofPattern("d MMM"))
-					+ " - " + end.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"));
-				break;
+			start = histFrom;
+			end = histTo.isAfter(java.time.LocalDate.now()) ? java.time.LocalDate.now() : histTo;
+			label = start.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yy"))
+				+ " - " + end.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yy"));
+		}
+		else
+		{
+			switch (histGranularity)
+			{
+				case "Day":
+					start = end;
+					label = end.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"));
+					break;
+				case "Month":
+					start = end.withDayOfMonth(1);
+					end = start.plusMonths(1).minusDays(1);
+					label = start.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"));
+					break;
+				case "Year":
+					start = end.withDayOfYear(1);
+					end = start.plusYears(1).minusDays(1);
+					label = String.valueOf(start.getYear());
+					break;
+				case "Week":
+				default:
+					start = end.minusDays(6);
+					label = start.format(java.time.format.DateTimeFormatter.ofPattern("d MMM"))
+						+ " - " + end.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"));
+					break;
+			}
 		}
 		final java.time.LocalDate pStart = start;
+		final java.time.LocalDate pEnd = end;
 
 		JPanel stepper = new JPanel(new BorderLayout());
 		stepper.setBackground(ColorScheme.DARKER_GRAY_COLOR);
@@ -1412,17 +1464,39 @@ class ChroniclePanel extends PluginPanel
 		}
 		back.addMouseListener(clicker(() ->
 		{
-			histCursor = stepBack(histCursor);
+			if (histFrom != null && histTo != null)
+			{
+				long span = java.time.temporal.ChronoUnit.DAYS.between(histFrom, histTo) + 1;
+				histFrom = histFrom.minusDays(span);
+				histTo = histTo.minusDays(span);
+			}
+			else
+			{
+				histCursor = stepBack(histCursor);
+			}
 			rebuild();
 		}));
 		fwd.addMouseListener(clicker(() ->
 		{
-			java.time.LocalDate next = stepForward(histCursor);
-			histCursor = next.isAfter(java.time.LocalDate.now()) ? java.time.LocalDate.now() : next;
+			if (histFrom != null && histTo != null)
+			{
+				long span = java.time.temporal.ChronoUnit.DAYS.between(histFrom, histTo) + 1;
+				histFrom = histFrom.plusDays(span);
+				histTo = histTo.plusDays(span);
+			}
+			else
+			{
+				java.time.LocalDate next = stepForward(histCursor);
+				histCursor = next.isAfter(java.time.LocalDate.now()) ? java.time.LocalDate.now() : next;
+			}
 			rebuild();
 		}));
 		JLabel lbl = new JLabel(label, JLabel.CENTER);
 		lbl.setFont(FontManager.getRunescapeFont());
+		// The site takes any two dates; so does the panel — click the period.
+		lbl.setToolTipText("Set exact dates");
+		lbl.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+		lbl.addMouseListener(clicker(() -> onSetExactDates(pStart, pEnd)));
 		stepper.add(back, BorderLayout.WEST);
 		stepper.add(lbl, BorderLayout.CENTER);
 		stepper.add(fwd, BorderLayout.EAST);
@@ -1503,29 +1577,32 @@ class ChroniclePanel extends PluginPanel
 			gains.sort(Map.Entry.<String, Long>comparingByValue().reversed());
 			if (!gains.isEmpty())
 			{
-				JPanel card = card("XP gained");
-				JPanel grid = new JPanel(new GridLayout(0, 2, 3, 3));
-				grid.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+				// Ranked rows, the site's Chronicle idiom: total first, skills
+				// by xp desc, a lit "99" where the window crossed the line.
+				long totalGained = 0;
+				for (Map.Entry<String, Long> g : gains)
+				{
+					totalGained += g.getValue();
+				}
+				JPanel card = card("Xp gained");
+				card.add(row("Total", "+" + gp(totalGained), accent()));
 				int mounted = 0;
 				for (Map.Entry<String, Long> g : gains)
 				{
-					if (mounted++ >= 8)
+					if (mounted++ >= 14)
 					{
 						break;
 					}
-					JPanel cell = new JPanel(new BorderLayout());
-					cell.setOpaque(false);
-					JLabel nm = new JLabel(StatRegistry.prettify(g.getKey()));
-					nm.setFont(FontManager.getRunescapeSmallFont());
-					nm.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker());
-					JLabel xp = new JLabel("+" + gp(g.getValue()));
-					xp.setFont(FontManager.getRunescapeFont());
-					xp.setForeground(ACCENT_SESSION);
-					cell.add(nm, BorderLayout.NORTH);
-					cell.add(xp, BorderLayout.CENTER);
-					grid.add(cell);
+					long after = at.getValue().skills.getOrDefault(g.getKey(), 0L);
+					boolean hit99 = after >= XP_99 && after - g.getValue() < XP_99;
+					card.add(row(StatRegistry.prettify(g.getKey())
+						+ (hit99 ? " · 99" : ""), "+" + gp(g.getValue()),
+						hit99 ? ACCENT_SESSION : null, hit99));
 				}
-				card.add(grid);
+				if (gains.size() > 14)
+				{
+					card.add(ghostRow("+ " + (gains.size() - 14) + " more skills", ""));
+				}
 				p.add(card);
 				p.add(vgap(5));
 			}
@@ -1634,6 +1711,64 @@ class ChroniclePanel extends PluginPanel
 			}
 		});
 		return importBtn;
+	}
+
+	/** The site's any-two-dates gains, panel edition: a small dialog, ISO or
+	 *  d/M/yyyy accepted, prefilled with the visible period. */
+	private void onSetExactDates(java.time.LocalDate from, java.time.LocalDate to)
+	{
+		javax.swing.JTextField fromField = new javax.swing.JTextField(from.toString());
+		javax.swing.JTextField toField = new javax.swing.JTextField(to.toString());
+		JPanel form = new JPanel(new GridLayout(0, 1, 0, 4));
+		form.add(new JLabel("From (yyyy-mm-dd):"));
+		form.add(fromField);
+		form.add(new JLabel("To (yyyy-mm-dd):"));
+		form.add(toField);
+		int ok = JOptionPane.showConfirmDialog(this, form,
+			"Exact dates", JOptionPane.OK_CANCEL_OPTION);
+		if (ok != JOptionPane.OK_OPTION)
+		{
+			return;
+		}
+		java.time.LocalDate f = parseDate(fromField.getText());
+		java.time.LocalDate t = parseDate(toField.getText());
+		if (f == null || t == null)
+		{
+			JOptionPane.showMessageDialog(this,
+				"Dates read as yyyy-mm-dd (or d/m/yyyy) — nothing changed.");
+			return;
+		}
+		if (t.isBefore(f))
+		{
+			java.time.LocalDate swap = f;
+			f = t;
+			t = swap;
+		}
+		histFrom = f;
+		histTo = t;
+		rebuild();
+	}
+
+	private static java.time.LocalDate parseDate(String text)
+	{
+		String s = text == null ? "" : text.trim();
+		try
+		{
+			return java.time.LocalDate.parse(s);
+		}
+		catch (RuntimeException ignored)
+		{
+			// fall through to d/m/yyyy
+		}
+		try
+		{
+			return java.time.LocalDate.parse(s,
+				java.time.format.DateTimeFormatter.ofPattern("d/M/yyyy"));
+		}
+		catch (RuntimeException ignored)
+		{
+			return null;
+		}
 	}
 
 	private java.time.LocalDate stepBack(java.time.LocalDate d)
@@ -1808,24 +1943,27 @@ class ChroniclePanel extends PluginPanel
 			}
 		}
 
-		// Drops — one group, items first (the thing you searched for, with
-		// where it came from), then matching sources, four rows in all.
-		List<String[]> itemHits = new ArrayList<>();
-		outerItems:
+		// Drops — the question is "how many, and from where": the item
+		// aggregates across every source, and its sources follow underneath.
+		Map<String, long[]> itemAgg = new LinkedHashMap<>();       // name -> {qty, value}
+		Map<String, List<String>> itemSrcs = new LinkedHashMap<>();
 		for (LocalStore.SourceRow src : plugin.dropSources())
 		{
 			for (LocalStore.BagItem b : plugin.sourceItems(src.name))
 			{
-				if (b.name.toLowerCase(Locale.ROOT).contains(ql))
+				if (!b.name.toLowerCase(Locale.ROOT).contains(ql))
 				{
-					itemHits.add(new String[]{b.name + (b.qty > 1 ? " ×" + fmt(b.qty) : ""), src.name});
-					if (itemHits.size() >= 3)
-					{
-						break outerItems;
-					}
+					continue;
 				}
+				long[] agg = itemAgg.computeIfAbsent(b.name, k -> new long[2]);
+				agg[0] += b.qty;
+				agg[1] += b.value;
+				itemSrcs.computeIfAbsent(b.name, k -> new ArrayList<>())
+					.add(src.name + (b.qty > 1 ? " ×" + fmt(b.qty) : ""));
 			}
 		}
+		List<String> itemNames = new ArrayList<>(itemAgg.keySet());
+		itemNames.sort(Comparator.comparingLong((String n) -> itemAgg.get(n)[1]).reversed());
 		List<LocalStore.SourceRow> srcHits = new ArrayList<>();
 		for (LocalStore.SourceRow r : plugin.dropSources())
 		{
@@ -1835,16 +1973,30 @@ class ChroniclePanel extends PluginPanel
 			}
 		}
 		srcHits.sort(Comparator.comparingLong((LocalStore.SourceRow r) -> r.value).reversed());
-		if (!itemHits.isEmpty() || !srcHits.isEmpty())
+		if (!itemNames.isEmpty() || !srcHits.isEmpty())
 		{
 			p.add(group("Drops"));
 			jump(View.DROPS);
-			for (String[] hit : itemHits)
+			for (int i = 0; i < Math.min(2, itemNames.size()); i++)
 			{
-				p.add(row(hit[0], hit[1], null));
+				String name = itemNames.get(i);
+				long[] agg = itemAgg.get(name);
+				p.add(row(name + " ×" + fmt(agg[0]),
+					agg[1] > 0 ? gp(agg[1]) + " gp" : "", accent()));
+				List<String> srcs = itemSrcs.get(name);
+				StringBuilder fromLine = new StringBuilder("from ");
+				for (int s = 0; s < Math.min(3, srcs.size()); s++)
+				{
+					fromLine.append(s > 0 ? " · " : "").append(srcs.get(s));
+				}
+				if (srcs.size() > 3)
+				{
+					fromLine.append(" · +").append(srcs.size() - 3);
+				}
+				p.add(ghostRow(fromLine.toString(), ""));
 				total++;
 			}
-			for (int i = 0; i < Math.min(4 - itemHits.size(), srcHits.size()); i++)
+			for (int i = 0; i < Math.min(2, srcHits.size()); i++)
 			{
 				LocalStore.SourceRow r = srcHits.get(i);
 				p.add(row(r.name, (r.kc > 0 ? fmt(r.kc) + " kc · " : "") + gp(r.value) + " gp", null));

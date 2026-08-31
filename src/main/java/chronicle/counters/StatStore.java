@@ -83,8 +83,16 @@ public class StatStore
 		// hunter
 		"creaturesTrapped", "implingsCaught",
 		// prayer, agility, farming, construction action floors
-		"bonesBuried", "ashesScattered", "agilityObstacles", "farmingActions",
+		// (the sacrificed TOTALS stay client-owned — MagicStatTracker counts
+		// casts; the server mints only the typed per-item keys + the altar's
+		// bonesOffered floor)
+		"bonesBuried", "ashesScattered", "bonesOffered",
+		"agilityObstacles", "farmingActions",
 		"constructionBuilds", "seedsPlanted", "rooftopAgilityLaps", "normalAgilityLaps",
+		// fletching production floors minted server-side
+		"arrowShaftsFletched", "headlessArrowsFletched", "logsFletched",
+		// hunter (server-minted from the harvest xp band)
+		"herbiboarsHarvested",
 		// derived server-side (untaken loot from forwarded events; resourcesGatheredValue
 		// priced from the gathering counters at read time — never a client counter):
 		"untakenLootValue", "untakenLootCount", "resourcesGatheredValue"));
@@ -98,7 +106,8 @@ public class StatStore
 	private static final String[] SERVER_OWNED_FAMILIES = {
 		"LogsChopped", "Caught", "Cooked", "Mined", "Pickpockets", "FailedPickpockets",
 		"LogsBurned", "Runecrafted", "BonesBuried", "AshesScattered", "StallsThieved",
-		"ChestsLooted", "Harvested"};
+		"ChestsLooted", "Harvested", "LogsFletched",
+		"BonesSacrificed", "AshesSacrificed", "BonesOffered"};
 
 	static boolean isServerOwned(String key)
 	{

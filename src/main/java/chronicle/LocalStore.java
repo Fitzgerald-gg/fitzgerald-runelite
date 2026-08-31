@@ -767,6 +767,86 @@ class LocalStore
 	}
 
 	/** The locally-witnessed item bag for one source, unsorted. */
+	/**
+	 * Adopt the cloud's whole per-source item ledger into the local bags, so
+	 * item questions ("how many whips, from where") answer locally. Matched
+	 * by NAME (the server has no item ids): an existing local entry keeps its
+	 * id (sprites) and floors its qty/value at the cloud's; a cloud-only item
+	 * lands as an id-less entry keyed "n:&lt;name&gt;". Idempotent — re-adoption
+	 * is a floor, never a sum.
+	 */
+	void floorSourceBags(java.util.List<chronicle.ChronicleApiClient.SourceItemRow> rows, String rsn)
+	{
+		if (!isReadyFor(rsn) || rows == null)
+		{
+			return;
+		}
+		synchronized (lock)
+		{
+			JsonObject drops = root.has("drops") && root.get("drops").isJsonObject()
+				? root.getAsJsonObject("drops") : new JsonObject();
+			root.add("drops", drops);
+			for (chronicle.ChronicleApiClient.SourceItemRow row : rows)
+			{
+				if (row.source == null || row.source.isEmpty()
+					|| row.name == null || row.name.isEmpty())
+				{
+					continue;
+				}
+				JsonObject src = drops.has(row.source) && drops.get(row.source).isJsonObject()
+					? drops.getAsJsonObject(row.source) : null;
+				if (src == null)
+				{
+					src = new JsonObject();
+					src.addProperty("kc", 0);
+					src.addProperty("loots", 0);
+					src.addProperty("value", 0);
+					src.add("items", new JsonObject());
+					drops.add(row.source, src);
+				}
+				if (!src.has("items") || !src.get("items").isJsonObject())
+				{
+					src.add("items", new JsonObject());
+				}
+				JsonObject items = src.getAsJsonObject("items");
+				// find an existing entry with this name (id-keyed or adopted)
+				JsonObject hit = null;
+				for (java.util.Map.Entry<String, JsonElement> e : items.entrySet())
+				{
+					if (e.getValue().isJsonObject())
+					{
+						JsonObject it = e.getValue().getAsJsonObject();
+						if (it.has("name") && !it.get("name").isJsonNull()
+							&& row.name.equalsIgnoreCase(it.get("name").getAsString()))
+						{
+							hit = it;
+							break;
+						}
+					}
+				}
+				if (hit == null)
+				{
+					hit = new JsonObject();
+					hit.addProperty("id", 0);
+					hit.addProperty("name", row.name);
+					hit.addProperty("qty", 0);
+					hit.addProperty("value", 0);
+					items.add("n:" + row.name.toLowerCase(java.util.Locale.ROOT), hit);
+				}
+				long q = hit.has("qty") ? hit.get("qty").getAsLong() : 0;
+				long v = hit.has("value") ? hit.get("value").getAsLong() : 0;
+				if (row.qty > q)
+				{
+					hit.addProperty("qty", row.qty);
+				}
+				if (row.value > v)
+				{
+					hit.addProperty("value", row.value);
+				}
+			}
+		}
+	}
+
 	java.util.List<BagItem> sourceItems(String source)
 	{
 		java.util.List<BagItem> out = new java.util.ArrayList<>();

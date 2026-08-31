@@ -717,12 +717,104 @@ public class ChronicleApiClient
 	}
 
 	/**
+	 * The cloud's whole daily xp series in ONE response — the server's raw
+	 * snapshot archive via /api/osrs/snapshots. The plugin token unlocks full
+	 * depth (anonymous callers are clamped to a year, the account-age rule).
+	 * Day and Week history work everywhere the archive has days.
+	 */
+	public void fetchServerHistoryDaily(String baseUrl, String rsn, String token,
+		Consumer<java.util.List<WomSnapshot>> onDone)
+	{
+		HttpUrl url = resolve(baseUrl, "api/osrs/snapshots/" + rsn);
+		if (url == null)
+		{
+			onDone.accept(null);
+			return;
+		}
+		Request.Builder rb = new Request.Builder().url(url).get();
+		if (token != null && !token.isEmpty())
+		{
+			rb.header("X-Plugin-Token", token);
+		}
+		http.newCall(rb.build()).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("snapshot series fetch failed", e);
+				onDone.accept(null);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				java.util.List<WomSnapshot> out = null;
+				try (Response r = response)
+				{
+					if (r.code() == 200)
+					{
+						JsonObject o = gson.fromJson(r.body().charStream(), JsonObject.class);
+						out = new java.util.ArrayList<>();
+						if (o != null && o.has("series") && o.get("series").isJsonArray())
+						{
+							for (JsonElement el : o.getAsJsonArray("series"))
+							{
+								if (!el.isJsonObject())
+								{
+									continue;
+								}
+								JsonObject day = el.getAsJsonObject();
+								String date = str(day, "date");
+								if (date.length() < 10 || !day.has("skills")
+									|| !day.get("skills").isJsonObject())
+								{
+									continue;
+								}
+								Map<String, Long> xp = new HashMap<>();
+								for (java.util.Map.Entry<String, JsonElement> sk
+									: day.getAsJsonObject("skills").entrySet())
+								{
+									try
+									{
+										long v = sk.getValue().getAsLong();
+										if (v > 0)
+										{
+											String key = "runecrafting".equals(sk.getKey())
+												? "runecraft" : sk.getKey();
+											xp.put(key, v);
+										}
+									}
+									catch (RuntimeException ignored)
+									{
+										// non-numeric — skip
+									}
+								}
+								if (!xp.isEmpty())
+								{
+									out.add(new WomSnapshot(date.substring(0, 10), xp));
+								}
+							}
+						}
+					}
+				}
+				catch (RuntimeException e)
+				{
+					log.debug("snapshot series parse failed", e);
+				}
+				onDone.accept(out);
+			}
+		});
+	}
+
+	/**
 	 * One-shot import of the cloud's own snapshot archive: the server keeps a
 	 * daily xp file per player back to its first sync (2023 for the reference
 	 * instance) but serves only window DIFFS — so this walks the archive month
 	 * by month through the public gains endpoint and returns each month's
 	 * closing absolutes as {@link WomSnapshot}s, ready for the history stream.
 	 * One probe (period=all) finds the true first month; empty months skip.
+	 * Superseded by {@link #fetchServerHistoryDaily} where the server has the
+	 * snapshots endpoint; kept as the BYO-server fallback.
 	 */
 	public void fetchServerHistory(String baseUrl, String rsn,
 		Consumer<java.util.List<WomSnapshot>> onDone)
@@ -849,6 +941,87 @@ public class ChronicleApiClient
 					log.debug("server history parse failed", e);
 				}
 				fetchServerHistoryWindow(baseUrl, rsn, windows, idx + 1, acc, onDone);
+			}
+		});
+	}
+
+	/** One (source, item, qty, value) ledger row for the whole-bag adoption. */
+	public static final class SourceItemRow
+	{
+		public final String source;
+		public final String name;
+		public final long qty;
+		public final long value;
+
+		SourceItemRow(String source, String name, long qty, long value)
+		{
+			this.source = source;
+			this.name = name;
+			this.qty = qty;
+			this.value = value;
+		}
+	}
+
+	/** Every per-source item row of the cloud ledger in one call — the journal
+	 *  adopts these so item questions answer locally, no drill-time fetches. */
+	public void fetchAllSourceItems(String baseUrl, String rsn,
+		Consumer<java.util.List<SourceItemRow>> onDone)
+	{
+		HttpUrl url = resolve(baseUrl, "api/activity/source-items");
+		if (url == null)
+		{
+			onDone.accept(null);
+			return;
+		}
+		url = url.newBuilder().addQueryParameter("player", rsn).build();
+		Request request = new Request.Builder().url(url).get().build();
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("source-items fetch failed", e);
+				onDone.accept(null);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				java.util.List<SourceItemRow> out = null;
+				try (Response r = response)
+				{
+					if (r.code() == 200)
+					{
+						JsonObject o = gson.fromJson(r.body().charStream(), JsonObject.class);
+						out = new java.util.ArrayList<>();
+						if (o != null && o.has("rows") && o.get("rows").isJsonArray())
+						{
+							for (JsonElement el : o.getAsJsonArray("rows"))
+							{
+								if (!el.isJsonArray() || el.getAsJsonArray().size() < 4)
+								{
+									continue;
+								}
+								com.google.gson.JsonArray a = el.getAsJsonArray();
+								try
+								{
+									out.add(new SourceItemRow(a.get(0).getAsString(),
+										a.get(1).getAsString(), a.get(2).getAsLong(),
+										a.get(3).getAsLong()));
+								}
+								catch (RuntimeException ignored)
+								{
+									// malformed row — skip
+								}
+							}
+						}
+					}
+				}
+				catch (RuntimeException e)
+				{
+					log.debug("source-items parse failed", e);
+				}
+				onDone.accept(out);
 			}
 		});
 	}
