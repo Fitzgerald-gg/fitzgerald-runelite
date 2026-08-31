@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -140,6 +141,31 @@ public class PanelPreviewTest
 				break;
 			}
 		}
+
+		// The task under the glass, and the left-behind lens drilled both ways.
+		set(panel, "detailTask", 0);
+		shoot(panel, out, prefix + "-slayer-task", "SLAYER");
+		set(panel, "detailTask", -1);
+		List<LocalStore.UntakenRow> un = stub.untakenSources();
+		if (!un.isEmpty())
+		{
+			set(panel, "leftBehindSource", un.get(0).name);
+			shoot(panel, out, prefix + "-leftbehind-source", "DROPS");
+			set(panel, "leftBehindSource", null);
+		}
+		List<LocalStore.UntakenRow> ui = stub.untakenItems();
+		if (!ui.isEmpty())
+		{
+			set(panel, "leftBehindItem", ui.get(0).name);
+			shoot(panel, out, prefix + "-leftbehind-item", "DROPS");
+			set(panel, "leftBehindItem", null);
+		}
+		// The pets page, where the journal's own marginalia shows.
+		set(panel, "clogTab", "Other");
+		set(panel, "clogPageSel", "All Pets");
+		shoot(panel, out, prefix + "-log-pets", "LOG");
+		set(panel, "clogPageSel", null);
+		set(panel, "clogTab", "Bosses");
 
 		set(panel, "dropsLeftBehind", true);
 		shoot(panel, out, prefix + "-drops-leftbehind", "DROPS");
@@ -652,6 +678,53 @@ public class PanelPreviewTest
 		{
 			return "Journaling locally — nothing leaves this computer.";
 		}
+
+		@Override
+		java.util.List<LocalStore.PetRow> pets()
+		{
+			return store != null ? store.pets() : new ArrayList<>();
+		}
+
+		@Override
+		java.util.List<LocalStore.BagItem> slayerTaskItems(int index)
+		{
+			return store != null ? store.slayerTaskItems(index) : new ArrayList<>();
+		}
+
+		@Override
+		java.util.List<LocalStore.UntakenRow> slayerTaskMonsters(int index)
+		{
+			return store != null ? store.slayerTaskMonsters(index) : taskMonsters;
+		}
+
+		@Override
+		java.util.List<LocalStore.BagItem> untakenItemsOf(String source)
+		{
+			return store != null ? store.untakenItemsOf(source) : untakenBag;
+		}
+
+		@Override
+		java.util.List<LocalStore.UntakenRow> untakenSourcesOf(String item)
+		{
+			return store != null ? store.untakenSourcesOf(item) : new ArrayList<>();
+		}
+
+		@Override
+		PaceBook.Pace pace(String skill)
+		{
+			// The real engine over the stub's own spine — the render then proves
+			// the sentence, not a hand-made stand-in for it.
+			long xp = 0;
+			if (!history.isEmpty())
+			{
+				Long v = history.lastEntry().getValue().skills.get(skill.toLowerCase(Locale.ROOT));
+				xp = v != null ? v : 0;
+			}
+			return PaceBook.forSkill(history, skill.toLowerCase(Locale.ROOT), xp);
+		}
+
+		java.util.List<LocalStore.UntakenRow> taskMonsters = new ArrayList<>();
+		java.util.List<LocalStore.BagItem> untakenBag = new ArrayList<>();
 
 		@Override
 		String journalWarning()

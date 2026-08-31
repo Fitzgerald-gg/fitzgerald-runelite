@@ -328,6 +328,14 @@ class ChroniclePanel extends PluginPanel
 		{
 			body = buildSourceDetail(detailSource);
 		}
+		else if (detailTask >= 0)
+		{
+			body = buildTaskDetail(detailTask);
+		}
+		else if (leftBehindSource != null || leftBehindItem != null)
+		{
+			body = buildLeftBehindDetail();
+		}
 		else
 		{
 			switch (view)
@@ -672,7 +680,12 @@ class ChroniclePanel extends PluginPanel
 			JPanel sr = row(r.name, fmt(r.qty) + " · " + gp(r.value) + " gp", ACCENT_RED);
 			sr.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
 			final String src = r.name;
-			sr.addMouseListener(clicker(() -> openSource(src)));
+			sr.addMouseListener(clicker(() ->
+			{
+				leftBehindSource = src;
+				leftBehindItem = null;
+				rebuild();
+			}));
 			p.add(sr);
 		}
 		List<LocalStore.UntakenRow> items = plugin.untakenItems();
@@ -691,7 +704,12 @@ class ChroniclePanel extends PluginPanel
 				JPanel ir = row(r.name, "×" + fmt(r.qty) + " · " + gp(r.value) + " gp", ACCENT_RED);
 				ir.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
 				final String itm = r.name;
-				ir.addMouseListener(clicker(() -> openItem(itm)));
+				ir.addMouseListener(clicker(() ->
+				{
+					leftBehindItem = itm;
+					leftBehindSource = null;
+					rebuild();
+				}));
 				p.add(ir);
 			}
 		}
@@ -705,6 +723,11 @@ class ChroniclePanel extends PluginPanel
 	// The journey fetches once per session on first open; null = not yet asked.
 	private ChronicleApiClient.SlayerJourney journeyCache;
 	private boolean journeyFetching;
+	// Index into the journey (newest-first) of the task under the glass, or -1.
+	private int detailTask = -1;
+	// The Left behind lens drilled from one end or the other; both null = the list.
+	private String leftBehindSource;
+	private String leftBehindItem;
 
 	/**
 	 * Drop every view built from ONE account's journal. Called when a different
@@ -715,6 +738,9 @@ class ChroniclePanel extends PluginPanel
 	{
 		journeyCache = null;
 		journeyFetching = false;
+		detailTask = -1;
+		leftBehindSource = null;
+		leftBehindItem = null;
 		grindsCache = null;
 		grindsFetching = false;
 		historySpine = null;
@@ -838,6 +864,209 @@ class ChroniclePanel extends PluginPanel
 		return p;
 	}
 
+	/**
+	 * One task, on its own: what it was made of and what it dropped. A task is
+	 * not the same question as the monster's lifetime bag — this assignment's
+	 * 104 blue dragons are a different story from every blue dragon ever killed
+	 * — so the all-time view is one button away rather than the default.
+	 */
+	private JPanel buildTaskDetail(int index)
+	{
+		JPanel p = column();
+		JPanel back = row("< Back", "", null);
+		JLabel bl = (JLabel) ((BorderLayout) back.getLayout()).getLayoutComponent(BorderLayout.CENTER);
+		bl.setFont(FontManager.getRunescapeSmallFont());
+		bl.setForeground(accent());
+		back.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+		back.addMouseListener(clicker(() ->
+		{
+			detailTask = -1;
+			rebuild();
+		}));
+		p.add(back);
+		p.add(vgap(4));
+		ChronicleApiClient.SlayerJourney j = journeyCache;
+		ChronicleApiClient.SlayerTask t = j != null && index >= 0 && index < j.tasks.size()
+			? j.tasks.get(index) : null;
+		if (t == null)
+		{
+			p.add(note("That task is no longer in the journal."));
+			return p;
+		}
+		JPanel head = card(t.task.toUpperCase(Locale.ROOT));
+		String kills = t.inProgress && t.assignment > t.kills
+			? fmt(t.kills) + " / " + fmt(t.assignment) : fmt(t.kills);
+		head.add(row("Kills logged", kills, accent()));
+		if (t.noLootKills > 0)
+		{
+			head.add(row("Killed without loot", fmt(t.noLootKills), null));
+		}
+		head.add(row("The take", gp(t.totalValue) + " gp", null));
+		if (t.ts > 0)
+		{
+			head.add(row(t.inProgress ? "Started" : "Finished",
+				TASK_DAY.format(Instant.ofEpochMilli((long) (t.ts * 1000))), null));
+		}
+		p.add(head);
+		p.add(vgap(6));
+
+		// What the assignment was actually made of. An assignment is rarely one
+		// creature: brutals, superiors and a boss detour all count toward it.
+		List<LocalStore.UntakenRow> monsters = plugin.slayerTaskMonsters(index);
+		if (!monsters.isEmpty())
+		{
+			p.add(group("Killed"));
+			for (LocalStore.UntakenRow m : monsters)
+			{
+				JPanel r = row(m.name, "×" + fmt(m.qty), null);
+				r.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+				final String who = m.name;
+				r.addMouseListener(clicker(() -> openSourceLoose(who)));
+				p.add(r);
+			}
+			p.add(vgap(6));
+		}
+
+		List<LocalStore.BagItem> bag = plugin.slayerTaskItems(index);
+		if (bag.isEmpty())
+		{
+			p.add(note("No loot recorded against this task."));
+		}
+		else
+		{
+			p.add(group("Loot from this task"));
+			for (LocalStore.BagItem it : bag)
+			{
+				JPanel r = row(it.name + (it.qty > 1 ? " ×" + fmt(it.qty) : ""),
+					gp(it.value) + " gp", null);
+				r.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+				final String item = it.name;
+				r.addMouseListener(clicker(() -> openItem(item)));
+				p.add(r);
+			}
+		}
+		p.add(vgap(8));
+		JButton all = new JButton("All kills of " + t.task);
+		all.setAlignmentX(Component.LEFT_ALIGNMENT);
+		all.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+		final String taskName = t.task;
+		all.addActionListener(e ->
+		{
+			detailTask = -1;
+			openSourceLoose(taskName);
+		});
+		p.add(all);
+		return p;
+	}
+
+	/**
+	 * The Left behind lens, drilled. Deliberately NOT the Drops drill: that one
+	 * answers "what did this source give me", this one answers "what did I
+	 * leave on its floor". Same shapes, opposite questions — which is the whole
+	 * reason the two tabs exist.
+	 */
+	private JPanel buildLeftBehindDetail()
+	{
+		JPanel p = column();
+		JPanel back = row("< Back", "", null);
+		JLabel bl = (JLabel) ((BorderLayout) back.getLayout()).getLayoutComponent(BorderLayout.CENTER);
+		bl.setFont(FontManager.getRunescapeSmallFont());
+		bl.setForeground(accent());
+		back.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+		back.addMouseListener(clicker(() ->
+		{
+			leftBehindSource = null;
+			leftBehindItem = null;
+			rebuild();
+		}));
+		p.add(back);
+		p.add(vgap(4));
+
+		if (leftBehindSource != null)
+		{
+			List<LocalStore.BagItem> bag = plugin.untakenItemsOf(leftBehindSource);
+			// The headline is the source's own lifetime tally, NOT the sum of the
+			// itemised rows: itemisation started later than the counting did, so
+			// summing the list here would report a long-standing total as zero.
+			long qty = 0;
+			long val = 0;
+			for (LocalStore.UntakenRow r : plugin.untakenSources())
+			{
+				if (r.name.equals(leftBehindSource))
+				{
+					qty = r.qty;
+					val = r.value;
+					break;
+				}
+			}
+			JPanel head = card(leftBehindSource.toUpperCase(Locale.ROOT));
+			head.add(row("Left on the floor", fmt(qty) + " items", ACCENT_RED));
+			head.add(row("Worth", gp(val) + " gp", null));
+			p.add(head);
+			p.add(vgap(6));
+			if (bag.isEmpty())
+			{
+				p.add(note("The tally above predates the itemised record — what this "
+					+ "source leaves behind is listed here from now on."));
+				return p;
+			}
+			p.add(group("Declined"));
+			for (LocalStore.BagItem b : bag)
+			{
+				JPanel r = row(b.name + (b.qty > 1 ? " ×" + fmt(b.qty) : ""),
+					gp(b.value) + " gp", ACCENT_RED);
+				r.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+				final String itm = b.name;
+				r.addMouseListener(clicker(() ->
+				{
+					leftBehindItem = itm;
+					leftBehindSource = null;
+					rebuild();
+				}));
+				p.add(r);
+			}
+			return p;
+		}
+
+		List<LocalStore.UntakenRow> sources = plugin.untakenSourcesOf(leftBehindItem);
+		long qty = 0;
+		long val = 0;
+		for (LocalStore.UntakenRow r : plugin.untakenItems())
+		{
+			if (r.name.equals(leftBehindItem))
+			{
+				qty = r.qty;
+				val = r.value;
+				break;
+			}
+		}
+		JPanel head = card(leftBehindItem.toUpperCase(Locale.ROOT));
+		head.add(row("Left behind", "×" + fmt(qty), ACCENT_RED));
+		head.add(row("Worth", gp(val) + " gp", null));
+		p.add(head);
+		p.add(vgap(6));
+		if (sources.isEmpty())
+		{
+			p.add(note("No source itemised for this yet."));
+			return p;
+		}
+		p.add(group("Left where"));
+		for (LocalStore.UntakenRow r : sources)
+		{
+			JPanel row = row(r.name, "×" + fmt(r.qty) + " · " + gp(r.value) + " gp", ACCENT_RED);
+			row.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+			final String src = r.name;
+			row.addMouseListener(clicker(() ->
+			{
+				leftBehindSource = src;
+				leftBehindItem = null;
+				rebuild();
+			}));
+			p.add(row);
+		}
+		return p;
+	}
+
 	private void addJourney(JPanel p, ChronicleApiClient.SlayerJourney j)
 	{
 		if (j.tasks.isEmpty() && j.completedTasks == 0)
@@ -865,8 +1094,12 @@ class ChroniclePanel extends PluginPanel
 			// not a suffix — text ate the card's width. The card is a doorway:
 			// the task's monster view holds everything it ever dropped.
 			card.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
-			final String taskName = t.task;
-			card.addMouseListener(clicker(() -> openSourceLoose(taskName)));
+			final int at = mounted - 1;
+			card.addMouseListener(clicker(() ->
+			{
+				detailTask = at;
+				rebuild();
+			}));
 			card.add(row(t.task, t.totalValue > 0 ? gp(t.totalValue) + " gp" : "",
 				accent(), t.inProgress));
 			String kills = t.inProgress && t.assignment > t.kills
@@ -1328,17 +1561,53 @@ class ChroniclePanel extends PluginPanel
 			if (open)
 			{
 				JPanel drill = cardPlain();
+				// The pets pages are the one place the log alone undersells what
+				// the journal knows: it can say WHICH pets, but the journal
+				// remembers where each one came from and at what kill count. A
+				// dated line beside the name is the whole difference between a
+				// checklist and a record.
+				Map<String, LocalStore.PetRow> known = page.toLowerCase(Locale.ROOT).contains("pet")
+					? petsByName() : java.util.Collections.emptyMap();
 				for (int i = 0; i < slots.size(); i++)
 				{
+					LocalStore.PetRow pet = known.get(slots.get(i).toLowerCase(Locale.ROOT));
+					// Watching it drop is proof of ownership, and the journal saw
+					// that before any scrape of the log did — so a pet the record
+					// holds lights even if the page it lives on was never opened.
 					// the in-game log's own idiom: green owned, red missing
 					drill.add(row(slots.get(i), "",
-						lit[i] ? ACCENT_SESSION : ACCENT_RED, true));
+						lit[i] || pet != null ? ACCENT_SESSION : ACCENT_RED, true));
+					if (pet != null)
+					{
+						StringBuilder line = new StringBuilder();
+						if (pet.source != null && !pet.source.isEmpty())
+						{
+							line.append(pet.source);
+							if (pet.kc > 0)
+							{
+								line.append(", kc ").append(fmt(pet.kc));
+							}
+						}
+						drill.add(ghostRow(line.toString(), pet.ts > 0
+							? TASK_DAY.format(Instant.ofEpochMilli(pet.ts)) : ""));
+					}
 				}
 				p.add(drill);
 				p.add(vgap(3));
 			}
 		}
 		return p;
+	}
+
+	/** The journal's pet record, keyed for slot lookup. */
+	private Map<String, LocalStore.PetRow> petsByName()
+	{
+		Map<String, LocalStore.PetRow> out = new LinkedHashMap<>();
+		for (LocalStore.PetRow r : plugin.pets())
+		{
+			out.putIfAbsent(r.name.toLowerCase(Locale.ROOT), r);
+		}
+		return out;
 	}
 
 	/**
@@ -1434,6 +1703,49 @@ class ChroniclePanel extends PluginPanel
 
 	// Sections the player has clicked open this session; everything foldable
 	// starts folded, the clog browser's own idiom. Keyed family:section.
+	/**
+	 * One sentence of pace for a skill, or the date it last moved. Never a
+	 * calendar target: "lands on the 22nd" quietly assumes you train every day,
+	 * which is the same lie the naive average tells. Days of PLAY is true
+	 * however you space them.
+	 */
+	private void addPaceLine(JPanel p, String section)
+	{
+		PaceBook.Pace pace;
+		try
+		{
+			pace = plugin.pace(section);
+		}
+		catch (RuntimeException e)
+		{
+			return;   // not a skill section
+		}
+		if (pace == null)
+		{
+			return;
+		}
+		if (pace.hasHorizon())
+		{
+			String target = pace.targetLevel != null
+				? String.valueOf(pace.targetLevel) : "200m";
+			p.add(ghostRow(target + " in " + fmt(pace.daysOfPlay)
+				+ (pace.daysOfPlay == 1 ? " day of play" : " days of play"),
+				gp((long) pace.xpPerActiveDay) + "/day"));
+			// How thin the figure is only needs saying when it IS thin; a pace
+			// standing on a full week speaks for itself.
+			if (pace.activeDays < 3)
+			{
+				p.add(ghostRow("measured over " + pace.activeDays
+					+ (pace.activeDays == 1 ? " day" : " days"), ""));
+			}
+		}
+		else if (pace.dormant() && pace.lastActive != null)
+		{
+			p.add(ghostRow("last moved " + pace.lastActive.format(
+				java.time.format.DateTimeFormatter.ofPattern("d MMM yy", Locale.UK)), ""));
+		}
+	}
+
 	private final java.util.Set<String> statsExpanded = new java.util.HashSet<>();
 
 	// Server-priced gp per consumable key, refreshed per rebuild — Food and
@@ -1598,6 +1910,15 @@ class ChroniclePanel extends PluginPanel
 			p.add(head);
 			if (open)
 			{
+				// The pace line, for a skill section that is one named skill. It
+				// is measured over the days that skill ACTUALLY moved, so a long
+				// idle stretch never dilutes it — and it says what it is standing
+				// on, because a figure built on two days should not read with the
+				// authority of one built on seven.
+				if (statsFamily.equals("Skilling"))
+				{
+					addPaceLine(p, sec);
+				}
 				boolean nested = statsFamily.equals("Skilling")
 					&& addCraftNested(p, sec, rows, counters);
 				if (!nested)

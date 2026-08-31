@@ -1017,6 +1017,47 @@ public class ChroniclePlugin extends Plugin
 		return Math.max(clogCapture.availableCount(), localStore.clogFraction()[1]);
 	}
 
+	java.util.List<LocalStore.BagItem> untakenItemsOf(String source)
+	{
+		return localStore.untakenItemsOf(source);
+	}
+
+	java.util.List<LocalStore.UntakenRow> untakenSourcesOf(String item)
+	{
+		return localStore.untakenSourcesOf(item);
+	}
+
+	java.util.List<LocalStore.BagItem> slayerTaskItems(int index)
+	{
+		return localStore.slayerTaskItems(index);
+	}
+
+	java.util.List<LocalStore.UntakenRow> slayerTaskMonsters(int index)
+	{
+		return localStore.slayerTaskMonsters(index);
+	}
+
+	java.util.List<LocalStore.PetRow> pets()
+	{
+		return localStore.pets();
+	}
+
+	/** The pace of a skill, measured over the days it actually moved. */
+	PaceBook.Pace pace(String skill)
+	{
+		java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> spine = historyBaselines();
+		long xp = 0;
+		try
+		{
+			xp = client.getSkillExperience(Skill.valueOf(skill.toUpperCase(java.util.Locale.ROOT)));
+		}
+		catch (RuntimeException ignored)
+		{
+			// not a real skill name, or the client is unreadable — no pace
+		}
+		return PaceBook.forSkill(spine, skill, xp);
+	}
+
 	java.util.List<LocalStore.UntakenRow> untakenSources()
 	{
 		return localStore.untakenSources();

@@ -1921,6 +1921,177 @@ class LocalStore
 		root.add(name, cur);
 	}
 
+	/** Items a single source was left holding, richest first (the Left behind
+	 *  lens drilled from the source end). */
+	java.util.List<BagItem> untakenItemsOf(String source)
+	{
+		java.util.List<BagItem> out = new java.util.ArrayList<>();
+		synchronized (lock)
+		{
+			if (root == null || !root.has("untaken_pairs") || !root.get("untaken_pairs").isJsonObject())
+			{
+				return out;
+			}
+			JsonObject pairs = root.getAsJsonObject("untaken_pairs");
+			if (!pairs.has(source) || !pairs.get(source).isJsonObject())
+			{
+				return out;
+			}
+			for (java.util.Map.Entry<String, JsonElement> e : pairs.getAsJsonObject(source).entrySet())
+			{
+				JsonObject r = e.getValue().getAsJsonObject();
+				out.add(new BagItem(r.has("id") ? r.get("id").getAsInt() : -1, e.getKey(),
+					asLong(r.get("qty")), asLong(r.get("value"))));
+			}
+		}
+		out.sort((a, b) -> Long.compare(b.value, a.value));
+		return out;
+	}
+
+	/** Sources that left a given item on the ground, most first (the same lens
+	 *  drilled from the item end). */
+	java.util.List<UntakenRow> untakenSourcesOf(String item)
+	{
+		java.util.List<UntakenRow> out = new java.util.ArrayList<>();
+		synchronized (lock)
+		{
+			if (root == null || !root.has("untaken_pairs") || !root.get("untaken_pairs").isJsonObject())
+			{
+				return out;
+			}
+			for (java.util.Map.Entry<String, JsonElement> e
+				: root.getAsJsonObject("untaken_pairs").entrySet())
+			{
+				if (!e.getValue().isJsonObject())
+				{
+					continue;
+				}
+				JsonObject bag = e.getValue().getAsJsonObject();
+				if (bag.has(item) && bag.get(item).isJsonObject())
+				{
+					JsonObject r = bag.getAsJsonObject(item);
+					out.add(new UntakenRow(e.getKey(), asLong(r.get("qty")), asLong(r.get("value"))));
+				}
+			}
+		}
+		out.sort((a, b) -> Long.compare(b.value, a.value));
+		return out;
+	}
+
+	/** One task segment's own loot, richest first. */
+	java.util.List<BagItem> slayerTaskItems(int index)
+	{
+		java.util.List<BagItem> out = new java.util.ArrayList<>();
+		JsonObject seg = segmentAt(index);
+		if (seg != null && seg.has("items") && seg.get("items").isJsonObject())
+		{
+			for (java.util.Map.Entry<String, JsonElement> e : seg.getAsJsonObject("items").entrySet())
+			{
+				JsonObject r = e.getValue().getAsJsonObject();
+				out.add(new BagItem(r.has("id") ? r.get("id").getAsInt() : -1, e.getKey(),
+					asLong(r.get("qty")), asLong(r.get("value"))));
+			}
+		}
+		out.sort((a, b) -> Long.compare(b.value, a.value));
+		return out;
+	}
+
+	/** What a task was actually made of: {monster: kills}, most killed first. */
+	java.util.List<UntakenRow> slayerTaskMonsters(int index)
+	{
+		java.util.List<UntakenRow> out = new java.util.ArrayList<>();
+		JsonObject seg = segmentAt(index);
+		if (seg != null && seg.has("monsters") && seg.get("monsters").isJsonObject())
+		{
+			for (java.util.Map.Entry<String, JsonElement> e : seg.getAsJsonObject("monsters").entrySet())
+			{
+				out.add(new UntakenRow(e.getKey(), asLong(e.getValue()), 0));
+			}
+		}
+		out.sort((a, b) -> Long.compare(b.qty, a.qty));
+		return out;
+	}
+
+	/** The task segment the panel's journey list calls {@code index} — the
+	 *  journey is served newest-first, the store keeps them oldest-first. */
+	private JsonObject segmentAt(int index)
+	{
+		synchronized (lock)
+		{
+			if (root == null || !root.has("slayer") || !root.get("slayer").isJsonObject())
+			{
+				return null;
+			}
+			JsonObject sl = root.getAsJsonObject("slayer");
+			if (!sl.has("tasks") || !sl.get("tasks").isJsonArray())
+			{
+				return null;
+			}
+			JsonArray tasks = sl.getAsJsonArray("tasks");
+			int at = tasks.size() - 1 - index;
+			return at >= 0 && at < tasks.size() && tasks.get(at).isJsonObject()
+				? tasks.get(at).getAsJsonObject() : null;
+		}
+	}
+
+	/** Pets the journal has seen drop: name, source and the kc at the moment. */
+	java.util.List<PetRow> pets()
+	{
+		java.util.List<PetRow> out = new java.util.ArrayList<>();
+		synchronized (lock)
+		{
+			if (root == null || !root.has("feed") || !root.get("feed").isJsonArray())
+			{
+				return out;
+			}
+			java.util.Set<String> seen = new java.util.HashSet<>();
+			JsonArray feed = root.getAsJsonArray("feed");
+			for (int i = feed.size() - 1; i >= 0; i--)
+			{
+				if (!feed.get(i).isJsonObject())
+				{
+					continue;
+				}
+				JsonObject e = feed.get(i).getAsJsonObject();
+				if (!"PET".equals(e.has("type") ? e.get("type").getAsString() : "")
+					|| !e.has("data") || !e.get("data").isJsonObject())
+				{
+					continue;
+				}
+				JsonObject d = e.getAsJsonObject("data");
+				String name = d.has("petName") && !d.get("petName").isJsonNull()
+					? d.get("petName").getAsString() : null;
+				if (name == null || name.isEmpty() || !seen.add(name.toLowerCase(java.util.Locale.ROOT)))
+				{
+					continue;
+				}
+				out.add(new PetRow(name,
+					d.has("source") && !d.get("source").isJsonNull() ? d.get("source").getAsString() : null,
+					d.has("killCount") && !d.get("killCount").isJsonNull() ? asLong(d.get("killCount")) : 0,
+					e.has("ts") ? asLong(e.get("ts")) : 0));
+			}
+		}
+		out.sort((a, b) -> Long.compare(b.ts, a.ts));
+		return out;
+	}
+
+	/** One pet as the journal remembers it. */
+	static final class PetRow
+	{
+		final String name;
+		final String source;
+		final long kc;
+		final long ts;
+
+		PetRow(String name, String source, long kc, long ts)
+		{
+			this.name = name;
+			this.source = source;
+			this.kc = kc;
+			this.ts = ts;
+		}
+	}
+
 	/** The journal's stored collection log, deep-copied for the panel. */
 	JsonObject clogSnapshot()
 	{
