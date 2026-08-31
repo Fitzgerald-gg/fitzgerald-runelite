@@ -134,11 +134,20 @@ public class PanelPreviewTest
 			String slug = fam.toLowerCase().replaceAll("[^a-z]+", "-");
 			shoot(panel, out, prefix + "-stats-" + slug, "STATS", "LIFETIME");
 		}
-		// one craft opened, to see rows + the ghost "Other" reconciliation
+		// one craft opened, to see rows + the ghost "Other" reconciliation —
+		// Prayer additionally opens its verb folds (the second drill level)
 		set(panel, "statsFamily", "Skilling");
 		expandSection(panel, "Skilling:Cooking");
 		expandSection(panel, "Skilling:Prayer");
+		expandSection(panel, "Skilling:Prayer:AshesScattered");
+		expandSection(panel, "Skilling:Prayer:BonesBuried");
 		shoot(panel, out, prefix + "-stats-skilling-open", "STATS", "LIFETIME");
+		collapseAll(panel);
+		// the roads: Teleports fold open with Destinations nested inside
+		set(panel, "statsFamily", "Ledger & Roads");
+		expandSection(panel, "Ledger & Roads:Teleports");
+		expandSection(panel, "Ledger & Roads:Destinations");
+		shoot(panel, out, prefix + "-stats-roads-open", "STATS", "LIFETIME");
 		collapseAll(panel);
 		set(panel, "statsFamily", chronicle.panel.StatRegistry.FAMILIES[0]);
 		shoot(panel, out, prefix + "-stats-session", "STATS", "SESSION");

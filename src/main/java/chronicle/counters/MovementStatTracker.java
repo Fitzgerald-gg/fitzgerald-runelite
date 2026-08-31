@@ -16,7 +16,6 @@ import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.MenuOptionClicked;
-import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.util.Text;
@@ -38,9 +37,9 @@ import static chronicle.counters.StatKeys.*;
  * that move you a long way in one tick (login, world hop, entering an instance, a
  * staircase) are never miscounted: none of them is preceded by such a click.
  *
- * <p>Fairy rings and spirit trees keep their own dedicated signals (an animation and a
- * dialog): they credit directly and never arm the click gate, so the jump path leaves
- * them alone.
+ * <p>Fairy rings keep their own dedicated signal (the ring animation): they credit
+ * directly, clearing any pending so a stale click can't also ride the landing.
+ * Spirit trees arm the ordinary click gate off their "Travel" option.
  */
 public class MovementStatTracker implements StatTracker
 {
@@ -49,8 +48,6 @@ public class MovementStatTracker implements StatTracker
 	private static final int RUN_ENABLED_SPRITE_ID = 1070;
 
 	// Spirit-tree confirmation dialog: interface group and the chat-line child.
-	private static final int SPIRIT_TREE_GROUP = 193;
-	private static final int SPIRIT_TREE_MESSAGE_CHILD = 2;
 
 	// Fairy rings announce themselves with a distinctive animation, so they are
 	// credited on sight rather than through the click-gated jump path.
@@ -153,6 +150,7 @@ public class MovementStatTracker implements StatTracker
 		{"house on the hill", TELEPORTS_FOSSIL_ISLAND},   // before "house" (the POH)
 		{"house", TELEPORTS_HOUSE},
 		{"poh", TELEPORTS_HOUSE},
+		{"spirit tree", TELEPORTS_SPIRIT_TREE},
 		// Skillcapes. The Fishing cape names its place in the option ("Otto's Grotto",
 		// or "Fishing Guild" handled above); the rest fire a bare "Teleport", so match
 		// the cape NAME in the target. No cape name is contained in another, and none
@@ -260,6 +258,16 @@ public class MovementStatTracker implements StatTracker
 		String optLow = option.toLowerCase();
 		String tgtLow = Text.removeTags(target).toLowerCase();
 
+		// A deliberate walk means the last teleport-ish click is history. A
+		// pending that survives the player visibly doing something else gets
+		// consumed by the NEXT region hop — a cancelled cast followed by a
+		// spirit-tree ride booked "+1 by spell" this way.
+		if (optLow.equals("walk here"))
+		{
+			clearPending();
+			return;
+		}
+
 		// A click on the nexus teleport-list interface (ROWS1/ROWS2 are click hitboxes
 		// with no text; the destination NAME sits at the same index in the parallel
 		// TEXT1 list, prefixed with its keybind e.g. "5 :  Camelot"), so read
@@ -347,6 +355,31 @@ public class MovementStatTracker implements StatTracker
 			return;
 		}
 
+		// The bare house portal in the world (option "Enter"/"Home"/"Build mode",
+		// target just "Portal") teleports home but names no place, so the gate
+		// above can't see it — these entries counted NOTHING. Outside only: the
+		// identical click INSIDE the house is the exit, bound elsewhere.
+		if (tgtLow.equals("portal")
+			&& (optLow.equals("enter") || optLow.equals("home")
+			|| optLow.equals("build mode") || optLow.equals("friend's house"))
+			&& !client.isInInstancedRegion())
+		{
+			armTeleport("house", false);
+			return;
+		}
+
+		// Spirit trees say "tele" nowhere — the option is "Travel". The old
+		// confirmation-dialog detector matched a dialog the game no longer
+		// shows, which froze the counter AND let hops land on stale cast
+		// pendings instead ("spirit tree travel reads as by-spell").
+		if ((tgtLow.contains("spirit tree")
+			&& (optLow.startsWith("travel") || optLow.startsWith("last-destination")))
+			|| (tgtLow.contains("spiritual fairy tree") && optLow.startsWith("travel")))
+		{
+			armTeleport("spirit tree", false);
+			return;
+		}
+
 		// Any spell / tab / cape / item teleport. The destination can sit on EITHER the
 		// option (a spell's "Cast <place>", the cape's "Tele to POH") or the target (a
 		// tab's "<place> teleport", a cape's name), so arm with both joined and let the
@@ -364,6 +397,13 @@ public class MovementStatTracker implements StatTracker
 		// doubles as the destination label where the table knows it.
 		if (isTeleportJewellery(tgtLow) && !isWearHandling(optLow))
 		{
+			if (optLow.startsWith("rub"))
+			{
+				// The real destination arrives as a chat-menu row click just
+				// after; remember the rub so that row is recognised. The arm
+				// below stands in if the row click is missed.
+				rubTick = client.getTickCount();
+			}
 			armTeleport(optLow + " " + tgtLow, false);
 			pendingMethod = TELEPORTS_VIA_JEWELLERY;
 			return;
@@ -494,24 +534,6 @@ public class MovementStatTracker implements StatTracker
 	}
 
 	@Override
-	public void onWidgetLoaded(WidgetLoaded event)
-	{
-		if (event.getGroupId() != SPIRIT_TREE_GROUP)
-		{
-			return;
-		}
-
-		// The spirit-tree menu shares its group with other dialogs, so confirm via the
-		// flavour text before crediting the travel.
-		Widget message = client.getWidget(SPIRIT_TREE_GROUP, SPIRIT_TREE_MESSAGE_CHILD);
-		if (message != null && message.getText().contains("place your hands on the dry"))
-		{
-			statStore.incrementStat(TELEPORTS_TOTAL);   // every teleport bumps the total
-			statStore.incrementStat(TELEPORTS_SPIRIT_TREE);
-		}
-	}
-
-	@Override
 	public void onGameTick(GameTick event)
 	{
 		Player local = client.getLocalPlayer();
@@ -548,11 +570,16 @@ public class MovementStatTracker implements StatTracker
 		// attached to a later movement.
 		if (pendingTick >= 0 && client.getTickCount() - pendingTick > TELEPORT_PENDING_WINDOW_TICKS)
 		{
-			pendingLabel = null;
-			pendingTick = -1;
-			pendingFromNexus = false;
-			pendingMethod = null;
+			clearPending();
 		}
+	}
+
+	private void clearPending()
+	{
+		pendingLabel = null;
+		pendingTick = -1;
+		pendingFromNexus = false;
+		pendingMethod = null;
 	}
 
 	private boolean teleportPending()
@@ -586,10 +613,7 @@ public class MovementStatTracker implements StatTracker
 		{
 			statStore.incrementStat(pendingMethod);   // the means, beside the place
 		}
-		pendingLabel = null;
-		pendingTick = -1;
-		pendingFromNexus = false;
-		pendingMethod = null;
+		clearPending();
 	}
 
 	@Override
@@ -620,6 +644,9 @@ public class MovementStatTracker implements StatTracker
 		{
 			statStore.incrementStat(TELEPORTS_TOTAL);   // every teleport bumps the total
 			statStore.incrementStat(TELEPORTS_FAIRY_RING);
+			// The ring IS the journey — a stale pending (a cancelled cast, an
+			// unrelated click) must not also ride this landing.
+			clearPending();
 		}
 	}
 

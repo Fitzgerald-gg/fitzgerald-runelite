@@ -552,6 +552,15 @@ public class ChroniclePlugin extends Plugin
 		{
 			return;
 		}
+		// Two writers on one account corrupt the counters (each seeds on top
+		// of the other's pushes) — refuse to be the second one.
+		if (legacyPluginRunning())
+		{
+			statusLine = "The old Fitzgerald plugin is still enabled — disable it; "
+				+ "two writers corrupt the counters.";
+			refreshPanel();
+			return;
+		}
 		if (client.getGameState() != GameState.LOGGED_IN)
 		{
 			return;
@@ -662,15 +671,14 @@ public class ChroniclePlugin extends Plugin
 				refreshPanel();
 				return;   // stay unseeded; the backoff retry re-enters here
 			}
-			if (reseedFloor)
-			{
-				statStore.seedFloor(base);
-				reseedFloor = false;
-			}
-			else
-			{
-				statStore.seedAdditive(base);
-			}
+			// Floor, never add: with a second writer on the same account (a
+			// stray second install, another computer mid-session) additive
+			// seeding stacks the server's copy of events this client also
+			// counted — a one-way ratchet minting phantom increments every
+			// seed/push interleaving. Flooring costs at most the few seconds
+			// counted before this callback returned.
+			statStore.seedFloor(base);
+			reseedFloor = false;
 			// The journal adopts the server's history too (per-key floor): a fresh
 			// install on an account with a cloud record starts complete instead of
 			// from zero, and two computers converge through the server's union.
@@ -938,6 +946,21 @@ public class ChroniclePlugin extends Plugin
 			return;
 		}
 		clientThread.invoke(this::pushCurrent);
+	}
+
+	/** True while the Plugin Hub ancestor of this plugin is ALSO enabled —
+	 *  the dual-writer state that ratchets the cloud counters upward. */
+	private boolean legacyPluginRunning()
+	{
+		for (net.runelite.client.plugins.Plugin p : pluginManager.getPlugins())
+		{
+			if (p != this && p.getClass().getName().startsWith("gg.fitzgerald.")
+				&& pluginManager.isPluginEnabled(p))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	String serverBaseUrl()
@@ -1212,10 +1235,14 @@ public class ChroniclePlugin extends Plugin
 		}
 		localStore.setCharacter(name, accountTypeTag(client.getVarbitValue(VarbitID.IRONMAN)),
 			harvestSkills(), lp.getCombatLevel(), clogCapture.snapshot(), achievementSync.snapshot());
-		// The client-computed counters (this session's totals) fold into the lifetime
-		// trackers. The server-derived per-resource skilling counters aren't available
-		// offline, so they don't appear in local mode.
-		localStore.setTrackers(harvest(), name);
+		// The client-computed counters fold into the lifetime trackers — as the
+		// SESSION view, never raw absolutes: harvest() still contains the seeded
+		// server share, and writing it here stacked base+seeded+delta into the
+		// journal until the later setTrackers pass corrected it (a transient
+		// doubling any read in between could see). The server-derived
+		// per-resource skilling counters aren't available offline, so they
+		// don't appear in local mode.
+		localStore.setTrackers(sessionView(), name);
 	}
 
 	/** Local-mode equivalent of a push: refresh the sheet, then rewrite the page. */

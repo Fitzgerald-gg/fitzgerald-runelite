@@ -90,6 +90,7 @@ class ChroniclePanel extends PluginPanel
 	// driven from onSelectEvent — handing it `display` makes the group swap in
 	// each tab's content component itself, which NPEs on our contentless tabs.
 	private final MaterialTabGroup tabGroup = new MaterialTabGroup();
+	private final Map<View, MaterialTab> tabByView = new java.util.EnumMap<>(View.class);
 	private final IconTextField searchField = new IconTextField();
 	private final JLabel scopeLifetime = new JLabel("Lifetime", JLabel.CENTER);
 	private final JLabel scopeSession = new JLabel("Session", JLabel.CENTER);
@@ -145,6 +146,16 @@ class ChroniclePanel extends PluginPanel
 		searchField.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
 		searchDebounce = new Timer(150, e -> onSearchChanged());
 		searchDebounce.setRepeats(false);
+		// Enter opens the view the first result group belongs to — selecting
+		// its tab clears the query and rebuilds through the normal path.
+		searchField.addActionListener(e ->
+		{
+			MaterialTab target = searchJump != null ? tabByView.get(searchJump) : null;
+			if (!searchQuery().isEmpty() && target != null)
+			{
+				tabGroup.select(target);
+			}
+		});
 		searchField.getDocument().addDocumentListener(new DocumentListener()
 		{
 			@Override
@@ -216,6 +227,7 @@ class ChroniclePanel extends PluginPanel
 			return true;
 		});
 		tabGroup.addTab(tab);
+		tabByView.put(target, tab);
 		if (target == View.HOME)
 		{
 			tabGroup.select(tab);
@@ -1036,6 +1048,16 @@ class ChroniclePanel extends PluginPanel
 			return p;
 		}
 
+		// Destinations nest INSIDE the Teleports fold, not as a sibling.
+		List<Map.Entry<String, Long>> destRows = statsFamily.equals("Ledger & Roads")
+			? rowsBySection.remove("Destinations") : null;
+		if (destRows != null && !rowsBySection.containsKey("Teleports")
+			&& !floorTotals.containsKey("Teleports"))
+		{
+			rowsBySection.put("Destinations", destRows);   // no host fold — stand alone
+			destRows = null;
+		}
+
 		List<String> order = sectionOrder(rowsBySection, floorTotals);
 		for (String sec : order)
 		{
@@ -1071,6 +1093,12 @@ class ChroniclePanel extends PluginPanel
 				}
 			}
 			long ghost = anyTyped && floor - typedSum >= 1 ? floor - typedSum : 0;
+			if (sec.equals("Teleports") && floor - shown >= 1)
+			{
+				// Means aren't "typed" in the craft sense, but the floor still
+				// reconciles: unclassified journeys surface as "Other means".
+				ghost = floor - shown;
+			}
 			long total = Math.max(shown + ghost, floor);
 
 			boolean foldable = statsFamily.equals("Skilling")
@@ -1107,19 +1135,28 @@ class ChroniclePanel extends PluginPanel
 			p.add(head);
 			if (open)
 			{
-				for (Map.Entry<String, Long> e : rows)
+				boolean nested = statsFamily.equals("Skilling")
+					&& addCraftNested(p, sec, rows, counters);
+				if (!nested)
 				{
-					p.add(row(StatRegistry.rowLabel(e.getKey()), value(e), null));
+					for (Map.Entry<String, Long> e : rows)
+					{
+						p.add(row(StatRegistry.rowLabel(e.getKey()), value(e), null));
+					}
+					if (ghost > 0)
+					{
+						p.add(ghostRow(sec.equals("Teleports") ? "Other means" : "Other",
+							fmt(ghost)));
+					}
+					// A floor-only section (Agility) opens to its single total row.
+					if (rows.isEmpty() && floor > 0)
+					{
+						p.add(row(sectionFloorLabel(sec), fmt(floor), null));
+					}
 				}
-				if (ghost > 0)
+				if (sec.equals("Teleports") && destRows != null && !destRows.isEmpty())
 				{
-					p.add(ghostRow(sec.equals("Teleports") ? "Other means" : "Other",
-						fmt(ghost)));
-				}
-				// A floor-only section (Agility) opens to its single total row.
-				if (rows.isEmpty() && floor > 0)
-				{
-					p.add(row(sectionFloorLabel(sec), fmt(floor), null));
+					addDestinationsFold(p, destRows);
 				}
 			}
 		}
@@ -1169,6 +1206,120 @@ class ChroniclePanel extends PluginPanel
 			order.addAll(present);
 		}
 		return order;
+	}
+
+	/**
+	 * Multi-verb crafts drill one level deeper: Prayer's open state reads as
+	 * Bones buried · Ashes scattered · Ensouled heads folds, each reconciling
+	 * to its own floor, with the verbless totals (Ashes sacrificed) as flat
+	 * rows above. Returns false when the craft has fewer than two verb groups
+	 * — a flat list reads better then, and the caller renders it.
+	 */
+	private boolean addCraftNested(JPanel p, String craft,
+		List<Map.Entry<String, Long>> rows, Map<String, Long> counters)
+	{
+		Map<String, List<Map.Entry<String, Long>>> byVerb = new LinkedHashMap<>();
+		List<Map.Entry<String, Long>> leaves = new ArrayList<>();
+		for (Map.Entry<String, Long> e : rows)
+		{
+			String suf = StatRegistry.suffixOf(e.getKey());
+			if (suf == null)
+			{
+				leaves.add(e);
+			}
+			else
+			{
+				byVerb.computeIfAbsent(suf, k -> new ArrayList<>()).add(e);
+			}
+		}
+		if (byVerb.size() < 2)
+		{
+			return false;
+		}
+		for (Map.Entry<String, Long> e : leaves)
+		{
+			p.add(row(StatRegistry.rowLabel(e.getKey()), value(e), null));
+		}
+		List<String> verbs = new ArrayList<>(byVerb.keySet());
+		Map<String, Long> verbTotal = new LinkedHashMap<>();
+		for (String verb : verbs)
+		{
+			String floorKey = StatRegistry.suffixFloor(craft, verb);
+			long floorVal = floorKey != null ? counters.getOrDefault(floorKey, 0L) : 0L;
+			long sum = 0;
+			for (Map.Entry<String, Long> e : byVerb.get(verb))
+			{
+				sum += e.getValue();
+			}
+			verbTotal.put(verb, Math.max(floorVal, sum));
+		}
+		verbs.sort(Comparator.comparingLong(
+			(String v) -> verbTotal.getOrDefault(v, 0L)).reversed());
+		for (String verb : verbs)
+		{
+			String stateKey = "Skilling:" + craft + ":" + verb;
+			boolean open = statsExpanded.contains(stateKey);
+			p.add(subHead(StatRegistry.suffixLabel(verb),
+				fmt(verbTotal.getOrDefault(verb, 0L)), stateKey, open));
+			if (open)
+			{
+				long sum = 0;
+				for (Map.Entry<String, Long> e : byVerb.get(verb))
+				{
+					p.add(row(StatRegistry.rowLabel(e.getKey()), value(e), null));
+					sum += e.getValue();
+				}
+				long verbGhost = verbTotal.get(verb) - sum;
+				if (verbGhost >= 1)
+				{
+					p.add(ghostRow("Other", fmt(verbGhost)));
+				}
+			}
+		}
+		return true;
+	}
+
+	/** Destinations live one level under Teleports: a fold naming where the
+	 *  roads actually led. */
+	private void addDestinationsFold(JPanel p, List<Map.Entry<String, Long>> destRows)
+	{
+		destRows.sort(StatRegistry::compareRows);
+		long sum = 0;
+		for (Map.Entry<String, Long> e : destRows)
+		{
+			sum += e.getValue();
+		}
+		String stateKey = "Ledger & Roads:Destinations";
+		boolean open = statsExpanded.contains(stateKey);
+		p.add(subHead("Destinations", fmt(sum), stateKey, open));
+		if (open)
+		{
+			for (Map.Entry<String, Long> e : destRows)
+			{
+				p.add(row(StatRegistry.label(e.getKey()), value(e), null));
+			}
+		}
+	}
+
+	/** A second-level fold header: normal case, indented, click to toggle. */
+	private JPanel subHead(String label, String totalStr, String stateKey, boolean open)
+	{
+		JPanel head = row(label, totalStr, open ? accent() : null);
+		JLabel name = (JLabel) ((BorderLayout) head.getLayout())
+			.getLayoutComponent(BorderLayout.CENTER);
+		name.setFont(FontManager.getRunescapeSmallFont());
+		name.setForeground(open ? accent() : ColorScheme.LIGHT_GRAY_COLOR.darker());
+		head.setBorder(BorderFactory.createEmptyBorder(3, 10, 1, 2));
+		head.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+		head.addMouseListener(clicker(() ->
+		{
+			if (!statsExpanded.remove(stateKey))
+			{
+				statsExpanded.add(stateKey);
+			}
+			rebuild();
+		}));
+		return head;
 	}
 
 	private static String value(Map.Entry<String, Long> e)
@@ -1294,10 +1445,25 @@ class ChroniclePanel extends PluginPanel
 		Map.Entry<java.time.LocalDate, HistoryLog.Baseline> at = hist.floorEntry(end);
 		if (at == null || (before != null && at.getKey().equals(before.getKey())))
 		{
-			p.add(note(hist.isEmpty()
-				? "The record starts today — baselines close at each login, day "
-				+ "rollover and logout. Import your deeper past above."
-				: "Nothing recorded in this period."));
+			String empty;
+			if (hist.isEmpty())
+			{
+				empty = "The record starts today — baselines close at each login, "
+					+ "day rollover and logout. Import your deeper past above.";
+			}
+			else if (!hist.isEmpty() && hist.firstKey().isBefore(pStart)
+				&& ("Day".equals(histGranularity) || "Week".equals(histGranularity)))
+			{
+				// The imported past resolves by month — day and week windows
+				// inside it genuinely hold no interior baseline.
+				empty = "The imported past resolves by month — switch to Month "
+					+ "or Year to read this era. Daily detail begins with the plugin.";
+			}
+			else
+			{
+				empty = "Nothing recorded in this period.";
+			}
+			p.add(note(empty));
 		}
 		else
 		{
@@ -1310,11 +1476,15 @@ class ChroniclePanel extends PluginPanel
 				{
 					continue;
 				}
-				long d = e.getValue() - beforeSk.getOrDefault(e.getKey(), before == null ? e.getValue() : 0L);
-				if (before == null)
+				if (before == null || !beforeSk.containsKey(e.getKey()))
 				{
-					d = 0;   // a single baseline has no delta story
+					// No before-value for this skill means NO DATA, not zero:
+					// imported baselines predate newer skills (Sailing), and
+					// treating absence as 0 painted a lifetime's xp as one
+					// week's gain. The skill shows once both ends know it.
+					continue;
 				}
+				long d = e.getValue() - beforeSk.get(e.getKey());
 				if (d > 0)
 				{
 					gains.add(new java.util.AbstractMap.SimpleEntry<>(e.getKey(), d));
@@ -1353,11 +1523,18 @@ class ChroniclePanel extends PluginPanel
 			Map<String, Long> beforeCt = before != null ? before.getValue().counters
 				: new LinkedHashMap<>();
 			List<Map.Entry<String, Long>> movers = new ArrayList<>();
-			if (before != null)
+			// Imported baselines carry NO counters (the archive is xp-only), so
+			// a key absent from the before-side is no-data — same rule as xp,
+			// or a period bounded by an import claims a lifetime as its movers.
+			if (before != null && !beforeCt.isEmpty())
 			{
 				for (Map.Entry<String, Long> e : at.getValue().counters.entrySet())
 				{
-					long d = e.getValue() - beforeCt.getOrDefault(e.getKey(), 0L);
+					if (!beforeCt.containsKey(e.getKey()))
+					{
+						continue;
+					}
+					long d = e.getValue() - beforeCt.get(e.getKey());
 					if (d > 0 && !LocalStore.MAX_KEYS.contains(e.getKey()))
 					{
 						movers.add(new java.util.AbstractMap.SimpleEntry<>(e.getKey(), d));
@@ -1594,6 +1771,7 @@ class ChroniclePanel extends PluginPanel
 		JPanel p = column();
 		String ql = q.toLowerCase(Locale.ROOT);
 		int total = 0;
+		searchJump = null;
 
 		// Trackers — via the registry, so every counter is findable by label or key.
 		List<Map.Entry<String, Long>> statHits = new ArrayList<>();
@@ -1610,6 +1788,7 @@ class ChroniclePanel extends PluginPanel
 		if (!statHits.isEmpty())
 		{
 			p.add(group("Trackers"));
+			jump(View.STATS);
 			for (int i = 0; i < Math.min(4, statHits.size()); i++)
 			{
 				Map.Entry<String, Long> e = statHits.get(i);
@@ -1619,28 +1798,8 @@ class ChroniclePanel extends PluginPanel
 			}
 		}
 
-		// Drops — source names and item names from the journal.
-		List<LocalStore.SourceRow> srcHits = new ArrayList<>();
-		for (LocalStore.SourceRow r : plugin.dropSources())
-		{
-			if (r.name.toLowerCase(Locale.ROOT).contains(ql))
-			{
-				srcHits.add(r);
-			}
-		}
-		srcHits.sort(Comparator.comparingLong((LocalStore.SourceRow r) -> r.value).reversed());
-		if (!srcHits.isEmpty())
-		{
-			p.add(group("Drops"));
-			for (int i = 0; i < Math.min(4, srcHits.size()); i++)
-			{
-				LocalStore.SourceRow r = srcHits.get(i);
-				p.add(row(r.name, (r.kc > 0 ? fmt(r.kc) + " kc · " : "") + gp(r.value) + " gp", null));
-				total++;
-			}
-		}
-
-		// Drop items — every bag the journal holds, by item name.
+		// Drops — one group, items first (the thing you searched for, with
+		// where it came from), then matching sources, four rows in all.
 		List<String[]> itemHits = new ArrayList<>();
 		outerItems:
 		for (LocalStore.SourceRow src : plugin.dropSources())
@@ -1650,19 +1809,35 @@ class ChroniclePanel extends PluginPanel
 				if (b.name.toLowerCase(Locale.ROOT).contains(ql))
 				{
 					itemHits.add(new String[]{b.name + (b.qty > 1 ? " ×" + fmt(b.qty) : ""), src.name});
-					if (itemHits.size() >= 4)
+					if (itemHits.size() >= 3)
 					{
 						break outerItems;
 					}
 				}
 			}
 		}
-		if (!itemHits.isEmpty())
+		List<LocalStore.SourceRow> srcHits = new ArrayList<>();
+		for (LocalStore.SourceRow r : plugin.dropSources())
 		{
-			p.add(group("Drop items"));
+			if (r.name.toLowerCase(Locale.ROOT).contains(ql))
+			{
+				srcHits.add(r);
+			}
+		}
+		srcHits.sort(Comparator.comparingLong((LocalStore.SourceRow r) -> r.value).reversed());
+		if (!itemHits.isEmpty() || !srcHits.isEmpty())
+		{
+			p.add(group("Drops"));
+			jump(View.DROPS);
 			for (String[] hit : itemHits)
 			{
 				p.add(row(hit[0], hit[1], null));
+				total++;
+			}
+			for (int i = 0; i < Math.min(4 - itemHits.size(), srcHits.size()); i++)
+			{
+				LocalStore.SourceRow r = srcHits.get(i);
+				p.add(row(r.name, (r.kc > 0 ? fmt(r.kc) + " kc · " : "") + gp(r.value) + " gp", null));
 				total++;
 			}
 		}
@@ -1678,7 +1853,10 @@ class ChroniclePanel extends PluginPanel
 				owned.merge(e.getKey().toLowerCase(Locale.ROOT), safeLong(e.getValue()), Math::max);
 			}
 		}
-		int slotHits = 0;
+		// One answer per ITEM, not per page copy — obtaining one whip lights
+		// every slot that holds it, so listing each slot is redundant. The
+		// first page that carries the item stands in as its address.
+		Map<String, String> slotFirstPage = new LinkedHashMap<>();
 		clogSearch:
 		for (Map.Entry<String, Map<String, List<String>>> tab : taxonomy().entrySet())
 		{
@@ -1688,20 +1866,25 @@ class ChroniclePanel extends PluginPanel
 				{
 					if (slot.toLowerCase(Locale.ROOT).contains(ql))
 					{
-						if (slotHits == 0)
-						{
-							p.add(group("Collection log"));
-						}
-						boolean got = owned.containsKey(slot.toLowerCase(Locale.ROOT));
-						p.add(row(slot, got ? "obtained" : pg.getKey(),
-							got ? ACCENT_SESSION : null));
-						total++;
-						if (++slotHits >= 4)
+						slotFirstPage.putIfAbsent(slot, pg.getKey());
+						if (slotFirstPage.size() >= 4)
 						{
 							break clogSearch;
 						}
 					}
 				}
+			}
+		}
+		if (!slotFirstPage.isEmpty())
+		{
+			p.add(group("Collection log"));
+			jump(View.LOG);
+			for (Map.Entry<String, String> hit : slotFirstPage.entrySet())
+			{
+				boolean got = owned.containsKey(hit.getKey().toLowerCase(Locale.ROOT));
+				p.add(row(hit.getKey(), got ? "obtained" : hit.getValue(),
+					got ? ACCENT_SESSION : null));
+				total++;
 			}
 		}
 
@@ -1721,6 +1904,7 @@ class ChroniclePanel extends PluginPanel
 		if (!feedHits.isEmpty())
 		{
 			p.add(group("Journal"));
+			jump(View.JOURNAL);
 			for (JsonObject e : feedHits)
 			{
 				long ts = e.has("ts") ? e.get("ts").getAsLong() : 0;
@@ -1733,7 +1917,23 @@ class ChroniclePanel extends PluginPanel
 		{
 			p.add(note("Nothing matches \"" + q + "\" yet."));
 		}
+		else
+		{
+			p.add(vgap(6));
+			p.add(ghostRow("enter opens the matching view", ""));
+		}
 		return p;
+	}
+
+	// Where Enter lands: the first group that answered sets the view.
+	private View searchJump;
+
+	private void jump(View target)
+	{
+		if (searchJump == null)
+		{
+			searchJump = target;
+		}
 	}
 
 	// ------------------------------------------------------------------

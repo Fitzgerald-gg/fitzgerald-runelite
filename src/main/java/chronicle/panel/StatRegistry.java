@@ -98,7 +98,9 @@ public final class StatRegistry
 		new SkillSpec("Farming", new String[]{"Harvested"}, new String[]{"farmingActions"},
 			new String[]{"seedsPlanted"}),
 		new SkillSpec("Hunter", new String[]{"Trapped"}, new String[]{"creaturesTrapped"},
-			new String[]{"implingsCaught", "chompyBirdsPlucked"}),
+			// herbiboarsHarvested is claimed explicitly so Farming's broad
+			// "Harvested" sweep can't steal it — the implingsCaught precedent.
+			new String[]{"implingsCaught", "chompyBirdsPlucked", "herbiboarsHarvested"}),
 		new SkillSpec("Prayer",
 			new String[]{"BonesBuried", "AshesScattered", "HeadsReanimated"},
 			new String[]{"bonesBuried", "ashesScattered", "headsReanimated"},
@@ -431,6 +433,101 @@ public final class StatRegistry
 		String s = prettify(base).replaceAll("(?i)\\(?level\\s*\\d+\\)?", " ")
 			.replaceAll("[()]", " ").replaceAll("\\s+", " ").trim();
 		return s.isEmpty() ? label(key) : s;
+	}
+
+	/**
+	 * The typed suffix a key matched within its craft, or null for explicit
+	 * claims and non-typed keys. Drives the second drill level: a craft whose
+	 * typed rows span SEVERAL verbs (Prayer: buried · scattered · ensouled)
+	 * folds each verb into its own sub-section.
+	 */
+	public static String suffixOf(String key)
+	{
+		if (KEY_SKILL.containsKey(key))
+		{
+			return null;
+		}
+		String skill = skillOf(key);
+		if (skill == null)
+		{
+			return null;
+		}
+		for (SkillSpec s : SKILLS)
+		{
+			if (!s.name.equals(skill))
+			{
+				continue;
+			}
+			for (String suf : s.suffixes)
+			{
+				if (key.endsWith(suf) && !key.equals(suf))
+				{
+					return suf;
+				}
+			}
+		}
+		return null;
+	}
+
+	/** Reading label for a suffix group: "BonesBuried" → "Bones buried". */
+	public static String suffixLabel(String suffix)
+	{
+		switch (suffix)
+		{
+			case "HeadsReanimated":
+				return "Ensouled heads";
+			case "OreMined":
+				return "Ores mined";
+			default:
+				return prettify(Character.toLowerCase(suffix.charAt(0)) + suffix.substring(1));
+		}
+	}
+
+	/** The floor key heading one suffix group, or null when the craft doesn't
+	 *  declare one for it. Convention is the decapitalised suffix; the
+	 *  irregulars are mapped. */
+	public static String suffixFloor(String craft, String suffix)
+	{
+		String cand;
+		switch (suffix)
+		{
+			case "Caught":
+				cand = "fishCaught";
+				break;
+			case "Mined":
+			case "OreMined":
+				cand = "rocksMined";
+				break;
+			case "Runecrafted":
+				cand = "runesCrafted";
+				break;
+			case "Trapped":
+				cand = "creaturesTrapped";
+				break;
+			case "Pickpockets":
+				cand = "pickPockets";
+				break;
+			case "Cooked":
+				cand = "foodCooked";
+				break;
+			default:
+				cand = Character.toLowerCase(suffix.charAt(0)) + suffix.substring(1);
+		}
+		for (SkillSpec s : SKILLS)
+		{
+			if (!s.name.equals(craft))
+			{
+				continue;
+			}
+			for (String f : s.floors)
+			{
+				if (f.equals(cand))
+				{
+					return f;
+				}
+			}
+		}
+		return null;
 	}
 
 	/**
