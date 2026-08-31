@@ -89,3 +89,16 @@ tasks.register('shadowJar', Jar) {
 	archiveClassifier.set('shadow')
 	archiveFileName.set("${rootProject.name}-${project.version}-all.jar")
 }
+
+// The operator tool (JournalReconcileTool) is driven by -Dchronicle.* switches
+// and prints what it merged; Gradle forwards neither to a test JVM by default.
+tasks.named('test') {
+	System.properties.each { k, v ->
+		if (k.toString().startsWith('chronicle.')) {
+			systemProperty k.toString(), v
+		}
+	}
+	testLogging {
+		showStandardStreams = true
+	}
+}
