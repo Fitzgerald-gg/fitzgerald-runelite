@@ -1467,6 +1467,16 @@ class ChroniclePanel extends PluginPanel
 		}
 		else
 		{
+			// When the nearest earlier baseline sits well before the window
+			// (the imported past resolves by month), say so — a month of xp
+			// presented as one week's gain is the sailing bug in muted form.
+			if (before != null && before.getKey().isBefore(pStart.minusDays(1)))
+			{
+				p.add(note("Measured since " + before.getKey().format(
+					java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))
+					+ " — the nearest earlier baseline."));
+				p.add(vgap(4));
+			}
 			Map<String, Long> beforeSk = before != null ? before.getValue().skills
 				: new LinkedHashMap<>();
 			List<Map.Entry<String, Long>> gains = new ArrayList<>();
