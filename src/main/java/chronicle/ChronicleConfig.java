@@ -18,13 +18,11 @@ import net.runelite.client.config.Units;
 @ConfigGroup(ChronicleConfig.GROUP)
 public interface ChronicleConfig extends Config
 {
-	// Settings and the enrolment token migrate one-shot from the pre-rename
-	// "fitzgerald" group (see ChroniclePlugin.startUp + the login branch).
 	String GROUP = "chronicle";
 
 	@ConfigSection(
 		name = "Advanced",
-		description = "Cloud sync, screenshots, and how often the journal is written. "
+		description = "Cloud sync and how often the journal is written. "
 			+ "Every network feature here is OFF/blank by default — Chronicle is a "
 			+ "local journal unless you point it somewhere.",
 		position = 1,

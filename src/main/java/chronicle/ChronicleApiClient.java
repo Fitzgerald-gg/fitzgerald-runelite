@@ -32,7 +32,9 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 
 /**
- * Thin async wrapper over the configured Chronicle server's HTTP API. Every call is fired on
+ * Thin async wrapper over the configured Chronicle server's HTTP API. Every call
+ * here is UPWARD — the plugin sends, and never reads anything back; the journal on
+ * disk is the record. Every call is fired on
  * OkHttp's own dispatcher threads (never the client thread) and reports back
  * through a {@link Consumer} callback. Callbacks may run on any thread; the
  * caller is responsible for hopping back to the client/EDT thread as needed.
@@ -464,87 +466,6 @@ public class ChronicleApiClient
 		return !(ts > 0) ? 0 : Math.min(ts, MAX_TS);
 	}
 
-	/** Fetch the slayer journey the server derives from on-task loot. */
-	public void fetchSlayerJourney(String baseUrl, String rsn,
-		Consumer<SlayerJourney> onDone)
-	{
-		HttpUrl url = resolve(baseUrl, "api/slayer/journey/" + rsn);
-		if (url == null)
-		{
-			onDone.accept(null);
-			return;
-		}
-		Request request = new Request.Builder().url(url).get().build();
-		http.newCall(request).enqueue(new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.debug("slayer journey fetch failed", e);
-				onDone.accept(null);
-			}
-
-			@Override
-			public void onResponse(Call call, Response response)
-			{
-				SlayerJourney out = null;
-				try (Response r = response)
-				{
-					if (r.code() == 200)
-					{
-						String raw = readCapped(r);
-						JsonObject o = raw != null && !raw.isEmpty()
-							? gson.fromJson(raw, JsonObject.class) : null;
-						if (o != null)
-						{
-							java.util.List<SlayerTask> tasks = new java.util.ArrayList<>();
-							if (o.has("tasks") && o.get("tasks").isJsonArray())
-							{
-								for (JsonElement el : o.getAsJsonArray("tasks"))
-								{
-									if (tasks.size() >= MAX_JOURNEY_TASKS)
-									{
-										break;
-									}
-									if (!el.isJsonObject())
-									{
-										continue;
-									}
-									JsonObject t = el.getAsJsonObject();
-									String name = str(t, "task");
-									if (name.length() > MAX_TASK_NAME)
-									{
-										name = name.substring(0, MAX_TASK_NAME);
-									}
-									// the site's kill figure: total_kills, else the target
-									long kills = t.has("total_kills") && !t.get("total_kills").isJsonNull()
-										? num(t, "total_kills").longValue()
-										: num(t, "count_target").longValue();
-									tasks.add(new SlayerTask(name, clamp(kills, MAX_COUNT),
-										clamp(num(t, "assignment").longValue(), MAX_COUNT),
-										clamp(num(t, "no_loot_kills").longValue(), MAX_COUNT),
-										clampTs(num(t, "ts").doubleValue()),
-										clamp(num(t, "total_value").longValue(), MAX_GP),
-										t.has("in_progress") && !t.get("in_progress").isJsonNull()
-											&& t.get("in_progress").getAsBoolean()));
-								}
-							}
-							out = new SlayerJourney(
-								(int) clamp(num(o, "completed_tasks_count").longValue(), MAX_COUNT),
-								clamp(num(o, "total_kills").longValue(), MAX_COUNT),
-								clamp(num(o, "total_value_gp").longValue(), MAX_GP),
-								clamp(num(o, "total_xp_est").longValue(), MAX_GP), tasks);
-						}
-					}
-				}
-				catch (RuntimeException | IOException e)
-				{
-					log.debug("slayer journey parse failed", e);
-				}
-				onDone.accept(out);
-			}
-		});
-	}
 
 	private static final String[] FEED_TYPES = {
 		"PET", "COLLECTION", "COMBAT_ACHIEVEMENT", "QUEST", "DIARY", "CLUE", "DEATH", "SLAYER"

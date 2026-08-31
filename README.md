@@ -31,6 +31,17 @@ On first run the plugin also **inherits your existing Loot Tracker archive** (Ru
 Loot Tracker stores its record in your local profile), so your history starts years deep, not at
 zero.
 
+## Import and export
+
+The Journal tab writes your whole record out as JSON, and reads one back in. An import is for
+another copy of **the same account's** history — a backup, another computer, or a record someone
+has been keeping for you — and every store merges as a **floor**: per-key maximum, earliest
+first-sighting, best personal best, never a sum. Importing the same file twice does nothing the
+second time, and an older export can never lower what you already hold.
+
+The file is a Chronicle journal (`<name>.json`). If a `<name>.history.jsonl` sits beside it, its
+calendar spine is folded in too, skipping days already on record.
+
 ## Optional cloud sync — upward only
 
 Off by default, blank by default. If you point the plugin at a Chronicle-compatible server

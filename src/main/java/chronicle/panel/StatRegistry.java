@@ -15,7 +15,8 @@ import java.util.Set;
  * The one table that makes every counter presentable: key → (label, family,
  * section) — a direct port of the site's settled tracker taxonomy (the
  * trackers page's COMBAT/LIVING_FLAT/LEDGER sets and SKILLS specs), so the
- * panel and fitzgerald.gg file, label and sort every key the same way.
+ * panel and any server page built from the same journal file, label and
+ * sort every key the same way.
  *
  * <p>Four facets, the site's own: Living · Combat · Skilling · Ledger &amp;
  * Roads. Within Skilling each craft owns its keys by explicit claim first,

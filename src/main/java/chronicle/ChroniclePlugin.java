@@ -160,10 +160,6 @@ public class ChroniclePlugin extends Plugin
 	private volatile Map<String, Integer> cachedSnapshot;
 	private volatile String cachedAccountType;
 
-	// One inheritance fetch per session at most — a failed attempt waits for the
-	// next login rather than refiring on every refresh cycle.
-	private volatile boolean slayerImportTried;
-
 	// True while the Loot Tracker adoption is between its off-thread read and the
 	// client-thread apply that writes the one-shot flag: the refresh that fires in
 	// that window must not start the archive over.
@@ -208,43 +204,6 @@ public class ChroniclePlugin extends Plugin
 			.build();
 		clientToolbar.addNavigation(navButton);
 		refreshPanel();
-
-		// One-shot migration from the pre-Chronicle era: settings move from the
-		// old "fitzgerald" config group to "chronicle", and the old enabled +
-		// syncMode shape maps onto journal-always + opt-in cloud — an install
-		// that was enabled in CLOUD mode keeps syncing to the same server
-		// without re-consenting; everyone else lands on the local-only default.
-		// NB: the client persists every config item's DEFAULT at plugin
-		// registration, before startUp — so "is the new key unset?" is never a
-		// valid guard here. The one-shot flag gates the whole block; inside it,
-		// old-group values OVERWRITE whatever defaults were just written.
-		final String legacyGroup = "fitzgerald";
-		if (configManager.getConfiguration(GROUP, "migrated") == null)
-		{
-			for (String key : new String[]{"serverBaseUrl", "manualToken",
-				"pushIntervalMinutes"})
-			{
-				String v = configManager.getConfiguration(legacyGroup, key);
-				if (v != null)
-				{
-					configManager.setConfiguration(GROUP, key, v);
-				}
-			}
-			String oldEnabled = configManager.getConfiguration(legacyGroup, "enabled");
-			String oldMode = configManager.getConfiguration(legacyGroup, "syncMode");
-			boolean wasCloud = "true".equals(oldEnabled)
-				&& (oldMode == null || "CLOUD".equals(oldMode));
-			if (wasCloud)
-			{
-				configManager.setConfiguration(GROUP, "cloudSync", true);
-				String base = configManager.getConfiguration(GROUP, "serverBaseUrl");
-				if (base == null || base.trim().isEmpty())
-				{
-					configManager.setConfiguration(GROUP, "serverBaseUrl", "https://fitzgerald.gg");
-				}
-			}
-			configManager.setConfiguration(GROUP, "migrated", true);
-		}
 
 		// The raw-event capture taps (loot/level/kc → /api/events) live in their
 		// own eventbus-registered object so this class stays focused on enrol +
@@ -472,16 +431,6 @@ public class ChroniclePlugin extends Plugin
 			return; // wait for the name to populate
 		}
 		pendingEnrolCheck = false;
-		// RSProfile-scoped values only migrate with a profile active: adopt the
-		// pre-rename group's enrolment token so cloud installs stay enrolled.
-		if (configManager.getRSProfileConfiguration(GROUP, KEY_TOKEN) == null)
-		{
-			String legacyTok = configManager.getRSProfileConfiguration("fitzgerald", KEY_TOKEN);
-			if (legacyTok != null)
-			{
-				configManager.setRSProfileConfiguration(GROUP, KEY_TOKEN, legacyTok);
-			}
-		}
 		// LOGGED_IN fires again on every world hop and every region load, for the
 		// SAME account and the SAME session. Re-running the load below would
 		// re-freeze the journal's lifetime base at values that ALREADY contain
@@ -668,15 +617,6 @@ public class ChroniclePlugin extends Plugin
 		{
 			return;
 		}
-		// Two writers on one account corrupt the counters (each seeds on top
-		// of the other's pushes) — refuse to be the second one.
-		if (legacyPluginRunning())
-		{
-			statusLine = "The old Fitzgerald plugin is still enabled — disable it; "
-				+ "two writers corrupt the counters.";
-			refreshPanel();
-			return;
-		}
 		if (client.getGameState() != GameState.LOGGED_IN)
 		{
 			return;
@@ -817,7 +757,6 @@ public class ChroniclePlugin extends Plugin
 		executor.submit(() -> localStore.flush(localDir()));
 		localStore.endSession();
 		eventCapture.resetSessionFlags();
-		slayerImportTried = false;
 		// Account boundary for the achievement gate too: the next login must
 		// sync its own snapshot even if it happens to serialize identically.
 		achievementSync.reset();
@@ -926,21 +865,6 @@ public class ChroniclePlugin extends Plugin
 			return;
 		}
 		clientThread.invoke(this::pushCurrent);
-	}
-
-	/** True while the Plugin Hub ancestor of this plugin is ALSO enabled —
-	 *  the dual-writer state that ratchets the cloud counters upward. */
-	private boolean legacyPluginRunning()
-	{
-		for (net.runelite.client.plugins.Plugin p : pluginManager.getPlugins())
-		{
-			if (p != this && p.getClass().getName().startsWith("gg.fitzgerald.")
-				&& pluginManager.isPluginEnabled(p))
-			{
-				return true;
-			}
-		}
-		return false;
 	}
 
 	String serverBaseUrl()
@@ -1242,18 +1166,6 @@ public class ChroniclePlugin extends Plugin
 			return cached;
 		}
 		File dir = new File(net.runelite.client.RuneLite.RUNELITE_DIR, "chronicle");
-		// One-shot: adopt the pre-rename journal directory. A failed rename means
-		// one of two things. Either the new directory is already there — two
-		// clients started together both find it missing and race for it, and the
-		// loser has to converge on the winner's directory rather than spend its
-		// whole run writing into one nothing will ever read again. Or the move
-		// itself could not be made (locked file, odd filesystem), in which case the
-		// old directory is still where the journal is and we keep using it.
-		File legacy = new File(net.runelite.client.RuneLite.RUNELITE_DIR, "fitzgerald");
-		if (legacy.isDirectory() && !dir.exists() && !legacy.renameTo(dir) && !dir.isDirectory())
-		{
-			dir = legacy;
-		}
 		journalDir = dir;
 		return dir;
 	}
@@ -1309,26 +1221,6 @@ public class ChroniclePlugin extends Plugin
 			&& !"true".equals(configManager.getRSProfileConfiguration(GROUP, "lootTrackerImported")))
 		{
 			importLootTracker();
-		}
-		// One-shot inheritance of the cloud's task-by-task slayer journey — the
-		// only downward call left, and it no-ops without a server URL, so a
-		// local-only install never notices it exists. From here the journey is
-		// kept locally (LOOT slayer stamps open segments; SLAYER events close them).
-		if (cloudActive() && !slayerImportTried
-			&& localName != null && localStore.isReadyFor(localName)
-			&& !"true".equals(configManager.getRSProfileConfiguration(GROUP, "slayerJourneyImported")))
-		{
-			slayerImportTried = true;
-			final String who = localName;
-			api.fetchSlayerJourney(config.serverBaseUrl(), who, j -> clientThread.invoke(() ->
-			{
-				if (j != null && localStore.isReadyFor(who))
-				{
-					localStore.adoptSlayerJourney(j, who);
-					configManager.setRSProfileConfiguration(GROUP, "slayerJourneyImported", true);
-					refreshPanel();
-				}
-			}));
 		}
 		executor.submit(() -> localStore.flush(localDir()));
 	}
@@ -1549,6 +1441,65 @@ public class ChroniclePlugin extends Plugin
 	String journalWarning()
 	{
 		return localStore.journalWarning();
+	}
+
+	/**
+	 * Merge a Chronicle journal file into this account's record. The file is a
+	 * journal in the same shape this plugin writes, so an export from anywhere —
+	 * a server that holds an older copy, another computer, last month's backup —
+	 * can be folded in without the plugin ever reading from a network. Every
+	 * store merges as a floor, so importing twice is the same as importing once.
+	 * If the file has a {@code .history.jsonl} sibling, its calendar spine comes
+	 * across too.
+	 */
+	void actionImport(File file)
+	{
+		final String rsn = localName;
+		if (rsn == null || !localStore.isReadyFor(rsn))
+		{
+			chat("Chronicle: log in first — an import lands in the logged-in account's journal.");
+			return;
+		}
+		if (file == null || !file.isFile())
+		{
+			return;
+		}
+		executor.submit(() ->
+		{
+			JsonObject in;
+			try
+			{
+				String txt = new String(java.nio.file.Files.readAllBytes(file.toPath()),
+					java.nio.charset.StandardCharsets.UTF_8);
+				com.google.gson.JsonElement el = gson.fromJson(txt, com.google.gson.JsonElement.class);
+				in = el != null && el.isJsonObject() ? el.getAsJsonObject() : null;
+			}
+			catch (Exception e)
+			{
+				log.debug("import read failed", e);
+				chat("Chronicle: couldn't read that file — it doesn't look like a journal.");
+				return;
+			}
+			if (in == null || !(in.has("trackers") || in.has("drops") || in.has("feed")))
+			{
+				chat("Chronicle: that file isn't a Chronicle journal.");
+				return;
+			}
+			String summary = localStore.importJournal(in, rsn);
+			if (summary == null)
+			{
+				return;
+			}
+			// The calendar spine travels beside the journal, not inside it.
+			File spine = new File(file.getParentFile(),
+				file.getName().replaceAll("\\.json$", "") + ".history.jsonl");
+			int days = spine.isFile() ? historyLog.importSpine(localDir(), rsn, spine) : 0;
+			localStore.flush(localDir());
+			reloadHistory(rsn);
+			chat("Chronicle: imported " + summary
+				+ (days > 0 ? " · " + days + " days of history" : "") + ".");
+			clientThread.invoke(this::refreshLocal);
+		});
 	}
 
 	/** Point the player at their own journal on disk — the export IS the file. */

@@ -2353,7 +2353,16 @@ class ChroniclePanel extends PluginPanel
 		export.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 		p.add(export);
 		p.add(vgap(4));
-		p.add(note("saved beside your journal: .runelite/chronicle/"));
+		JButton importBtn = new JButton("Import a journal…");
+		importBtn.addActionListener(ev -> onImportClicked());
+		importBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+		importBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		p.add(importBtn);
+		p.add(vgap(4));
+		p.add(note("saved beside your journal: .runelite/chronicle/ — an import "
+			+ "merges another copy of THIS account's record in (a backup, another "
+			+ "computer, a record kept for you elsewhere). Everything floors, so "
+			+ "importing twice changes nothing."));
 		p.add(vgap(8));
 
 		if (plugin.cloudActive())
@@ -2394,6 +2403,19 @@ class ChroniclePanel extends PluginPanel
 		push.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 		s.add(push);
 		return s;
+	}
+
+	/** Ask for a journal file and hand it to the plugin. EDT. */
+	private void onImportClicked()
+	{
+		javax.swing.JFileChooser fc = new javax.swing.JFileChooser();
+		fc.setDialogTitle("Import a Chronicle journal");
+		fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+			"Chronicle journal (*.json)", "json"));
+		if (fc.showOpenDialog(this) == javax.swing.JFileChooser.APPROVE_OPTION)
+		{
+			plugin.actionImport(fc.getSelectedFile());
+		}
 	}
 
 	private JPanel buildSearch(String q)

@@ -339,7 +339,7 @@ class LocalStore
 		{
 			if (slayerTask != null && !slayerTask.isEmpty())
 			{
-				slayerLoot(slayerTask, slayerAssignment, batchValue);
+				slayerLoot(slayerTask, slayerAssignment, batchValue, source, priced);
 			}
 			JsonObject drops = root.getAsJsonObject("drops");
 			// Every read below is field-by-field guarded, the way the seeding path
@@ -1008,7 +1008,7 @@ class LocalStore
 			{
 				name = "Item " + id;
 			}
-			perItem.add(new Object[]{name, (long) n, v});
+			perItem.add(new Object[]{name, (long) n, v, canon});
 		}
 		synchronized (lock)
 		{
@@ -1032,6 +1032,25 @@ class LocalStore
 				byItem.add((String) row[0], e);
 			}
 			root.add("untaken_items", byItem);
+			// …and the PAIRING, so the lens can be drilled from either end: which
+			// items a source was left holding, and which sources left an item
+			// behind. Two flat aggregates can answer neither question.
+			JsonObject pairs = root.has("untaken_pairs") && root.get("untaken_pairs").isJsonObject()
+				? root.getAsJsonObject("untaken_pairs") : new JsonObject();
+			JsonObject bag = pairs.has(source) && pairs.get(source).isJsonObject()
+				? pairs.getAsJsonObject(source) : new JsonObject();
+			for (Object[] row : perItem)
+			{
+				String nm = (String) row[0];
+				JsonObject e = bag.has(nm) && bag.get(nm).isJsonObject()
+					? bag.getAsJsonObject(nm) : new JsonObject();
+				e.addProperty("id", (Integer) row[3]);
+				e.addProperty("qty", (e.has("qty") ? asLong(e.get("qty")) : 0) + (Long) row[1]);
+				e.addProperty("value", (e.has("value") ? asLong(e.get("value")) : 0) + (Long) row[2]);
+				bag.add(nm, e);
+			}
+			pairs.add(source, bag);
+			root.add("untaken_pairs", pairs);
 			sessionUntaken += qty;
 			sessionUntakenValue += value;
 			root.addProperty("updated_at", nowSec());
@@ -1153,7 +1172,8 @@ class LocalStore
 	}
 
 	/** One on-task kill: extend (or open) the current task segment. Callers hold lock. */
-	private void slayerLoot(String task, long assignment, long value)
+	private void slayerLoot(String task, long assignment, long value,
+		String monster, JsonArray items)
 	{
 		JsonObject sl = slayerRoot();
 		JsonArray tasks = sl.getAsJsonArray("tasks");
@@ -1179,6 +1199,36 @@ class LocalStore
 			seg.addProperty("assignment", assignment);
 		}
 		seg.addProperty("ts", nowSec());
+		// What the task was actually made of. A "blue dragons" assignment is
+		// rarely one creature — brutals and a Vorkath detour count toward it too —
+		// and the task's own loot is a different question from that monster's
+		// lifetime bag, so both live here rather than being folded into `drops`.
+		if (monster != null && !monster.isEmpty())
+		{
+			JsonObject mons = seg.has("monsters") && seg.get("monsters").isJsonObject()
+				? seg.getAsJsonObject("monsters") : new JsonObject();
+			mons.addProperty(monster, (mons.has(monster) ? asLong(mons.get(monster)) : 0) + 1);
+			seg.add("monsters", mons);
+		}
+		if (items != null)
+		{
+			JsonObject bag = seg.has("items") && seg.get("items").isJsonObject()
+				? seg.getAsJsonObject("items") : new JsonObject();
+			for (JsonElement ie : items)
+			{
+				JsonObject it = ie.getAsJsonObject();
+				String name = it.get("name").getAsString();
+				JsonObject row = bag.has(name) && bag.get(name).isJsonObject()
+					? bag.getAsJsonObject(name) : new JsonObject();
+				row.addProperty("id", it.get("id").getAsInt());
+				row.addProperty("qty", (row.has("qty") ? asLong(row.get("qty")) : 0)
+					+ it.get("qty").getAsLong());
+				row.addProperty("value", (row.has("value") ? asLong(row.get("value")) : 0)
+					+ it.get("value").getAsLong());
+				bag.add(name, row);
+			}
+			seg.add("items", bag);
+		}
 	}
 
 	/**
@@ -1571,6 +1621,304 @@ class LocalStore
 		{
 			return 0;
 		}
+	}
+
+	/**
+	 * Merge another Chronicle journal into this account's record.
+	 *
+	 * <p>Every store merges as a FLOOR — per-key max, oldest-wins on first-seen,
+	 * best-wins on a personal best — never a sum. An import is a record of the
+	 * same account from somewhere else (a server export, another computer, a
+	 * backup), so its history OVERLAPS this one; adding would double every
+	 * shared kill. Flooring makes the operation idempotent: importing the same
+	 * file twice, or importing an older export after a newer one, changes
+	 * nothing. Runs off the client thread.
+	 *
+	 * @return a short human-readable summary of what came across.
+	 */
+	String importJournal(JsonObject in, String rsn)
+	{
+		if (!isReadyFor(rsn) || in == null)
+		{
+			return null;
+		}
+		int sources = 0;
+		int events = 0;
+		int counters = 0;
+		synchronized (lock)
+		{
+			// Lifetime counters: floor the frozen base AND the shown values, so the
+			// import survives the next session recompute.
+			if (in.has("trackers") && in.get("trackers").isJsonObject())
+			{
+				JsonObject tr = root.has("trackers") && root.get("trackers").isJsonObject()
+					? root.getAsJsonObject("trackers") : new JsonObject();
+				for (java.util.Map.Entry<String, JsonElement> e
+					: in.getAsJsonObject("trackers").entrySet())
+				{
+					long v = asLong(e.getValue());
+					if (v <= 0)
+					{
+						continue;
+					}
+					if (v > (trackersBase.has(e.getKey()) ? asLong(trackersBase.get(e.getKey())) : 0))
+					{
+						trackersBase.addProperty(e.getKey(), v);
+						counters++;
+					}
+					if (v > (tr.has(e.getKey()) ? asLong(tr.get(e.getKey())) : 0))
+					{
+						tr.addProperty(e.getKey(), v);
+					}
+				}
+				root.add("trackers", tr);
+			}
+			// Drop ledger: per source, then per item inside it.
+			if (in.has("drops") && in.get("drops").isJsonObject())
+			{
+				JsonObject drops = root.getAsJsonObject("drops");
+				for (java.util.Map.Entry<String, JsonElement> e
+					: in.getAsJsonObject("drops").entrySet())
+				{
+					if (!e.getValue().isJsonObject())
+					{
+						continue;
+					}
+					JsonObject inc = e.getValue().getAsJsonObject();
+					JsonObject cur = drops.has(e.getKey()) && drops.get(e.getKey()).isJsonObject()
+						? drops.getAsJsonObject(e.getKey()) : new JsonObject();
+					if (!drops.has(e.getKey()))
+					{
+						cur.addProperty("kc", 0);
+						cur.addProperty("loots", 0);
+						cur.addProperty("value", 0);
+						cur.add("items", new JsonObject());
+						drops.add(e.getKey(), cur);
+						sources++;
+					}
+					floorNumber(cur, inc, "kc");
+					floorNumber(cur, inc, "loots");
+					floorNumber(cur, inc, "value");
+					floorNumber(cur, inc, "last_seen");
+					// The earliest sighting is the true one: an import can only ever
+					// push "tracked since" further back.
+					if (inc.has("first_seen") && !inc.get("first_seen").isJsonNull())
+					{
+						long incFirst = asLong(inc.get("first_seen"));
+						long curFirst = cur.has("first_seen") ? asLong(cur.get("first_seen")) : 0;
+						if (incFirst > 0 && (curFirst == 0 || incFirst < curFirst))
+						{
+							cur.addProperty("first_seen", incFirst);
+						}
+					}
+					// A personal best is a minimum, not a maximum.
+					if (inc.has("pb") && !inc.get("pb").isJsonNull())
+					{
+						double incPb = inc.get("pb").getAsDouble();
+						if (incPb > 0 && (!cur.has("pb") || incPb < cur.get("pb").getAsDouble()))
+						{
+							cur.addProperty("pb", incPb);
+						}
+					}
+					if (inc.has("items") && inc.get("items").isJsonObject())
+					{
+						JsonObject bag = cur.has("items") && cur.get("items").isJsonObject()
+							? cur.getAsJsonObject("items") : new JsonObject();
+						for (java.util.Map.Entry<String, JsonElement> ie
+							: inc.getAsJsonObject("items").entrySet())
+						{
+							if (!ie.getValue().isJsonObject())
+							{
+								continue;
+							}
+							JsonObject incItem = ie.getValue().getAsJsonObject();
+							JsonObject curItem = bag.has(ie.getKey()) && bag.get(ie.getKey()).isJsonObject()
+								? bag.getAsJsonObject(ie.getKey()) : new JsonObject();
+							floorNumber(curItem, incItem, "qty");
+							floorNumber(curItem, incItem, "value");
+							// An id the local bag lacks is worth taking: it is what
+							// draws the sprite.
+							if (!curItem.has("id") && incItem.has("id"))
+							{
+								curItem.add("id", incItem.get("id"));
+							}
+							bag.add(ie.getKey(), curItem);
+						}
+						cur.add("items", bag);
+					}
+				}
+			}
+			// The dated feed, deduplicated on (timestamp, type) — the same rule
+			// that makes re-importing a no-op.
+			if (in.has("feed") && in.get("feed").isJsonArray())
+			{
+				JsonArray feed = root.getAsJsonArray("feed");
+				java.util.Set<String> seen = new java.util.HashSet<>();
+				for (JsonElement e : feed)
+				{
+					if (e.isJsonObject())
+					{
+						seen.add(feedKey(e.getAsJsonObject()));
+					}
+				}
+				for (JsonElement e : in.getAsJsonArray("feed"))
+				{
+					if (!e.isJsonObject() || !seen.add(feedKey(e.getAsJsonObject())))
+					{
+						continue;
+					}
+					feed.add(e.getAsJsonObject().deepCopy());
+					events++;
+				}
+				// Re-sort: an import interleaves with what is already here, and the
+				// panel reads the feed in stored order.
+				java.util.List<JsonObject> all = new java.util.ArrayList<>(feed.size());
+				for (JsonElement e : feed)
+				{
+					if (e.isJsonObject())
+					{
+						all.add(e.getAsJsonObject());
+					}
+				}
+				all.sort(java.util.Comparator.comparingLong(
+					o -> o.has("ts") ? asLong(o.get("ts")) : 0));
+				JsonArray rebuilt = new JsonArray();
+				for (int i = Math.max(0, all.size() - FEED_CAP); i < all.size(); i++)
+				{
+					rebuilt.add(all.get(i));
+				}
+				root.add("feed", rebuilt);
+			}
+			// Collection log: the existing max-union, which is exactly right here.
+			if (in.has("collection_log") && in.get("collection_log").isJsonObject())
+			{
+				JsonObject cl = root.has("collection_log") && root.get("collection_log").isJsonObject()
+					? root.getAsJsonObject("collection_log") : new JsonObject();
+				root.add("collection_log", mergeClog(cl, in.getAsJsonObject("collection_log")));
+			}
+			for (String store : new String[]{"untaken", "untaken_items", "consumable_values"})
+			{
+				floorNestedStore(store, in);
+			}
+			// The left-behind pairing is two levels deep.
+			if (in.has("untaken_pairs") && in.get("untaken_pairs").isJsonObject())
+			{
+				JsonObject pairs = root.has("untaken_pairs") && root.get("untaken_pairs").isJsonObject()
+					? root.getAsJsonObject("untaken_pairs") : new JsonObject();
+				for (java.util.Map.Entry<String, JsonElement> e
+					: in.getAsJsonObject("untaken_pairs").entrySet())
+				{
+					if (!e.getValue().isJsonObject())
+					{
+						continue;
+					}
+					JsonObject bag = pairs.has(e.getKey()) && pairs.get(e.getKey()).isJsonObject()
+						? pairs.getAsJsonObject(e.getKey()) : new JsonObject();
+					for (java.util.Map.Entry<String, JsonElement> ie
+						: e.getValue().getAsJsonObject().entrySet())
+					{
+						if (!ie.getValue().isJsonObject())
+						{
+							continue;
+						}
+						JsonObject incItem = ie.getValue().getAsJsonObject();
+						JsonObject curItem = bag.has(ie.getKey()) && bag.get(ie.getKey()).isJsonObject()
+							? bag.getAsJsonObject(ie.getKey()) : new JsonObject();
+						floorNumber(curItem, incItem, "qty");
+						floorNumber(curItem, incItem, "value");
+						if (!curItem.has("id") && incItem.has("id"))
+						{
+							curItem.add("id", incItem.get("id"));
+						}
+						bag.add(ie.getKey(), curItem);
+					}
+					pairs.add(e.getKey(), bag);
+				}
+				root.add("untaken_pairs", pairs);
+			}
+			// The slayer spine adopts only into an empty one: two overlapping
+			// task lists cannot be reconciled segment by segment, and the local
+			// one is the authoritative account of what this client watched.
+			if (in.has("slayer") && in.get("slayer").isJsonObject())
+			{
+				JsonObject incSl = in.getAsJsonObject("slayer");
+				JsonObject sl = slayerRoot();
+				JsonArray tasks = sl.getAsJsonArray("tasks");
+				if (tasks.size() == 0 && incSl.has("tasks") && incSl.get("tasks").isJsonArray())
+				{
+					for (JsonElement t : incSl.getAsJsonArray("tasks"))
+					{
+						if (t.isJsonObject())
+						{
+							tasks.add(t.getAsJsonObject().deepCopy());
+						}
+					}
+				}
+				for (String k : new String[]{"completed", "xp_est"})
+				{
+					if (incSl.has(k) && asLong(incSl.get(k)) > (sl.has(k) ? asLong(sl.get(k)) : 0))
+					{
+						sl.addProperty(k, asLong(incSl.get(k)));
+					}
+				}
+			}
+			root.addProperty("updated_at", nowSec());
+		}
+		return sources + " sources · " + String.format(java.util.Locale.UK, "%,d", events)
+			+ " journal entries · " + counters + " counters";
+	}
+
+	/** Identity of a feed line for import dedup: the instant plus its kind. */
+	private static String feedKey(JsonObject e)
+	{
+		return (e.has("ts") ? asLong(e.get("ts")) : 0) + "|"
+			+ (e.has("type") && !e.get("type").isJsonNull() ? e.get("type").getAsString() : "");
+	}
+
+	/** Raise {@code cur[key]} to {@code inc[key]} when the incoming one is higher. */
+	private static void floorNumber(JsonObject cur, JsonObject inc, String key)
+	{
+		if (!inc.has(key) || inc.get(key).isJsonNull())
+		{
+			return;
+		}
+		long v = asLong(inc.get(key));
+		if (v > (cur.has(key) ? asLong(cur.get(key)) : 0))
+		{
+			cur.addProperty(key, v);
+		}
+	}
+
+	/** Floor a flat {name: {qty, value}} store, or a flat {key: number} one. */
+	private void floorNestedStore(String name, JsonObject in)
+	{
+		if (!in.has(name) || !in.get(name).isJsonObject())
+		{
+			return;
+		}
+		JsonObject cur = root.has(name) && root.get(name).isJsonObject()
+			? root.getAsJsonObject(name) : new JsonObject();
+		for (java.util.Map.Entry<String, JsonElement> e : in.getAsJsonObject(name).entrySet())
+		{
+			if (e.getValue().isJsonObject())
+			{
+				JsonObject incRow = e.getValue().getAsJsonObject();
+				JsonObject curRow = cur.has(e.getKey()) && cur.get(e.getKey()).isJsonObject()
+					? cur.getAsJsonObject(e.getKey()) : new JsonObject();
+				floorNumber(curRow, incRow, "qty");
+				floorNumber(curRow, incRow, "value");
+				cur.add(e.getKey(), curRow);
+			}
+			else
+			{
+				long v = asLong(e.getValue());
+				if (v > (cur.has(e.getKey()) ? asLong(cur.get(e.getKey())) : 0))
+				{
+					cur.addProperty(e.getKey(), v);
+				}
+			}
+		}
+		root.add(name, cur);
 	}
 
 	/** The journal's stored collection log, deep-copied for the panel. */

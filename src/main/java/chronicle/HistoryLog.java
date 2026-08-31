@@ -196,6 +196,73 @@ class HistoryLog
 		}
 	}
 
+	/**
+	 * Fold another spine file into this account's, skipping days already on
+	 * record. The stream is append-only and readers take the LAST line for a
+	 * date, so an imported day that is already present would silently win over
+	 * the local one; keeping only genuinely new dates makes the import
+	 * idempotent and leaves this client's own measurements authoritative.
+	 *
+	 * @return how many days came across.
+	 */
+	synchronized int importSpine(File dir, String rsn, File source)
+	{
+		if (rsn == null || rsn.isEmpty() || source == null || !source.isFile())
+		{
+			return 0;
+		}
+		java.util.Set<String> have = read(dir, rsn).keySet().stream()
+			.map(java.time.LocalDate::toString)
+			.collect(java.util.stream.Collectors.toSet());
+		int added = 0;
+		try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(
+			new java.io.FileInputStream(source), StandardCharsets.UTF_8)))
+		{
+			File out = new File(dir, LocalStore.slug(rsn) + ".history.jsonl");
+			if (!dir.isDirectory() && !dir.mkdirs())
+			{
+				return 0;
+			}
+			try (Writer w = new OutputStreamWriter(new FileOutputStream(out, true), StandardCharsets.UTF_8))
+			{
+				String line;
+				while ((line = r.readLine()) != null)
+				{
+					if (line.trim().isEmpty())
+					{
+						continue;
+					}
+					String date;
+					try
+					{
+						JsonObject o = gson.fromJson(line, JsonObject.class);
+						date = o != null && o.has("date") ? o.get("date").getAsString() : null;
+					}
+					catch (RuntimeException torn)
+					{
+						continue;   // a half-written line in the source is skipped, as on read
+					}
+					if (date == null || !have.add(date))
+					{
+						continue;
+					}
+					w.write(line);
+					w.write('\n');
+					added++;
+				}
+			}
+		}
+		catch (Exception e)
+		{
+			log.debug("history import failed", e);
+		}
+		if (added > 0)
+		{
+			lastAppendedDate.remove(LocalStore.slug(rsn));
+		}
+		return added;
+	}
+
 	/** True once per calendar day for this account: the caller should append a
 	 *  fresh baseline. The account has to be named, because the gate it consults
 	 *  is the one keyed to that account's own stream. */
