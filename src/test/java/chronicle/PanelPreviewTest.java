@@ -352,11 +352,11 @@ public class PanelPreviewTest
 		s.lifetime = store.trackersSnapshot();
 		s.feed = store.feedNewest(2000);
 		s.store = store;
-		s.history = new HistoryLog().read(dir, "Oxli");
+		s.history = new HistoryLog(new Gson()).read(dir, "Oxli");
 		// The real journey + dryness, through the real local engines.
 		s.journey = store.slayerJourney();
 		s.consumVals = store.consumableValues();
-		s.grinds = new GrindBook().grinds(store.clogSnapshot(), store.dropSources());
+		s.grinds = new GrindBook(new Gson()).grinds(store.clogSnapshot(), store.dropSources());
 		return s;
 	}
 
@@ -584,6 +584,12 @@ public class PanelPreviewTest
 		}
 
 		@Override
+		com.google.gson.Gson gson()
+		{
+			return new Gson();   // the stub has no injector
+		}
+
+		@Override
 		net.runelite.client.game.ItemManager items()
 		{
 			return itemManager;
@@ -607,11 +613,11 @@ public class PanelPreviewTest
 
 	private String firstClogPage(ChroniclePanel panel) throws Exception
 	{
-		Method m = ChroniclePanel.class.getDeclaredMethod("taxonomy");
+		Method m = ChroniclePanel.class.getDeclaredMethod("taxonomy", com.google.gson.Gson.class);
 		m.setAccessible(true);
 		@SuppressWarnings("unchecked")
 		Map<String, Map<String, List<String>>> tax =
-			(Map<String, Map<String, List<String>>>) m.invoke(null);
+			(Map<String, Map<String, List<String>>>) m.invoke(null, new Gson());
 		Map<String, List<String>> bosses = tax.get("Bosses");
 		return bosses == null || bosses.isEmpty() ? null : bosses.keySet().iterator().next();
 	}

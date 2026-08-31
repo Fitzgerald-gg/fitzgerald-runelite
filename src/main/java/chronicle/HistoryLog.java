@@ -29,7 +29,12 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 class HistoryLog
 {
-	private final Gson gson = new Gson();
+	private final Gson gson;
+
+	HistoryLog(Gson gson)
+	{
+		this.gson = gson;
+	}
 
 	// The last date a baseline was appended for, per this client session —
 	// enough to make the day-rollover append fire exactly once.

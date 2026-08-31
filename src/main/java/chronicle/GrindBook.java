@@ -35,6 +35,13 @@ class GrindBook
 	private static final int MIN_DRY_RATE = 100;
 	private static final int MAX_ROWS = 20;
 
+	private final Gson gson;
+
+	GrindBook(Gson gson)
+	{
+		this.gson = gson;
+	}
+
 	// boss display name → {item name → rate denominator}; loaded once, lazily.
 	private volatile Map<String, Map<String, Integer>> drops;
 
@@ -50,7 +57,7 @@ class GrindBook
 		{
 			if (in != null)
 			{
-				JsonObject root = new Gson().fromJson(
+				JsonObject root = gson.fromJson(
 					new InputStreamReader(in, StandardCharsets.UTF_8), JsonObject.class);
 				JsonObject bosses = root.has("drops") && root.get("drops").isJsonObject()
 					? root.getAsJsonObject("drops") : new JsonObject();

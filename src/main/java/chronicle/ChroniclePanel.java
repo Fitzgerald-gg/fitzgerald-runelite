@@ -656,6 +656,32 @@ class ChroniclePanel extends PluginPanel
 	// The journey fetches once per session on first open; null = not yet asked.
 	private ChronicleApiClient.SlayerJourney journeyCache;
 	private boolean journeyFetching;
+
+	/**
+	 * Drop every view built from ONE account's journal. Called when a different
+	 * account's journal is mounted — without it the next player is shown the
+	 * previous one's task journey and dry streaks. EDT only.
+	 */
+	void resetAccountCaches()
+	{
+		journeyCache = null;
+		journeyFetching = false;
+		grindsCache = null;
+		grindsFetching = false;
+		detailItem = null;
+		detailSource = null;
+		detailStack.clear();
+		drillShown.clear();
+		statsExpanded.clear();
+		rebuild();
+	}
+
+	/** Stop the repeating timers. Called from the plugin's shutDown. EDT-safe. */
+	void shutdown()
+	{
+		homeTicker.stop();
+		searchDebounce.stop();
+	}
 	private int slayerShown = ROW_CAP;
 	private static final DateTimeFormatter TASK_DAY =
 		DateTimeFormatter.ofPattern("d MMM yy").withZone(ZoneId.systemDefault());
@@ -692,10 +718,16 @@ class ChroniclePanel extends PluginPanel
 			plugin.fetchSlayerJourney(j -> SwingUtilities.invokeLater(() ->
 			{
 				journeyFetching = false;
-				// A null read (store not ready) settles as an empty journey so
-				// the view lands on its empty-state note, never a stuck spinner.
-				journeyCache = j != null ? j : new ChronicleApiClient.SlayerJourney(
-					0, 0, 0, 0, new ArrayList<>());
+				// null means the journal was not mounted yet — do NOT cache it
+				// (that froze the tab on its empty state for the rest of the
+				// client run) and do NOT rebuild, which would spin fetch→null→
+				// rebuild→fetch. The next natural rebuild retries. A READY store
+				// returns a real (possibly empty) journey, which caches.
+				if (j == null)
+				{
+					return;
+				}
+				journeyCache = j;
 				if (view == View.SLAYER)
 				{
 					rebuild();
@@ -1029,7 +1061,11 @@ class ChroniclePanel extends PluginPanel
 				plugin.fetchGrinds(rows2 -> SwingUtilities.invokeLater(() ->
 				{
 					grindsFetching = false;
-					grindsCache = rows2 != null ? rows2 : new ArrayList<>();
+					if (rows2 == null)
+					{
+						return;   // store not mounted — retry on the next rebuild
+					}
+					grindsCache = rows2;
 					if (src.equals(detailSource))
 					{
 						rebuild();
@@ -1141,7 +1177,7 @@ class ChroniclePanel extends PluginPanel
 		p.add(head);
 		p.add(vgap(6));
 
-		Map<String, Map<String, List<String>>> tax = taxonomy();
+		Map<String, Map<String, List<String>>> tax = taxonomy(plugin.gson());
 		// Three per row: five across clipped the names AND made the column's
 		// preferred width overflow the viewport (the min-size clip trigger).
 		JPanel pills = new JPanel(new GridLayout(0, 3, 3, 3));
@@ -1294,7 +1330,8 @@ class ChroniclePanel extends PluginPanel
 	}
 
 	/** Parse the bundled taxonomy once; order preserved (tabs and slots). */
-	private static synchronized Map<String, Map<String, List<String>>> taxonomy()
+	private static synchronized Map<String, Map<String, List<String>>> taxonomy(
+		com.google.gson.Gson gson)
 	{
 		if (taxonomy != null)
 		{
@@ -1305,7 +1342,9 @@ class ChroniclePanel extends PluginPanel
 		{
 			if (in != null)
 			{
-				JsonObject rootTax = new com.google.gson.Gson().fromJson(
+				// The client's Gson, handed down from the plugin: the Hub's review
+				// rejects a plugin that constructs its own.
+				JsonObject rootTax = gson.fromJson(
 					new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8),
 					JsonObject.class);
 				for (Map.Entry<String, com.google.gson.JsonElement> tab : rootTax.entrySet())
@@ -2283,7 +2322,7 @@ class ChroniclePanel extends PluginPanel
 		// first page that carries the item stands in as its address.
 		Map<String, String> slotFirstPage = new LinkedHashMap<>();
 		clogSearch:
-		for (Map.Entry<String, Map<String, List<String>>> tab : taxonomy().entrySet())
+		for (Map.Entry<String, Map<String, List<String>>> tab : taxonomy(plugin.gson()).entrySet())
 		{
 			for (Map.Entry<String, List<String>> pg : tab.getValue().entrySet())
 			{

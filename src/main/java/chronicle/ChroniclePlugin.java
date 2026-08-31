@@ -115,7 +115,12 @@ public class ChroniclePlugin extends Plugin
 	@Inject
 	private LocalStore localStore;
 
-	private final HistoryLog historyLog = new HistoryLog();
+	// Injected rather than constructed: the Plugin Hub's review rejects a plugin
+	// that builds its own Gson/OkHttp instead of taking the client's.
+	@Inject
+	private com.google.gson.Gson gson;
+
+	private HistoryLog historyLog;
 
 	private ChroniclePanel panel;
 	private NavigationButton navButton;
@@ -123,6 +128,13 @@ public class ChroniclePlugin extends Plugin
 	private ScheduledFuture<?> pushTask;
 	private GameState lastState;
 	private boolean pendingEnrolCheck;
+	// True from the moment an account is in-game until its session is torn down.
+	// The teardown trigger can NOT be "the previous state was LOGGED_IN": a
+	// dropped connection arrives at the login screen via CONNECTION_LOST, and
+	// comparing only the immediately-prior state let that path skip the whole
+	// account boundary (session counters, caches and push identity survived into
+	// whichever account logged in next).
+	private boolean wasLoggedIn;
 
 	// Cached from the last successful harvest while logged in, so a logout push
 	// works even after the RSProfile has been cleared.
@@ -172,7 +184,7 @@ public class ChroniclePlugin extends Plugin
 	}
 
 	// The wiki drop-rate book for the local dryness ledger (lazy-loaded).
-	private final GrindBook grindBook = new GrindBook();
+	private GrindBook grindBook;
 
 	// Panel-facing status.
 	private volatile String enrolledRsn;
@@ -190,6 +202,10 @@ public class ChroniclePlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
+		// Built here, not in a field initializer: field injection has run by now,
+		// so both take the client's Gson.
+		historyLog = new HistoryLog(gson);
+		grindBook = new GrindBook(gson);
 		panel = new ChroniclePanel(this);
 		navButton = NavigationButton.builder()
 			.tooltip("Chronicle")
@@ -299,12 +315,30 @@ public class ChroniclePlugin extends Plugin
 			clientToolbar.removeNavigation(navButton);
 			navButton = null;
 		}
+		// The panel's repeating timers hold a reference to it (and to us): left
+		// running they rebuild a detached panel every few seconds forever, and
+		// each plugin toggle leaks another one.
+		final ChroniclePanel dying = panel;
+		if (dying != null)
+		{
+			javax.swing.SwingUtilities.invokeLater(dying::shutdown);
+		}
 		panel = null;
 		pendingEnrolCheck = false;
+		// Bank the session before dropping it. Toggling the plugin off (or closing
+		// the client, which shuts plugins down) used to discard everything counted
+		// since the last five-minute fold — the journal is the system of record,
+		// so it must be written on the way out, not just on the interval.
+		if (localName != null && localStore.isReadyFor(localName))
+		{
+			localStore.setTrackers(sessionView(), localName);
+			localStore.flush(localDir());
+		}
 		// While we are unregistered no events reach the trackers, so the store stops
 		// tracking reality — and the player may switch accounts before toggling us
 		// back on. Forget the totals so the next login counts its own session.
 		statStore.clear();
+		wasLoggedIn = false;
 	}
 
 	private void reschedulePushLoop()
@@ -360,14 +394,15 @@ public class ChroniclePlugin extends Plugin
 		if (state == GameState.LOGGED_IN)
 		{
 			pendingEnrolCheck = true;
+			wasLoggedIn = true;
 		}
-		else if (state == GameState.LOGIN_SCREEN && lastState == GameState.LOGGED_IN)
+		else if (state == GameState.LOGIN_SCREEN && wasLoggedIn)
 		{
-			// Best-effort final push on logout. A world HOP is deliberately NOT
-			// treated as a logout: it is the same account with the same totals, and
-			// invalidating here would fire a re-seed GET that races the final POST —
-			// the reader sees the last committed row, so a still-in-flight push means
-			// the re-seed reads stale and then overwrites the session's counters.
+			// Any arrival at the login screen from an in-game session closes it —
+			// including the CONNECTION_LOST route a dropped connection takes. A
+			// world HOP is still deliberately NOT a logout: it never reaches the
+			// login screen, and it is the same account with the same totals.
+			wasLoggedIn = false;
 			onLogout();
 		}
 		lastState = state;
@@ -401,6 +436,23 @@ public class ChroniclePlugin extends Plugin
 				configManager.setRSProfileConfiguration(GROUP, KEY_TOKEN, legacyTok);
 			}
 		}
+		// LOGGED_IN fires again on every world hop and every region load, for the
+		// SAME account and the SAME session. Re-running the load below would
+		// re-freeze the journal's lifetime base at values that ALREADY contain
+		// this session (the base is frozen from disk, and the session store is
+		// deliberately not cleared on a hop) — every counter banked before the
+		// hop would be counted twice, and a journal-absolute push would make that
+		// permanent server-side. It would also discard any records folded in
+		// since the last flush. So: an already-loaded account only refreshes.
+		if (name.equals(localName) && localStore.isReadyFor(name))
+		{
+			refreshPanel();
+			if (cloudActive())
+			{
+				adoptToken(name);
+			}
+			return;
+		}
 		// The journal always runs: remember whose account this is and load its
 		// on-disk record so the record keeps accumulating across sessions. No
 		// enrolment, no network — cloud sync below is additive when configured.
@@ -429,6 +481,13 @@ public class ChroniclePlugin extends Plugin
 			}
 			configManager.setRSProfileConfiguration(GROUP, KEY_JOURNAL_NAME, who);
 			localStore.load(localDir(), who);
+			// A different account's journal is now mounted: drop the panel views
+			// built from the previous one (task journey, dryness, open drill-downs).
+			ChroniclePanel p = panel;
+			if (p != null)
+			{
+				javax.swing.SwingUtilities.invokeLater(p::resetAccountCaches);
+			}
 			clientThread.invoke(this::refreshLocal);
 		});
 		if (cloudActive())
@@ -585,11 +644,17 @@ public class ChroniclePlugin extends Plugin
 		// (the discord bot's feed), never a source. The one-shot correction runs
 		// first from here too, so no push can beat it to a freshly-loaded journal.
 		maybeMigratePrayerVerbs();
-		if (localName != null && localStore.isReadyFor(localName))
+		// The journal must be the one belonging to the account we are about to
+		// push AS. Between an account switch and the completion of the new
+		// journal's async load, the store still holds the previous account's
+		// model — pushing then would file one player's lifetime under another's
+		// token, permanently (the server floor-merges).
+		if (!name.equals(localName) || !localStore.isReadyFor(name))
 		{
-			localStore.setTrackers(sessionView(), localName);
+			return;
 		}
-		Map<String, Integer> snapshot = journalAbsolutes();
+		localStore.setTrackers(sessionView(), localName);
+		Map<String, Integer> snapshot = journalAbsolutes(name);
 		if (snapshot.isEmpty())
 		{
 			return;   // nothing journaled yet on this account — nothing to push
@@ -650,9 +715,16 @@ public class ChroniclePlugin extends Plugin
 	 * server gets, so a fresh server (or a wiped one) rebuilds entirely from the
 	 * client and "server on or off" makes no difference to what the player sees.
 	 */
-	private Map<String, Integer> journalAbsolutes()
+	private Map<String, Integer> journalAbsolutes(String rsn)
 	{
 		Map<String, Integer> out = new java.util.HashMap<>();
+		// The store keeps the PREVIOUS account's model mounted until the next
+		// load completes, so an unguarded read during the login gap would hand
+		// one account's lifetime totals to another's push.
+		if (rsn == null || !localStore.isReadyFor(rsn))
+		{
+			return out;
+		}
 		for (Map.Entry<String, Long> e : localStore.trackersSnapshot().entrySet())
 		{
 			long v = e.getValue() != null ? e.getValue() : 0;
@@ -670,7 +742,10 @@ public class ChroniclePlugin extends Plugin
 		// The journal always closes out the session: fold the final counters in,
 		// write, end the session so a different account logging in next can't
 		// record onto this model.
-		if (localName != null)
+		// Guarded on the store's own identity: if this account's journal never
+		// finished loading (a logout inside the login gap), the mounted model
+		// belongs to somebody else and must not be written or frozen here.
+		if (localName != null && localStore.isReadyFor(localName))
 		{
 			localStore.setTrackers(sessionView(), localName);
 			appendHistoryBaseline();
@@ -678,7 +753,7 @@ public class ChroniclePlugin extends Plugin
 			// Freeze the journal's totals for the final push BEFORE the stores
 			// reset — the logout flush sends exactly what the journal will say
 			// on the next login.
-			Map<String, Integer> fresh = journalAbsolutes();
+			Map<String, Integer> fresh = journalAbsolutes(localName);
 			if (!fresh.isEmpty())
 			{
 				cachedSnapshot = fresh;
@@ -694,12 +769,27 @@ public class ChroniclePlugin extends Plugin
 		// These totals belong to the account that just logged out. Drop them here
 		// so a DIFFERENT account logging in next can never inherit them.
 		statStore.clear();
-		if (!cloudActive() || cachedToken == null || cachedName == null
-			|| cachedSnapshot == null || cachedSnapshot.isEmpty())
+		// Take the push identity by value, then CLEAR it. The cache is what makes
+		// a logout flush possible after the RSProfile has gone; left standing, it
+		// becomes the identity of whichever account logs in next — a token-less
+		// alt would flush ITS journal under this account's token and name, which
+		// the server accepts and floor-merges permanently. (localName is kept:
+		// the panel still browses the closed session's journal.)
+		final String token = cachedToken;
+		final String who = cachedName;
+		final String type = cachedAccountType;
+		final Map<String, Integer> snapshot = cachedSnapshot;
+		cachedToken = null;
+		cachedName = null;
+		cachedSnapshot = null;
+		cachedAccountType = null;
+		enrolledRsn = null;
+		if (!cloudActive() || token == null || who == null
+			|| snapshot == null || snapshot.isEmpty())
 		{
 			return;
 		}
-		api.pushStats(config.serverBaseUrl(), cachedToken, cachedName, cachedSnapshot, cachedAccountType,
+		api.pushStats(config.serverBaseUrl(), token, who, snapshot, type,
 			null, this::onPushResult);   // logout flush: client unreadable, skip skills
 	}
 
@@ -997,6 +1087,12 @@ public class ChroniclePlugin extends Plugin
 		return out;
 	}
 
+	/** The client's Gson, shared with the panel so nothing constructs its own. */
+	com.google.gson.Gson gson()
+	{
+		return gson;
+	}
+
 	net.runelite.client.game.ItemManager items()
 	{
 		return localStore.items();
@@ -1114,8 +1210,6 @@ public class ChroniclePlugin extends Plugin
 		executor.submit(() -> localStore.flush(localDir()));
 	}
 
-	private static final com.google.gson.Gson LOOT_GSON = new com.google.gson.Gson();
-
 	/** Client thread (ItemManager pricing). One-shot; flag set on success. */
 	private void importLootTracker()
 	{
@@ -1146,7 +1240,7 @@ public class ChroniclePlugin extends Plugin
 			}
 			try
 			{
-				JsonObject o = LOOT_GSON.fromJson(raw, JsonObject.class);
+				JsonObject o = gson.fromJson(raw, JsonObject.class);
 				String source = o.has("name") ? o.get("name").getAsString() : null;
 				if (source == null || source.isEmpty())
 				{
