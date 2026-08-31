@@ -166,9 +166,12 @@ public class ChroniclePlugin extends Plugin
 	private volatile boolean lootImportRunning;
 
 	// Counters the server computes from OTHER data at read time (untaken loot from
-	// forwarded events; resource value priced from the gathering counters). They can
-	// appear in the journal via old adoptions, but pushing them as counters would
-	// double-present them — the only keys the upward sync withholds.
+	// forwarded events; resource value priced from the gathering counters), so
+	// pushing them as counters would double-present them — the only keys the
+	// upward sync withholds. The journal now mints resourcesGatheredValue itself,
+	// at the prices that stood when the ore came out of the rock; that figure is
+	// the local record's, and it stays home rather than colliding with the
+	// server's own re-derivation at today's market.
 	private static final java.util.Set<String> PUSH_EXCLUDE = new java.util.HashSet<>(
 		java.util.Arrays.asList("untakenLootValue", "untakenLootCount", "resourcesGatheredValue"));
 
@@ -225,6 +228,11 @@ public class ChroniclePlugin extends Plugin
 				localStore.addConsumableValue(key, gp, who);
 			}
 		});
+		// The gathered-item ledger IS the journal: the resolver notes each gather
+		// into the record and the drop tracker reads it back, so an ore mined a
+		// month ago still counts as a resource when it is finally binned. A
+		// session-scoped set would answer that question wrong at every login.
+		counters.setGatheredLedger(localStore);
 		eventBus.register(counters);
 		// Passive collection-log capture — reads the completion fraction on login
 		// and scrapes whatever clog page the player opens themselves; the push loop
@@ -1055,7 +1063,11 @@ public class ChroniclePlugin extends Plugin
 		{
 			// not a real skill name, or the client is unreadable — no pace
 		}
-		return PaceBook.forSkill(spine, skill, xp);
+		// The spine files every skill under its lowercase name (harvestSkills
+		// writes them that way), while the panel asks with the section's own
+		// capitalisation — so the lookup has to be normalised or it silently
+		// finds no day on which the skill ever moved.
+		return PaceBook.forSkill(spine, skill.toLowerCase(java.util.Locale.ROOT), xp);
 	}
 
 	java.util.List<LocalStore.UntakenRow> untakenSources()
