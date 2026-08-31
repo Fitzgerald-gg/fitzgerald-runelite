@@ -64,6 +64,11 @@ public class ChroniclePlugin extends Plugin
 {
 	static final String GROUP = ChronicleConfig.GROUP; // "chronicle"
 	static final String KEY_TOKEN = "token";
+	// RSProfile-scoped (account-hash-bound, so it survives renames — the same
+	// slot the token lives in): the display name this account's journal is
+	// filed under. Lets the journal FOLLOW an in-game rename instead of the
+	// new name starting a blank record.
+	static final String KEY_JOURNAL_NAME = "journalName";
 
 	@Inject
 	private Client client;
@@ -407,8 +412,22 @@ public class ChroniclePlugin extends Plugin
 		}
 		refreshPanel();
 		final String who = name;
+		// The account's RSProfile remembers which name its journal is filed
+		// under. A different name at login means an in-game rename — move the
+		// journal (and its history spine) to the new slug BEFORE loading, so
+		// the record continues instead of restarting blank. The pointer is
+		// read here (client thread) and updated after the load settles.
+		final String priorName = trimToNull(
+			configManager.getRSProfileConfiguration(GROUP, KEY_JOURNAL_NAME));
 		executor.submit(() ->
 		{
+			if (priorName != null && !LocalStore.slug(priorName).equals(LocalStore.slug(who))
+				&& LocalStore.migrateJournalFiles(localDir(), priorName, who))
+			{
+				chat("Chronicle: your journal followed the rename — "
+					+ priorName + " is now " + who + ".");
+			}
+			configManager.setRSProfileConfiguration(GROUP, KEY_JOURNAL_NAME, who);
 			localStore.load(localDir(), who);
 			clientThread.invoke(this::refreshLocal);
 		});

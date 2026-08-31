@@ -1548,6 +1548,47 @@ class LocalStore
 		return out;
 	}
 
+	/**
+	 * Carry an account's journal across an in-game rename: move
+	 * {@code <oldslug>.json} and {@code <oldslug>.history.jsonl} to the new
+	 * name's slugs. Never clobbers — a file already present under the new slug
+	 * (a swap back to a name that journaled here before, or another account's
+	 * record) is left untouched and simply becomes the record that loads.
+	 * Returns true when the journal file itself moved.
+	 */
+	static boolean migrateJournalFiles(File dir, String oldName, String newName)
+	{
+		String oldSlug = slug(oldName);
+		String newSlug = slug(newName);
+		if (oldSlug.equals(newSlug))
+		{
+			return false;
+		}
+		boolean movedJournal = false;
+		String[][] pairs = {
+			{oldSlug + ".json", newSlug + ".json"},
+			{oldSlug + ".history.jsonl", newSlug + ".history.jsonl"},
+		};
+		for (String[] pair : pairs)
+		{
+			File from = new File(dir, pair[0]);
+			File to = new File(dir, pair[1]);
+			if (!from.isFile() || to.exists())
+			{
+				continue;
+			}
+			if (from.renameTo(to))
+			{
+				movedJournal |= pair[1].endsWith(".json");
+			}
+			else
+			{
+				log.debug("journal rename failed: {} -> {}", from, to);
+			}
+		}
+		return movedJournal;
+	}
+
 	static String slug(String rsn)
 	{
 		String s = rsn == null ? "" : rsn.trim().toLowerCase().replaceAll("[^a-z0-9]+", "-");
