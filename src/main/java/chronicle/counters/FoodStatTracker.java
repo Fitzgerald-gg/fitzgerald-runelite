@@ -128,6 +128,15 @@ public class FoodStatTracker implements StatTracker
 	/** Previous inventory contents, used to spot the eaten stack shrinking. */
 	private Map<Integer, Integer> inventorySnapshot;
 
+	/**
+	 * Dose price per potion name, remembered for as long as the client stays logged in.
+	 * The lookup behind it walks every tradeable item name, and in a long fight a dose
+	 * lands every few dozen ticks — on the client thread, where that walk is felt. A
+	 * potion's 4-dose price does not move underneath a session, so one lookup per
+	 * distinct name is enough.
+	 */
+	private final Map<String, Integer> dosePrices = new HashMap<>();
+
 	// Journal sink for per-consumable gp (typed key -> price at use). Nullable —
 	// tests build the tracker bare and the counts still flow without it.
 	private final java.util.function.BiConsumer<String, Integer> consumableSink;
@@ -221,6 +230,14 @@ public class FoodStatTracker implements StatTracker
 		{
 			reset();
 		}
+		// Remembered dose prices are world-wide GE figures, the same for every account,
+		// so they carry nothing personal — but the login screen is the one transition
+		// where nothing at all should survive, and it is rare enough that dropping them
+		// costs a single lookup per potion rather than one per region cross.
+		if (event.getGameState() == GameState.LOGIN_SCREEN)
+		{
+			dosePrices.clear();
+		}
 	}
 
 	/** Drop all inferred state. Safe to call at any time; the next tick rebuilds it. */
@@ -303,14 +320,31 @@ public class FoodStatTracker implements StatTracker
 		{
 			return 0;
 		}
+		Integer known = dosePrices.get(potion);
+		if (known != null)
+		{
+			return known;
+		}
+		String fourDose = potion + "(4)";
 		try
 		{
-			for (ItemPrice p : itemManager.search(potion + "(4)"))
+			List<ItemPrice> matches = itemManager.search(fourDose);
+			for (ItemPrice p : matches)
 			{
-				if (p.getName().equalsIgnoreCase(potion + "(4)"))
+				if (p.getName().equalsIgnoreCase(fourDose))
 				{
-					return p.getPrice() / 4;
+					int dose = p.getPrice() / 4;
+					dosePrices.put(potion, dose);
+					return dose;
 				}
+			}
+			// An empty result means just as easily that the client's price list has not
+			// finished loading, and remembering a zero from that would leave the potion
+			// unpriced for the rest of the session. Only a search that came back with
+			// something proves this name has no 4-dose form worth asking about again.
+			if (!matches.isEmpty())
+			{
+				dosePrices.put(potion, 0);
 			}
 		}
 		catch (RuntimeException ignored)

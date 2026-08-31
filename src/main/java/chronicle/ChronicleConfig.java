@@ -45,10 +45,11 @@ public interface ChronicleConfig extends Config
 		description = "ALSO send a copy of your journal (loot, levels, kill counts, "
 			+ "collection log, clues, quests, diaries, combat achievements, slayer "
 			+ "tasks, pets, deaths, group-storage movements) UPWARD to the server "
-			+ "below. One-way: the plugin never reads anything back, and every "
-			+ "feature works identically with this off. Off by default: without "
-			+ "this, Chronicle never touches the network. Requires a server URL "
-			+ "and a token.",
+			+ "below. The only thing ever read back is a one-time import, once per "
+			+ "account, of the slayer-task history that server already holds for "
+			+ "you; nothing else is downloaded, and every feature works identically "
+			+ "with this off. Off by default: without this, Chronicle never touches "
+			+ "the network. Requires a server URL and a token.",
 		warning = "This feature submits your IP address, and your own account's activity, "
 			+ "to the 3rd-party server you configure below — a server not controlled or "
 			+ "verified by the RuneLite developers",

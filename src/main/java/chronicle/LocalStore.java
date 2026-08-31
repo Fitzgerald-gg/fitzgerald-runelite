@@ -125,9 +125,17 @@ class LocalStore
 					loaded = el.getAsJsonObject();
 				}
 			}
-			catch (Exception e)   // noqa: a corrupt/half-written file just starts fresh
+			catch (Exception e)   // noqa: a torn or hand-broken file starts fresh, aside
 			{
-				log.debug("local record unreadable, starting fresh", e);
+				log.warn("local record unreadable: {}", f, e);
+			}
+			if (loaded == null)
+			{
+				// This file is the only copy of the account's history, and the very
+				// next flush would write a blank skeleton straight over it. A torn
+				// write usually loses only the tail, so keep the bytes: set them
+				// aside under a dated sidecar the player can repair or hand back.
+				setAside(f, "corrupt");
 			}
 		}
 		if (loaded == null)
@@ -297,9 +305,16 @@ class LocalStore
 				slayerLoot(slayerTask, slayerAssignment, batchValue);
 			}
 			JsonObject drops = root.getAsJsonObject("drops");
-			JsonObject src = drops.has(source) ? drops.getAsJsonObject(source) : new JsonObject();
-			if (!drops.has(source))
+			// Every read below is field-by-field guarded, the way the seeding path
+			// is: a source entry written by an older era of the journal (or edited
+			// by hand) can be missing its counters or not be an object at all, and
+			// an exception thrown here on the client thread is swallowed by the
+			// event bus — this source's drops would then stop accruing for good.
+			JsonObject src = drops.has(source) && drops.get(source).isJsonObject()
+				? drops.getAsJsonObject(source) : null;
+			if (src == null)
 			{
+				src = new JsonObject();
 				src.addProperty("kc", 0);
 				src.addProperty("loots", 0);
 				src.addProperty("value", 0);
@@ -308,10 +323,10 @@ class LocalStore
 			}
 			if (kc != null)
 			{
-				src.addProperty("kc", Math.max(src.get("kc").getAsInt(), kc));
+				src.addProperty("kc", Math.max(asLong(src.get("kc")), kc.longValue()));
 			}
-			src.addProperty("loots", src.get("loots").getAsInt() + 1);
-			src.addProperty("value", src.get("value").getAsLong() + batchValue);
+			src.addProperty("loots", asLong(src.get("loots")) + 1);
+			src.addProperty("value", asLong(src.get("value")) + batchValue);
 			sessionLoots++;
 			sessionLootValue += batchValue;
 			long[] tally = sessionSources.computeIfAbsent(source, k -> new long[2]);
@@ -327,22 +342,26 @@ class LocalStore
 			{
 				recentDrops.removeLast();
 			}
-			if (pbCand != null && pbCand > 0
-				&& (!src.has("pb") || pbCand < src.get("pb").getAsDouble()))
+			double bestPb = asDouble(src.get("pb"));
+			if (pbCand != null && pbCand > 0 && (bestPb <= 0 || pbCand < bestPb))
 			{
 				src.addProperty("pb", pbCand);
 			}
 
+			if (!src.has("items") || !src.get("items").isJsonObject())
+			{
+				src.add("items", new JsonObject());
+			}
 			JsonObject bag = src.getAsJsonObject("items");
 			for (JsonElement pe : priced)
 			{
 				JsonObject p = pe.getAsJsonObject();
 				String key = String.valueOf(p.get("id").getAsInt());
-				if (bag.has(key))
+				if (bag.has(key) && bag.get(key).isJsonObject())
 				{
 					JsonObject cur = bag.getAsJsonObject(key);
-					cur.addProperty("qty", cur.get("qty").getAsLong() + p.get("qty").getAsLong());
-					cur.addProperty("value", cur.get("value").getAsLong() + p.get("value").getAsLong());
+					cur.addProperty("qty", asLong(cur.get("qty")) + p.get("qty").getAsLong());
+					cur.addProperty("value", asLong(cur.get("value")) + p.get("value").getAsLong());
 					cur.addProperty("name", p.get("name").getAsString());
 				}
 				else
@@ -1491,6 +1510,18 @@ class LocalStore
 		}
 	}
 
+	private static double asDouble(JsonElement e)
+	{
+		try
+		{
+			return e != null && !e.isJsonNull() ? e.getAsDouble() : 0;
+		}
+		catch (RuntimeException ex)
+		{
+			return 0;
+		}
+	}
+
 	/** The journal's stored collection log, deep-copied for the panel. */
 	JsonObject clogSnapshot()
 	{
@@ -1551,10 +1582,21 @@ class LocalStore
 	/**
 	 * Carry an account's journal across an in-game rename: move
 	 * {@code <oldslug>.json} and {@code <oldslug>.history.jsonl} to the new
-	 * name's slugs. Never clobbers — a file already present under the new slug
-	 * (a swap back to a name that journaled here before, or another account's
-	 * record) is left untouched and simply becomes the record that loads.
-	 * Returns true when the journal file itself moved.
+	 * name's slugs. Returns true when the journal file itself moved.
+	 *
+	 * <p>A file already filed under the new slug is set aside rather than left
+	 * to be adopted. The carried journal is the one THIS account has been
+	 * writing to; the resident one is a record nobody here has touched since,
+	 * and freed names get taken — it may well belong to another account that
+	 * once held this name. Loading that record would let this account
+	 * accumulate on top of a stranger's lifetime and, once enrolled, push those
+	 * totals upward under its own token, where the server's floor-merge makes
+	 * them permanent. Nothing is deleted: the resident record keeps every byte
+	 * under a dated sidecar name.
+	 *
+	 * <p>The record and its history spine move together or not at all, for the
+	 * same reason — a spine filed under a slug whose journal belongs to someone
+	 * else would splice two accounts' baselines into one calendar.
 	 */
 	static boolean migrateJournalFiles(File dir, String oldName, String newName)
 	{
@@ -1564,29 +1606,53 @@ class LocalStore
 		{
 			return false;
 		}
-		boolean movedJournal = false;
-		String[][] pairs = {
-			{oldSlug + ".json", newSlug + ".json"},
-			{oldSlug + ".history.jsonl", newSlug + ".history.jsonl"},
-		};
-		for (String[] pair : pairs)
+		File journal = new File(dir, oldSlug + ".json");
+		if (!journal.isFile())
 		{
-			File from = new File(dir, pair[0]);
-			File to = new File(dir, pair[1]);
-			if (!from.isFile() || to.exists())
-			{
-				continue;
-			}
-			if (from.renameTo(to))
-			{
-				movedJournal |= pair[1].endsWith(".json");
-			}
-			else
-			{
-				log.debug("journal rename failed: {} -> {}", from, to);
-			}
+			// Nothing of this account's to carry, so nothing here earns the right
+			// to disturb whatever is filed under the new name.
+			return false;
 		}
-		return movedJournal;
+		File target = new File(dir, newSlug + ".json");
+		if (target.exists() && !setAside(target, "conflict"))
+		{
+			return false;
+		}
+		if (!journal.renameTo(target))
+		{
+			log.warn("journal rename failed: {} -> {}", journal, target);
+			return false;
+		}
+		File history = new File(dir, oldSlug + ".history.jsonl");
+		File historyTarget = new File(dir, newSlug + ".history.jsonl");
+		if (history.isFile() && (!historyTarget.exists() || setAside(historyTarget, "conflict"))
+			&& !history.renameTo(historyTarget))
+		{
+			log.warn("history rename failed: {} -> {}", history, historyTarget);
+		}
+		return true;
+	}
+
+	/**
+	 * Move a file out of the way under a dated sidecar name, keeping every byte.
+	 * False when it could not be moved, so a caller can leave things as they are
+	 * instead of acting on a clearance that never happened.
+	 */
+	private static boolean setAside(File f, String tag)
+	{
+		File aside = new File(f.getParentFile(),
+			f.getName() + "." + tag + "-" + System.currentTimeMillis());
+		try
+		{
+			Files.move(f.toPath(), aside.toPath(), StandardCopyOption.REPLACE_EXISTING);
+			log.warn("kept {} as {}", f.getName(), aside.getName());
+			return true;
+		}
+		catch (Exception e)   // noqa: best-effort; the caller decides what that costs
+		{
+			log.warn("could not set aside {}", f, e);
+			return false;
+		}
 	}
 
 	static String slug(String rsn)
@@ -1604,7 +1670,15 @@ class LocalStore
 	private static void writeAtomic(File dest, String content) throws IOException
 	{
 		File tmp = new File(dest.getParentFile(), dest.getName() + ".tmp");
-		Files.write(tmp.toPath(), content.getBytes(StandardCharsets.UTF_8));
+		try (java.io.FileOutputStream out = new java.io.FileOutputStream(tmp))
+		{
+			out.write(content.getBytes(StandardCharsets.UTF_8));
+			// The move below is atomic over the file's NAME, not over its contents:
+			// without forcing the bytes down first, a power cut between the write
+			// and the flush leaves the new name pointing at a zero-length or
+			// half-written record — the very file the load path has to abandon.
+			out.getFD().sync();
+		}
 		try
 		{
 			Files.move(tmp.toPath(), dest.toPath(),

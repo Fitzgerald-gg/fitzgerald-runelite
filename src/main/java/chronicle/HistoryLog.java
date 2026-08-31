@@ -40,8 +40,10 @@ class HistoryLog
 	// enough to make the day-rollover append fire exactly once.
 	private volatile String lastAppendedDate;
 
-	/** Append today's closing baseline. Call at login-load, day rollover, logout. */
-	synchronized void append(File dir, String rsn, Map<String, Integer> skills,
+	/** Append today's closing baseline. Call at login-load, day rollover, logout.
+	 *  Both maps are long-valued: total xp outgrows an int, and the reader takes
+	 *  every number back as a long. */
+	synchronized void append(File dir, String rsn, Map<String, Long> skills,
 		Map<String, Long> counters)
 	{
 		if (rsn == null || rsn.isEmpty())

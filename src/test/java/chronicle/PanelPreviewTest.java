@@ -12,6 +12,8 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -57,6 +59,18 @@ public class PanelPreviewTest
 		File out = new File("build/panel-preview");
 		//noinspection ResultOfMethodCallIgnored
 		out.mkdirs();
+		// A PNG left over from an earlier run is indistinguishable from one this
+		// run produced, so a surface that stopped rendering would keep showing
+		// its last good picture. Every preview here is written from scratch.
+		File[] stale = out.listFiles((d, n) -> n.endsWith(".png"));
+		if (stale != null)
+		{
+			for (File f : stale)
+			{
+				//noinspection ResultOfMethodCallIgnored
+				f.delete();
+			}
+		}
 
 		renderSet(out, "fix", fixturePlugin());
 
@@ -332,17 +346,18 @@ public class PanelPreviewTest
 	private StubPlugin realJournalPlugin()
 	{
 		File dir = new File(System.getProperty("user.home"), ".runelite/chronicle");
-		File journal = new File(dir, "oxli.json");
-		if (!journal.isFile())
+		File journal = newestJournal(dir);
+		if (journal == null)
 		{
 			return null;
 		}
+		String rsn = journalRsn(journal);
 		ItemManager im = mockItems();
 		LocalStore store = new LocalStore(im, new Gson());
-		store.load(dir, "Oxli");
+		store.load(dir, rsn);
 
 		StubPlugin s = new StubPlugin(im);
-		s.rsn = "Oxli";
+		s.rsn = rsn;
 		s.sources = store.dropSources();
 		s.untaken = store.untakenSources();
 		s.recent = store.recentDrops();
@@ -352,12 +367,67 @@ public class PanelPreviewTest
 		s.lifetime = store.trackersSnapshot();
 		s.feed = store.feedNewest(2000);
 		s.store = store;
-		s.history = new HistoryLog(new Gson()).read(dir, "Oxli");
+		s.history = new HistoryLog(new Gson()).read(dir, rsn);
 		// The real journey + dryness, through the real local engines.
 		s.journey = store.slayerJourney();
 		s.consumVals = store.consumableValues();
 		s.grinds = new GrindBook(new Gson()).grinds(store.clogSnapshot(), store.dropSources());
 		return s;
+	}
+
+	/**
+	 * The most recently written journal in the directory. A rename follows the
+	 * account to a new slug, so naming one file here would quietly stop the real
+	 * set from rendering the day the machine's account is renamed. The history
+	 * spine ({@code .history.jsonl}) and half-written {@code .tmp} files are not
+	 * journals and do not match.
+	 */
+	private static File newestJournal(File dir)
+	{
+		File[] found = dir.listFiles((d, n) -> n.endsWith(".json"));
+		File newest = null;
+		if (found != null)
+		{
+			for (File f : found)
+			{
+				if (f.isFile() && (newest == null || f.lastModified() > newest.lastModified()))
+				{
+					newest = f;
+				}
+			}
+		}
+		return newest;
+	}
+
+	/**
+	 * The account name this journal was written under. LocalStore reaches a file
+	 * by slugging the name it is given, so a name that slugs elsewhere loads an
+	 * empty skeleton instead of the record — the name is therefore only trusted
+	 * when it slugs back to this very file. A slug is its own slug, so the file's
+	 * own stem is the fallback that still resolves.
+	 */
+	private static String journalRsn(File journal)
+	{
+		String name = journal.getName();
+		String stem = name.substring(0, name.length() - ".json".length());
+		try
+		{
+			String txt = new String(Files.readAllBytes(journal.toPath()), StandardCharsets.UTF_8);
+			JsonObject o = new Gson().fromJson(txt, JsonObject.class);
+			if (o != null && o.has("rsn") && o.get("rsn").isJsonPrimitive())
+			{
+				String rsn = o.get("rsn").getAsString();
+				if (LocalStore.slug(rsn).equals(stem))
+				{
+					return rsn;
+				}
+			}
+		}
+		catch (Exception ignored)
+		{
+			// An unreadable record still renders under the stem it is filed by.
+		}
+		return stem;
 	}
 
 	private ItemManager mockItems()

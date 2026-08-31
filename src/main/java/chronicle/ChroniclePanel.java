@@ -39,6 +39,7 @@ import javax.swing.JPasswordField;
 import javax.swing.JScrollPane;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
 import javax.swing.Timer;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -253,6 +254,9 @@ class ChroniclePanel extends PluginPanel
 		});
 		homeTicker.start();
 
+		// The History tab's reads are primed now, off the EDT, rather than on
+		// the click that opens it.
+		gatherHistory();
 		rebuild();
 	}
 
@@ -668,11 +672,22 @@ class ChroniclePanel extends PluginPanel
 		journeyFetching = false;
 		grindsCache = null;
 		grindsFetching = false;
+		historySpine = null;
+		historyFeed = new ArrayList<>();
+		historyDay = null;
+		historyFeedTs = 0;
+		// Any pass reading the previous journal is disowned rather than waited
+		// for, so the new one starts reading at once.
+		historyEpoch++;
+		historyGathering = false;
 		detailItem = null;
 		detailSource = null;
 		detailStack.clear();
 		drillShown.clear();
 		statsExpanded.clear();
+		// A journal has just mounted and the panel is otherwise idle: the best
+		// moment to read the spine is before anyone asks for it.
+		gatherHistory();
 		rebuild();
 	}
 
@@ -1551,10 +1566,27 @@ class ChroniclePanel extends PluginPanel
 						p.add(ghostRow(sec.equals("Teleports") ? "Other means" : "Other",
 							fmt(ghost)));
 					}
-					// A floor-only section (Agility) opens to its single total row.
+					// A section with no typed rows opens to its floors themselves,
+					// one row each. They are separate verbs (bones buried and
+					// bones offered are different acts), so a single row carrying
+					// the section's whole count under the first floor's name
+					// credits one verb with another's work.
 					if (rows.isEmpty() && floor > 0)
 					{
-						p.add(row(sectionFloorLabel(sec), fmt(floor), null));
+						List<Map.Entry<String, Long>> floors = new ArrayList<>();
+						for (String fk : StatRegistry.floorKeys(sec))
+						{
+							long fv = counters.getOrDefault(fk, 0L);
+							if (fv > 0 && !StatRegistry.hidden(fk))
+							{
+								floors.add(new java.util.AbstractMap.SimpleEntry<>(fk, fv));
+							}
+						}
+						floors.sort(StatRegistry::compareRows);
+						for (Map.Entry<String, Long> fe : floors)
+						{
+							p.add(row(StatRegistry.label(fe.getKey()), fmt(fe.getValue()), null));
+						}
 					}
 				}
 				if (sec.equals("Teleports") && destRows != null && !destRows.isEmpty())
@@ -1730,13 +1762,6 @@ class ChroniclePanel extends PluginPanel
 		return StatRegistry.isGp(e.getKey()) ? gp(e.getValue()) + " gp" : fmt(e.getValue());
 	}
 
-	/** The row label a floor takes when it stands alone for its section. */
-	private static String sectionFloorLabel(String sec)
-	{
-		List<String> keys = StatRegistry.floorKeys(sec);
-		return keys.isEmpty() ? sec : StatRegistry.label(keys.get(0));
-	}
-
 	/** The reconciliation remainder: present, quiet, never the headline. */
 	private static JPanel ghostRow(String left, String right)
 	{
@@ -1746,10 +1771,116 @@ class ChroniclePanel extends PluginPanel
 		return r;
 	}
 
+	// How deep the milestone scan reads into the feed: wide enough that a
+	// year-long window still finds its own entries.
+	private static final int HISTORY_FEED_SCAN = 2000;
+
+	// The two reads this tab lives on, held between rebuilds. The calendar
+	// spine is a whole parse of an append-only file that grows for the life of
+	// the account, and the feed slice is handed over as deep copies while the
+	// store holds its lock — on the EDT that cost lands as a stall on every
+	// pill click and every push-driven refresh, and it gets worse the longer
+	// the account has been journalled. Both are gathered on a worker thread
+	// instead (the client's shared scheduler has no business carrying a
+	// multi-megabyte parse) and served from here until the journal moves.
+	private java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> historySpine;
+	private List<JsonObject> historyFeed = new ArrayList<>();
+	// What that pair was true of: the day it was read (baselines close at the
+	// rollover) and the newest feed entry it saw. Either one moving means the
+	// journal has changed underneath the cache.
+	private java.time.LocalDate historyDay;
+	private long historyFeedTs;
+	private boolean historyGathering;
+	// A gather still in flight when a different journal mounts must not land —
+	// its spine belongs to the account that has gone.
+	private int historyEpoch;
+
+	/** One gathered pass over the journal's calendar spine and its feed. */
+	private static final class HistoryData
+	{
+		final java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> spine;
+		final List<JsonObject> feed;
+		final java.time.LocalDate day;
+
+		HistoryData(java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> spine,
+			List<JsonObject> feed, java.time.LocalDate day)
+		{
+			this.spine = spine;
+			this.feed = feed;
+			this.day = day;
+		}
+	}
+
+	/**
+	 * Read the spine and the feed slice off the EDT, then mount. Primed when
+	 * the panel is built and whenever a journal mounts, so the tab is normally
+	 * warm before it is first opened; a failed read simply leaves the cache
+	 * cold for the next rebuild to ask again. EDT only.
+	 */
+	private void gatherHistory()
+	{
+		if (historyGathering)
+		{
+			return;
+		}
+		historyGathering = true;
+		final int epoch = historyEpoch;
+		new SwingWorker<HistoryData, Void>()
+		{
+			@Override
+			protected HistoryData doInBackground()
+			{
+				return new HistoryData(plugin.historyBaselines(),
+					plugin.feedNewest(HISTORY_FEED_SCAN), java.time.LocalDate.now());
+			}
+
+			@Override
+			protected void done()
+			{
+				if (epoch != historyEpoch)
+				{
+					// Another account mounted while this pass was reading; the
+					// gather it started owns the cache now.
+					return;
+				}
+				historyGathering = false;
+				HistoryData d;
+				try
+				{
+					d = get();
+				}
+				catch (InterruptedException e)
+				{
+					Thread.currentThread().interrupt();
+					return;
+				}
+				catch (java.util.concurrent.ExecutionException e)
+				{
+					// A read that failed leaves the cache cold rather than half
+					// true — the next rebuild asks again.
+					return;
+				}
+				historySpine = d.spine;
+				historyFeed = d.feed;
+				historyDay = d.day;
+				historyFeedTs = newestTs(d.feed);
+				if (view == View.HISTORY)
+				{
+					rebuild();
+				}
+			}
+		}.execute();
+	}
+
+	/** The newest feed entry's stamp, or 0 — the cheap staleness probe. */
+	private static long newestTs(List<JsonObject> feed)
+	{
+		return feed.isEmpty() ? 0 : safeLong(feed.get(0).get("ts"));
+	}
+
 	private JPanel buildHistory()
 	{
 		JPanel p = column();
-		java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> hist = plugin.historyBaselines();
 
 		// granularity pills
 		JPanel pills = new JPanel(new GridLayout(1, 4, 3, 3));
@@ -1868,6 +1999,21 @@ class ChroniclePanel extends PluginPanel
 		p.add(stepper);
 		p.add(vgap(6));
 
+		// Ask for a fresh pass when the day has turned or the feed has grown
+		// since the last one — probing the newest entry costs a single copy,
+		// where the scan below costs thousands. The stale pair still renders
+		// meanwhile, so only a genuinely cold cache shows a waiting line.
+		if (historySpine == null || !java.time.LocalDate.now().equals(historyDay)
+			|| newestTs(plugin.feedNewest(1)) != historyFeedTs)
+		{
+			gatherHistory();
+		}
+		if (historySpine == null)
+		{
+			p.add(note("Reading the journal's calendar spine…"));
+			return p;
+		}
+		java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> hist = historySpine;
 
 		// baselines bounding the period: closing state the day before it began,
 		// and the last close inside it
@@ -1880,8 +2026,8 @@ class ChroniclePanel extends PluginPanel
 			if (hist.isEmpty())
 			{
 				empty = "The record starts today — baselines close at each login, "
-					+ "day rollover and logout. Cloud sync adopts your server's "
-					+ "archive automatically.";
+					+ "day rollover and logout, and a period is the distance "
+					+ "between two of them.";
 			}
 			else if (!hist.isEmpty() && hist.firstKey().isBefore(pStart)
 				&& ("Day".equals(histGranularity) || "Week".equals(histGranularity)))
@@ -2009,7 +2155,7 @@ class ChroniclePanel extends PluginPanel
 			long fromMs = pStart.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
 			long toMs = end.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
 			List<JsonObject> milestones = new ArrayList<>();
-			for (JsonObject e : plugin.feedNewest(2000))
+			for (JsonObject e : historyFeed)
 			{
 				long ts = e.has("ts") ? e.get("ts").getAsLong() : 0;
 				if (ts >= fromMs && ts < toMs)

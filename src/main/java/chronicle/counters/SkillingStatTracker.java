@@ -26,7 +26,6 @@ package chronicle.counters;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
 import net.runelite.api.events.*;
-import net.runelite.client.plugins.xptracker.XpTrackerService;
 import net.runelite.client.util.Text;
 
 import java.util.ArrayList;
@@ -45,7 +44,6 @@ public class SkillingStatTracker implements StatTracker
 {
 	private final StatStore statStore;
 	private final Client client;
-	private final XpTrackerService xpService;
 	// Local-first: the same tuple derives typed counters HERE, instantly —
 	// the buffered copy still travels for cloud users (floor-merge reconciles).
 	private final SkillDeriver deriver;
@@ -76,6 +74,17 @@ public class SkillingStatTracker implements StatTracker
 	private Map<Integer, Integer> invSnapshot = null;
 
 	// --- content-proof weeds counter (Farming raking is 0 XP → no tuple) ---
+	// Weeds are tradeable, bankable and droppable, so their arrival in the pack only
+	// means a patch was raked while a rake is actually under way. Ungated, a bank
+	// withdrawal, a trade or a ground pickup mints patches that were never raked —
+	// and the server's floor-merge makes that inflation permanent, so an honest push
+	// can never walk it back. The window opens on a "Rake" click and is generous
+	// enough to cover the walk to the patch and the swings that clear it.
+	private static final int RAKE_TTL_TICKS = 30;
+	// A patch holds at most three weeds, so a bigger jump is a stack arriving from
+	// somewhere else and is clamped rather than trusted.
+	private static final int RAKE_MAX_PER_EVENT = 3;
+	private int rakeTtl = 0;
 
 	// Residual chat — ONLY things NO XP drop can see: 0-XP outcomes. Gather/produce
 	// verbs are DELIBERATELY absent (the XP tuples count those; forwarding chat too
@@ -89,12 +98,10 @@ public class SkillingStatTracker implements StatTracker
 		"Rooftop lap", "lap count" // Agility laps (not 1:1 with obstacle XP)
 	};
 
-	public SkillingStatTracker(StatStore statStore, Client client,
-	                           XpTrackerService xpTrackerService, SkillDeriver deriver)
+	public SkillingStatTracker(StatStore statStore, Client client, SkillDeriver deriver)
 	{
 		this.statStore = statStore;
 		this.client = client;
-		this.xpService = xpTrackerService;
 		this.deriver = deriver;
 	}
 
@@ -156,6 +163,10 @@ public class SkillingStatTracker implements StatTracker
 			lastObjectId = event.getId();   // live object id (not the stump) — legacy WC/Mining signal
 			objectTtl = TTL_TICKS;
 		}
+		if (object && o.equals("rake"))
+		{
+			rakeTtl = RAKE_TTL_TICKS;
+		}
 	}
 
 	@Override
@@ -182,13 +193,16 @@ public class SkillingStatTracker implements StatTracker
 				{
 					tickGainedItem = e.getKey();
 					tickGainedQty = d;      // +10 darts, +N runes, +1 bar/bow/gem/log/fish
-					if (e.getKey() == ItemID.WEEDS)
+					if (e.getKey() == ItemID.WEEDS && rakeTtl > 0)
 					{
 						// Raking awards no experience, so no tuple is ever forwarded for
 						// it and the server cannot derive it. Weeds arriving in the pack
-						// is the only evidence a patch was raked — and this loop has
-						// already computed that delta, so it costs nothing to read here.
-						statStore.incrementStatBy(PATCHES_RAKED, d);
+						// mid-rake are the only evidence a patch was raked — and this loop
+						// has already computed that delta, so it costs nothing to read here.
+						statStore.incrementStatBy(PATCHES_RAKED, Math.min(d, RAKE_MAX_PER_EVENT));
+						// One click rakes a patch clear over several swings, so the weed
+						// that just landed keeps the window open for the ones behind it.
+						rakeTtl = RAKE_TTL_TICKS;
 					}
 				}
 			}
@@ -249,6 +263,10 @@ public class SkillingStatTracker implements StatTracker
 		if (consumedTtl > 0)
 		{
 			consumedTtl--;
+		}
+		if (rakeTtl > 0)
+		{
+			rakeTtl--;
 		}
 
 	}
@@ -311,6 +329,7 @@ public class SkillingStatTracker implements StatTracker
 			objectTtl = 0;
 			lastTargetName = "";
 			targetTtl = 0;
+			rakeTtl = 0;
 		}
 	}
 

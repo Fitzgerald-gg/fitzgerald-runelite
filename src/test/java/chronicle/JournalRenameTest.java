@@ -14,8 +14,9 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * Pins the rename-follow file semantics: the journal and its history spine
- * move to the new name's slugs together, an existing target is never
- * clobbered, and a same-slug "rename" is a no-op.
+ * move to the new name's slugs together, a record already filed under the new
+ * name is set aside intact rather than adopted, and a same-slug "rename" is a
+ * no-op.
  */
 public class JournalRenameTest
 {
@@ -37,6 +38,14 @@ public class JournalRenameTest
 		return new String(Files.readAllBytes(new File(dir, name).toPath()), StandardCharsets.UTF_8);
 	}
 
+	/** The one file set aside under {@code prefix} (the timestamp suffix varies). */
+	private String onlySidecar(String prefix)
+	{
+		String[] hits = dir.list((d, name) -> name.startsWith(prefix));
+		assertTrue("no sidecar for " + prefix, hits != null && hits.length == 1);
+		return hits[0];
+	}
+
 	@Test
 	public void journalAndHistoryFollowTogether() throws Exception
 	{
@@ -50,26 +59,43 @@ public class JournalRenameTest
 	}
 
 	@Test
-	public void neverClobbersAnExistingTarget() throws Exception
+	public void aRecordAlreadyFiledUnderTheNewNameIsSetAsideNotAdopted() throws Exception
 	{
-		write("oxli.json", "{\"old\":true}");
-		write("counterfitz.json", "{\"kept\":true}");
-		// Swap back to a name that already journaled here: its record loads,
-		// the untargeted file stays put, nothing is overwritten.
-		assertFalse(LocalStore.migrateJournalFiles(dir, "Oxli", "Counterfitz"));
-		assertEquals("{\"kept\":true}", read("counterfitz.json"));
-		assertEquals("{\"old\":true}", read("oxli.json"));
+		write("oxli.json", "{\"mine\":true}");
+		// A freed name gets taken: what sits under it may be another account's
+		// record, and this account must never accumulate on top of it.
+		write("counterfitz.json", "{\"stranger\":true}");
+		assertTrue(LocalStore.migrateJournalFiles(dir, "Oxli", "Counterfitz"));
+		assertEquals("{\"mine\":true}", read("counterfitz.json"));
+		assertFalse(new File(dir, "oxli.json").exists());
+		// Nothing is deleted — the displaced record keeps every byte.
+		assertEquals("{\"stranger\":true}", read(onlySidecar("counterfitz.json.conflict-")));
 	}
 
 	@Test
-	public void historyStillMovesWhenOnlyJournalBlocked() throws Exception
+	public void theSpineIsSetAsideWithItsRecord() throws Exception
 	{
-		write("oxli.json", "{\"old\":true}");
+		write("oxli.json", "{\"mine\":true}");
 		write("oxli.history.jsonl", "{\"day\":1}");
-		write("counterfitz.json", "{\"kept\":true}");
-		assertFalse(LocalStore.migrateJournalFiles(dir, "Oxli", "Counterfitz"));
-		// The history spine had no conflict, so it followed.
+		write("counterfitz.json", "{\"stranger\":true}");
+		write("counterfitz.history.jsonl", "{\"day\":99}");
+		assertTrue(LocalStore.migrateJournalFiles(dir, "Oxli", "Counterfitz"));
 		assertEquals("{\"day\":1}", read("counterfitz.history.jsonl"));
+		assertEquals("{\"day\":99}", read(onlySidecar("counterfitz.history.jsonl.conflict-")));
+	}
+
+	@Test
+	public void aSpineWithoutItsRecordStaysPut() throws Exception
+	{
+		// No journal to carry, so the rename has no business touching the
+		// record filed under the new name — splicing this account's history
+		// onto it would join two baselines into one calendar.
+		write("oxli.history.jsonl", "{\"day\":1}");
+		write("counterfitz.json", "{\"stranger\":true}");
+		assertFalse(LocalStore.migrateJournalFiles(dir, "Oxli", "Counterfitz"));
+		assertEquals("{\"stranger\":true}", read("counterfitz.json"));
+		assertEquals("{\"day\":1}", read("oxli.history.jsonl"));
+		assertFalse(new File(dir, "counterfitz.history.jsonl").exists());
 	}
 
 	@Test

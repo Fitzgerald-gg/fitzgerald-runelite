@@ -26,7 +26,9 @@ import net.runelite.api.gameval.VarbitID;
  *
  * <p>All reads happen on the client thread via {@link #snapshot()}; the
  * change gate compares canonical JSON, so an untouched account costs one
- * string comparison per push interval.
+ * string comparison per push interval. A snapshot is built at most once per
+ * game tick: the journal refresh and the cloud push harvest in the same
+ * client-thread pass, and the quest sweep runs a clientscript per quest.
  */
 @Singleton
 public class AchievementSync
@@ -80,7 +82,15 @@ public class AchievementSync
 
 	// Canonical JSON of the last snapshot the server acknowledged; the fields
 	// are built in a fixed order, so string equality is a reliable change gate.
-	private String lastSynced;
+	// The ack lands on an HTTP callback thread and the gate is read on the
+	// client thread, so the reference has to be published safely.
+	private volatile String lastSynced;
+
+	// The tick's snapshot, reused by every caller within that tick. Written on
+	// the client thread and cleared by reset(); the snapshot is stored before
+	// the tick that validates it, so seeing the tick means seeing its copy.
+	private volatile JsonObject cached;
+	private volatile int cachedTick = -1;
 
 	@Inject
 	public AchievementSync(Client client)
@@ -88,9 +98,17 @@ public class AchievementSync
 		this.client = client;
 	}
 
-	/** Build the full state snapshot. Client thread only (scripts + varbits). */
+	/** The full state snapshot. Client thread only (scripts + varbits). The
+	 *  same copy is handed to every caller for the rest of the tick, so callers
+	 *  must treat it as read-only. */
 	JsonObject snapshot()
 	{
+		int tick = client.getTickCount();
+		JsonObject hit = cached;
+		if (hit != null && cachedTick == tick)
+		{
+			return hit;
+		}
 		JsonObject quests = new JsonObject();
 		for (Quest quest : Quest.values())
 		{
@@ -129,6 +147,8 @@ public class AchievementSync
 		root.add("quests", quests);
 		root.add("diaries", diaries);
 		root.add("combat", combat);
+		cached = root;
+		cachedTick = tick;
 		return root;
 	}
 
@@ -147,5 +167,7 @@ public class AchievementSync
 	void reset()
 	{
 		lastSynced = null;
+		cachedTick = -1;
+		cached = null;
 	}
 }

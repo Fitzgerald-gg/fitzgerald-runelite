@@ -67,9 +67,15 @@ public class ExperienceStatTracker implements StatTracker
 	@Override
 	public void onGameStateChanged(GameStateChanged event)
 	{
-		// The baseline only means anything within one login. Drop it when leaving
-		// so the next login's first readings reseed rather than counting a jump.
-		if (event.getGameState() != GameState.LOGGED_IN)
+		// The baseline is per-CHARACTER, so it survives a region load (LOADING, which
+		// fires constantly while moving) and a world hop (HOPPING — same account, same
+		// career totals). Only a real logout can be followed by a DIFFERENT account, so
+		// the login screen is the one state that invalidates it, and dropping it there
+		// keeps the next login's first readings from counting a whole account as gained.
+		// Clearing on every non-LOGGED_IN state instead swallowed the first gain after
+		// each transition as a fresh seed, losing XP drops that land on a region cross —
+		// routine while training on the move.
+		if (event.getGameState() == GameState.LOGIN_SCREEN)
 		{
 			xpSeen.clear();
 		}

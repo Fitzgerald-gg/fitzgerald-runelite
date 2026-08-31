@@ -12,6 +12,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.io.IOException;
+import java.io.Reader;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -29,6 +30,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
+import okhttp3.ResponseBody;
 
 /**
  * Thin async wrapper over the configured Chronicle server's HTTP API. Every call is fired on
@@ -42,6 +44,13 @@ public class ChronicleApiClient
 {
 	private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
 	private static final MediaType PNG = MediaType.get("image/png");
+
+	// The server base URL is the player's own setting, so a reply is never
+	// assumed to be well behaved. Anything past this ceiling is dropped unread
+	// rather than buffered, which stops a hostile or broken host from streaming
+	// the client out of heap; the largest reply the API has is a full slayer
+	// journey, a few hundred KB at the very worst.
+	private static final int MAX_BODY_CHARS = 1024 * 1024;
 
 	private final OkHttpClient http;
 	private final Gson gson;
@@ -405,6 +414,29 @@ public class ChronicleApiClient
 		}
 	}
 
+	// Ceilings for the one downward read. What comes back is inherited wholesale
+	// into the journal, which is the system of record, so every figure is bounded
+	// before it leaves this class: an absurd count or a far-future timestamp would
+	// otherwise be persisted to disk and skew the panel's totals for good. The
+	// task ceiling matches the journal's own runaway guard, and the reply arrives
+	// newest-first, so trimming at the ceiling keeps the recent history.
+	private static final int MAX_JOURNEY_TASKS = 1000;
+	private static final int MAX_TASK_NAME = 64;
+	private static final long MAX_COUNT = 10_000_000L;
+	private static final long MAX_GP = 1_000_000_000_000L;
+	private static final double MAX_TS = 4_102_444_800.0;   // 2100-01-01
+
+	private static long clamp(long v, long max)
+	{
+		return v < 0 ? 0 : Math.min(v, max);
+	}
+
+	private static double clampTs(double ts)
+	{
+		// Written as a negated test so a NaN reading falls through to zero.
+		return !(ts > 0) ? 0 : Math.min(ts, MAX_TS);
+	}
+
 	/** Fetch the slayer journey the server derives from on-task loot. */
 	public void fetchSlayerJourney(String baseUrl, String rsn,
 		Consumer<SlayerJourney> onDone)
@@ -433,37 +465,52 @@ public class ChronicleApiClient
 				{
 					if (r.code() == 200)
 					{
-						JsonObject o = gson.fromJson(r.body().charStream(), JsonObject.class);
-						java.util.List<SlayerTask> tasks = new java.util.ArrayList<>();
-						if (o.has("tasks") && o.get("tasks").isJsonArray())
+						String raw = readCapped(r);
+						JsonObject o = raw != null && !raw.isEmpty()
+							? gson.fromJson(raw, JsonObject.class) : null;
+						if (o != null)
 						{
-							for (JsonElement el : o.getAsJsonArray("tasks"))
+							java.util.List<SlayerTask> tasks = new java.util.ArrayList<>();
+							if (o.has("tasks") && o.get("tasks").isJsonArray())
 							{
-								if (!el.isJsonObject())
+								for (JsonElement el : o.getAsJsonArray("tasks"))
 								{
-									continue;
+									if (tasks.size() >= MAX_JOURNEY_TASKS)
+									{
+										break;
+									}
+									if (!el.isJsonObject())
+									{
+										continue;
+									}
+									JsonObject t = el.getAsJsonObject();
+									String name = str(t, "task");
+									if (name.length() > MAX_TASK_NAME)
+									{
+										name = name.substring(0, MAX_TASK_NAME);
+									}
+									// the site's kill figure: total_kills, else the target
+									long kills = t.has("total_kills") && !t.get("total_kills").isJsonNull()
+										? num(t, "total_kills").longValue()
+										: num(t, "count_target").longValue();
+									tasks.add(new SlayerTask(name, clamp(kills, MAX_COUNT),
+										clamp(num(t, "assignment").longValue(), MAX_COUNT),
+										clamp(num(t, "no_loot_kills").longValue(), MAX_COUNT),
+										clampTs(num(t, "ts").doubleValue()),
+										clamp(num(t, "total_value").longValue(), MAX_GP),
+										t.has("in_progress") && !t.get("in_progress").isJsonNull()
+											&& t.get("in_progress").getAsBoolean()));
 								}
-								JsonObject t = el.getAsJsonObject();
-								// the site's kill figure: total_kills, else the target
-								long kills = t.has("total_kills") && !t.get("total_kills").isJsonNull()
-									? num(t, "total_kills").longValue()
-									: num(t, "count_target").longValue();
-								tasks.add(new SlayerTask(str(t, "task"), kills,
-									num(t, "assignment").longValue(),
-									num(t, "no_loot_kills").longValue(),
-									num(t, "ts").doubleValue(),
-									num(t, "total_value").longValue(),
-									t.has("in_progress") && !t.get("in_progress").isJsonNull()
-										&& t.get("in_progress").getAsBoolean()));
 							}
+							out = new SlayerJourney(
+								(int) clamp(num(o, "completed_tasks_count").longValue(), MAX_COUNT),
+								clamp(num(o, "total_kills").longValue(), MAX_COUNT),
+								clamp(num(o, "total_value_gp").longValue(), MAX_GP),
+								clamp(num(o, "total_xp_est").longValue(), MAX_GP), tasks);
 						}
-						out = new SlayerJourney(num(o, "completed_tasks_count").intValue(),
-							num(o, "total_kills").longValue(),
-							num(o, "total_value_gp").longValue(),
-							num(o, "total_xp_est").longValue(), tasks);
 					}
 				}
-				catch (RuntimeException e)
+				catch (RuntimeException | IOException e)
 				{
 					log.debug("slayer journey parse failed", e);
 				}
@@ -563,14 +610,42 @@ public class ChronicleApiClient
 		return b.build();
 	}
 
+	/**
+	 * The whole reply as text, or null once it runs past {@link #MAX_BODY_CHARS}.
+	 * Reading through a fixed ceiling — rather than taking the body whole — means
+	 * a reply of any advertised (or unadvertised, chunked) length costs a fixed
+	 * amount of heap, and an over-long one abandons the connection mid-stream.
+	 */
 	@Nullable
-	private JsonObject parse(Response r) throws IOException
+	private static String readCapped(Response r) throws IOException
 	{
-		if (r.body() == null)
+		ResponseBody body = r.body();
+		if (body == null)
 		{
 			return null;
 		}
-		String s = r.body().string();
+		StringBuilder sb = new StringBuilder();
+		char[] buf = new char[8192];
+		try (Reader in = body.charStream())
+		{
+			int n;
+			while ((n = in.read(buf)) != -1)
+			{
+				if (sb.length() + n > MAX_BODY_CHARS)
+				{
+					log.debug("server reply over {} chars; discarded", MAX_BODY_CHARS);
+					return null;
+				}
+				sb.append(buf, 0, n);
+			}
+		}
+		return sb.toString();
+	}
+
+	@Nullable
+	private JsonObject parse(Response r) throws IOException
+	{
+		String s = readCapped(r);
 		if (s == null || s.isEmpty())
 		{
 			return null;

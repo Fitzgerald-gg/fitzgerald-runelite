@@ -11,6 +11,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -909,7 +910,7 @@ public class SkillDeriver
 			return null;
 		}
 		String low = n.toLowerCase(Locale.ROOT);
-		for (Rule r : itemRules().getOrDefault(skill, new ArrayList<>()))
+		for (Rule r : itemRules().getOrDefault(skill, Collections.emptyList()))
 		{
 			boolean hit = false;
 			switch (r.match == null ? "" : r.match)
@@ -964,7 +965,7 @@ public class SkillDeriver
 
 	private String ladder(String skill, String xpStr)
 	{
-		Object v = xpTable().getOrDefault(skill, new HashMap<>()).get(xpStr);
+		Object v = xpTable().getOrDefault(skill, Collections.emptyMap()).get(xpStr);
 		return v instanceof String ? (String) v : "";
 	}
 

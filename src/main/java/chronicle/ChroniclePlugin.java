@@ -42,6 +42,7 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDependency;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.PluginManager;
+import net.runelite.client.plugins.loottracker.LootTrackerPlugin;
 import net.runelite.client.plugins.slayer.SlayerPlugin;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
@@ -60,6 +61,11 @@ import net.runelite.client.ui.NavigationButton;
 // drops at the kill. Declaring it a dependency guarantees it's loaded (and its
 // service bound) before us — otherwise the on-task stamp silently no-ops.
 @PluginDependency(SlayerPlugin.class)
+// Non-NPC loot — clue caskets, barrows and every other chest/pickup source —
+// reaches us only as the core Loot Tracker's own LootReceived event, and its
+// stored archive is what a late install inherits its history from. Declaring
+// the dependency guarantees it is loaded before us, so that event source exists.
+@PluginDependency(LootTrackerPlugin.class)
 public class ChroniclePlugin extends Plugin
 {
 	static final String GROUP = ChronicleConfig.GROUP; // "chronicle"
@@ -122,6 +128,17 @@ public class ChroniclePlugin extends Plugin
 
 	private HistoryLog historyLog;
 
+	// The parsed calendar spine, kept in memory for the panel. The stream on disk
+	// is append-only and unbounded, and the History tab re-reads it on every pill,
+	// stepper and date click — all on the EDT. Parsing it there put the whole file
+	// on the Swing thread once per repaint, so the read happens on the executor
+	// (at the account's mount and after each appended baseline) and the panel is
+	// handed the finished map. Published wholesale, never mutated in place: the
+	// EDT may be walking the previous copy while the next one is being read.
+	private volatile String historyCacheRsn;
+	private volatile java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> historyCache;
+	private volatile boolean historyLoading;
+
 	private ChroniclePanel panel;
 	private NavigationButton navButton;
 
@@ -146,6 +163,11 @@ public class ChroniclePlugin extends Plugin
 	// One inheritance fetch per session at most — a failed attempt waits for the
 	// next login rather than refiring on every refresh cycle.
 	private volatile boolean slayerImportTried;
+
+	// True while the Loot Tracker adoption is between its off-thread read and the
+	// client-thread apply that writes the one-shot flag: the refresh that fires in
+	// that window must not start the archive over.
+	private volatile boolean lootImportRunning;
 
 	// Counters the server computes from OTHER data at read time (untaken loot from
 	// forwarded events; resource value priced from the gathering counters). They can
@@ -285,6 +307,7 @@ public class ChroniclePlugin extends Plugin
 
 		reschedulePushLoop();
 		warnIfSlayerDisabled();
+		warnIfLootTrackerDisabled();
 		log.debug("Chronicle started — slayer service: {}",
 			eventCapture.hasSlayerService() ? "AVAILABLE" : "MISSING");
 
@@ -359,6 +382,37 @@ public class ChroniclePlugin extends Plugin
 	 * but a user could still toggle it off — in which case there's no active
 	 * task to read, so nudge them via the side-panel status.
 	 */
+	/**
+	 * Chest and casket loot arrives only through the core Loot Tracker's event.
+	 * The dependency above guarantees the plugin is LOADED, but the player can
+	 * still switch it off — in which case that loot is simply never seen, so say
+	 * so in the panel rather than quietly under-recording.
+	 */
+	private void warnIfLootTrackerDisabled()
+	{
+		try
+		{
+			for (Plugin p : pluginManager.getPlugins())
+			{
+				if (p instanceof LootTrackerPlugin)
+				{
+					if (!pluginManager.isPluginEnabled(p))
+					{
+						statusLine = "Turn on the Loot Tracker plugin — chest and casket "
+							+ "loot reaches Chronicle through it.";
+						refreshPanel();
+						log.debug("Loot Tracker is disabled — non-NPC loot is not being captured.");
+					}
+					return;
+				}
+			}
+		}
+		catch (RuntimeException e)
+		{
+			log.debug("loot-tracker-enabled check failed", e);
+		}
+	}
+
 	private void warnIfSlayerDisabled()
 	{
 		try
@@ -481,6 +535,9 @@ public class ChroniclePlugin extends Plugin
 			}
 			configManager.setRSProfileConfiguration(GROUP, KEY_JOURNAL_NAME, who);
 			localStore.load(localDir(), who);
+			// Parse this account's calendar spine here, on the same off-thread
+			// mount as its journal, so the History tab opens from memory.
+			reloadHistory(who);
 			// A different account's journal is now mounted: drop the panel views
 			// built from the previous one (task journey, dryness, open drill-downs).
 			ChroniclePanel p = panel;
@@ -510,19 +567,30 @@ public class ChroniclePlugin extends Plugin
 			reschedulePushLoop();
 			if ("cloudSync".equals(key) || "serverBaseUrl".equals(key))
 			{
-				// Fold the running session into the journal and re-freeze its base
-				// BEFORE clearing the counter store — the journal is always-on, so a
-				// cloud toggle must never cost it the increments since the last flush.
-				if (localName != null)
+				// A settings write arrives on whatever thread made it — the EDT, for
+				// the settings panel. The block below shares the counter stores with
+				// the client thread's refresh and push: if one of those folds the
+				// session in between the rebase and the clear, the journal briefly
+				// holds base + session twice, and any push landing in that window
+				// mirrors the doubled absolutes upward for good (the server
+				// floor-merges). Run it where every other counter writer runs.
+				clientThread.invoke(() ->
 				{
-					localStore.setTrackers(sessionView(), localName);
-					localStore.rebase(localName);
-					executor.submit(() -> localStore.flush(localDir()));
-				}
-				// The session store restarts from zero either side of the toggle;
-				// the rebase above already banked its increments in the journal.
-				statStore.clear();
-				counters.reset();
+					// Fold the running session into the journal and re-freeze its base
+					// BEFORE clearing the counter store — the journal is always-on, so a
+					// cloud toggle must never cost it the increments since the last flush.
+					final String who = localName;
+					if (who != null)
+					{
+						localStore.setTrackers(sessionView(), who);
+						localStore.rebase(who);
+						executor.submit(() -> localStore.flush(localDir()));
+					}
+					// The session store restarts from zero either side of the toggle;
+					// the rebase above already banked its increments in the journal.
+					statStore.clear();
+					counters.reset();
+				});
 			}
 			// Turning cloud on re-runs the per-login branch so the token adopts now.
 			if (cloudActive() && client.getGameState() == GameState.LOGGED_IN)
@@ -696,16 +764,19 @@ public class ChroniclePlugin extends Plugin
 	 * identical correction to the local journal so the two records agree — and
 	 * so journal-absolute pushes can't resurrect the contaminated rows. Called
 	 * from both the refresh and the push path (whichever reaches a ready store
-	 * first applies it; the flag makes the second call a no-op).
+	 * first applies it; the flag makes the second call a no-op). The flag is
+	 * RSProfile-scoped like every other one-shot here: the correction belongs to
+	 * one account's journal, so a client-wide flag would let whichever account
+	 * logged in first spend the single shot on behalf of the rest.
 	 */
 	private void maybeMigratePrayerVerbs()
 	{
 		if (localName != null && localStore.isReadyFor(localName)
 			&& "oxli".equals(localName.trim().toLowerCase(java.util.Locale.ROOT))
-			&& !"true".equals(configManager.getConfiguration(GROUP, "prayerVerbMigrated")))
+			&& !"true".equals(configManager.getRSProfileConfiguration(GROUP, "prayerVerbMigrated")))
 		{
 			localStore.correctTrackers(PRAYER_VERB_FIX, localName);
-			configManager.setConfiguration(GROUP, "prayerVerbMigrated", true);
+			configManager.setRSProfileConfiguration(GROUP, "prayerVerbMigrated", true);
 		}
 	}
 
@@ -969,11 +1040,55 @@ public class ChroniclePlugin extends Plugin
 		return localStore.clogPages();
 	}
 
+	/** The calendar spine as last parsed. Called from the panel's rebuild (EDT),
+	 *  so it never touches the disk: a cold cache asks the executor for one and
+	 *  the panel rebuilds when it lands. */
 	java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> historyBaselines()
 	{
 		String rsn = localName;
-		return rsn != null ? historyLog.read(localDir(), rsn)
-			: new java.util.TreeMap<>();
+		if (rsn == null)
+		{
+			return new java.util.TreeMap<>();
+		}
+		java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> cached = historyCache;
+		if (cached != null && rsn.equals(historyCacheRsn))
+		{
+			return cached;
+		}
+		if (!historyLoading)
+		{
+			historyLoading = true;
+			executor.submit(() ->
+			{
+				try
+				{
+					reloadHistory(rsn);
+				}
+				finally
+				{
+					historyLoading = false;
+				}
+			});
+		}
+		return new java.util.TreeMap<>();
+	}
+
+	/**
+	 * Re-read the spine from disk and publish it to the panel. Executor only —
+	 * this is the file read the EDT must not do.
+	 */
+	private void reloadHistory(String rsn)
+	{
+		java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> read =
+			historyLog.read(localDir(), rsn);
+		// An account switch can overtake the read: the panel must never be handed
+		// the previous player's calendar under the current player's name.
+		if (rsn.equals(localName))
+		{
+			historyCache = read;
+			historyCacheRsn = rsn;
+			refreshPanel();
+		}
 	}
 
 	JsonObject clogSnapshot()
@@ -1210,30 +1325,89 @@ public class ChroniclePlugin extends Plugin
 		executor.submit(() -> localStore.flush(localDir()));
 	}
 
-	/** Client thread (ItemManager pricing). One-shot; flag set on success. */
+	/**
+	 * One Loot Tracker source as parsed off the client thread: its raw item ids
+	 * and quantities, still unnamed and unpriced. The ItemManager reads that turn
+	 * these into bag items are the only part of the adoption the client thread
+	 * owes us.
+	 */
+	private static final class RawSource
+	{
+		final String source;
+		final int kills;
+		final long firstMs;
+		final long lastMs;
+		// {item id, quantity} pairs, in the order the tracker stored them.
+		final java.util.List<long[]> items = new java.util.ArrayList<>();
+
+		RawSource(String source, int kills, long firstMs, long lastMs)
+		{
+			this.source = source;
+			this.kills = kills;
+			this.firstMs = firstMs;
+			this.lastMs = lastMs;
+		}
+	}
+
+	/**
+	 * Called from the refresh on the client thread; hands the archive off. The
+	 * config scan and the JSON parse are the bulk of the work and read no game
+	 * state, so they belong on the executor — done inline, an account with a
+	 * years-deep Loot Tracker stalled the client for several frames on the one
+	 * login where the plugin is supposed to be invisible.
+	 */
 	private void importLootTracker()
 	{
+		// The RSProfile flag is only written once the adoption lands, so without
+		// this the next refresh would start a second read over the same archive.
+		if (lootImportRunning)
+		{
+			return;
+		}
+		lootImportRunning = true;
+		final String who = localName;
+		// Read here, on the account being imported FOR: the archive stays
+		// own-account even if a switch overtakes the read below.
+		final String profileKey = configManager.getRSProfileKey();
+		executor.submit(() ->
+		{
+			final java.util.List<RawSource> parsed;
+			try
+			{
+				parsed = readLootTrackerArchive(profileKey);
+			}
+			catch (RuntimeException e)
+			{
+				lootImportRunning = false;
+				log.debug("loot tracker archive read failed", e);
+				return;
+			}
+			clientThread.invoke(() -> adoptLootTrackerArchive(who, parsed));
+		});
+	}
+
+	/** Executor: the config-archive scan and its JSON parse, no game state. */
+	private java.util.List<RawSource> readLootTrackerArchive(String profileKey)
+	{
+		java.util.List<RawSource> out = new java.util.ArrayList<>();
 		java.util.List<String> keys;
 		try
 		{
 			keys = configManager.getRSProfileConfigurationKeys(
-				"loottracker", configManager.getRSProfileKey(), "drops_");
+				"loottracker", profileKey, "drops_");
 		}
 		catch (RuntimeException e)
 		{
 			log.debug("loot tracker key scan failed", e);
-			return;
+			return out;
 		}
 		if (keys == null)
 		{
-			return;
+			return out;
 		}
-		java.util.List<LocalStore.LootSeed> seeds = new java.util.ArrayList<>();
-		long events = 0;
 		for (String key : keys)
 		{
-			String raw = configManager.getConfiguration(
-				"loottracker", configManager.getRSProfileKey(), key);
+			String raw = configManager.getConfiguration("loottracker", profileKey, key);
 			if (raw == null || raw.isEmpty())
 			{
 				continue;
@@ -1246,45 +1420,77 @@ public class ChroniclePlugin extends Plugin
 				{
 					continue;
 				}
-				int kills = o.has("kills") ? o.get("kills").getAsInt() : 0;
-				long first = o.has("first") ? o.get("first").getAsLong() : 0;
-				long last = o.has("last") ? o.get("last").getAsLong() : 0;
-				java.util.List<LocalStore.BagItem> items = new java.util.ArrayList<>();
+				RawSource src = new RawSource(source,
+					o.has("kills") ? o.get("kills").getAsInt() : 0,
+					o.has("first") ? o.get("first").getAsLong() : 0,
+					o.has("last") ? o.get("last").getAsLong() : 0);
 				if (o.has("drops") && o.get("drops").isJsonArray())
 				{
 					com.google.gson.JsonArray arr = o.getAsJsonArray("drops");
 					for (int i = 0; i + 1 < arr.size(); i += 2)
 					{
-						int id = arr.get(i).getAsInt();
+						long id = arr.get(i).getAsLong();
 						long qty = arr.get(i + 1).getAsLong();
 						if (id <= 0 || qty <= 0)
 						{
 							continue;
 						}
-						int canon = localStore.items().canonicalize(id);
-						String name = localStore.items().getItemComposition(canon).getName();
-						long each = localStore.items().getItemPrice(canon);
-						items.add(new LocalStore.BagItem(canon, name, qty,
-							Math.max(0, each) * qty));
+						src.items.add(new long[]{id, qty});
 					}
 				}
-				seeds.add(new LocalStore.LootSeed(source, kills, first, last, items));
-				events += kills;
+				out.add(src);
 			}
 			catch (RuntimeException e)
 			{
 				log.debug("loot tracker record parse failed: {}", key, e);
 			}
 		}
-		if (!seeds.isEmpty())
+		return out;
+	}
+
+	/** Client thread (ItemManager naming and pricing). Flag set on success. */
+	private void adoptLootTrackerArchive(String rsn, java.util.List<RawSource> parsed)
+	{
+		try
 		{
-			localStore.floorLootTracker(seeds, localName);
-			chat("Chronicle: adopted " + seeds.size() + " sources · "
-				+ String.format(java.util.Locale.UK, "%,d", events)
-				+ " loot events from your Loot Tracker.");
-			refreshPanel();
+			// A switch can land while the archive is being read: one account's
+			// Loot Tracker must never be floored into another's journal.
+			if (rsn == null || !rsn.equals(localName) || !localStore.isReadyFor(rsn))
+			{
+				return;
+			}
+			java.util.List<LocalStore.LootSeed> seeds = new java.util.ArrayList<>(parsed.size());
+			long events = 0;
+			for (RawSource src : parsed)
+			{
+				java.util.List<LocalStore.BagItem> items =
+					new java.util.ArrayList<>(src.items.size());
+				for (long[] drop : src.items)
+				{
+					int canon = localStore.items().canonicalize((int) drop[0]);
+					String name = localStore.items().getItemComposition(canon).getName();
+					long each = localStore.items().getItemPrice(canon);
+					items.add(new LocalStore.BagItem(canon, name, drop[1],
+						Math.max(0, each) * drop[1]));
+				}
+				seeds.add(new LocalStore.LootSeed(src.source, src.kills, src.firstMs,
+					src.lastMs, items));
+				events += src.kills;
+			}
+			if (!seeds.isEmpty())
+			{
+				localStore.floorLootTracker(seeds, rsn);
+				chat("Chronicle: adopted " + seeds.size() + " sources · "
+					+ String.format(java.util.Locale.UK, "%,d", events)
+					+ " loot events from your Loot Tracker.");
+				refreshPanel();
+			}
+			configManager.setRSProfileConfiguration(GROUP, "lootTrackerImported", true);
 		}
-		configManager.setRSProfileConfiguration(GROUP, "lootTrackerImported", true);
+		finally
+		{
+			lootImportRunning = false;
+		}
 	}
 
 	/** Client thread. Appends today's closing skills+counters baseline. */
@@ -1295,7 +1501,11 @@ public class ChroniclePlugin extends Plugin
 		{
 			return;
 		}
-		final Map<String, Integer> skills = new java.util.HashMap<>();
+		// Long, not int: the "overall" entry is the account's total xp, which
+		// passes 2,147,483,647 well before a maxed account and would wrap
+		// negative on the way in — and this stream is the durable record, so a
+		// wrapped baseline stays wrong for every reader that ever subtracts it.
+		final Map<String, Long> skills = new java.util.HashMap<>();
 		JsonObject sk = harvestSkills();
 		if (sk != null)
 		{
@@ -1303,12 +1513,19 @@ public class ChroniclePlugin extends Plugin
 			{
 				if (e.getValue().isJsonObject() && e.getValue().getAsJsonObject().has("xp"))
 				{
-					skills.put(e.getKey(), e.getValue().getAsJsonObject().get("xp").getAsInt());
+					skills.put(e.getKey(), e.getValue().getAsJsonObject().get("xp").getAsLong());
 				}
 			}
 		}
 		final Map<String, Long> counters = localStore.trackersSnapshot();
-		executor.submit(() -> historyLog.append(localDir(), rsn, skills, counters));
+		executor.submit(() ->
+		{
+			historyLog.append(localDir(), rsn, skills, counters);
+			// The panel reads the spine from memory, so the line just written has
+			// to reach the cache or the day it closes stays invisible until the
+			// next mount.
+			reloadHistory(rsn);
+		});
 	}
 
 	String statusLine()

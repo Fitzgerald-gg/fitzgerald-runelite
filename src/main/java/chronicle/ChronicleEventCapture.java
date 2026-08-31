@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.imageio.ImageIO;
@@ -58,6 +59,7 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.NpcLootReceived;
 import net.runelite.client.events.ServerNpcLoot;
+import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemStack;
 import net.runelite.client.plugins.loottracker.LootReceived;
 import net.runelite.client.plugins.slayer.SlayerPluginService;
@@ -162,10 +164,14 @@ public class ChronicleEventCapture
 	// 6:23" — and raid lines lead with their own prose ("Congratulations - your
 	// raid is complete! Duration: …"), so this is a find, not a full match. Longer
 	// labels precede "Duration" in the alternation so it can't shadow them. The
-	// timer line never names the boss; pairing with the kill is done by tick
+	// label is read without regard to case: the raids bury theirs mid-sentence in
+	// lower case — Tombs of Amascut prints "…challenge completion time: 25:33.60",
+	// the Theatre "…total completion time: …" — and a capitals-only label left
+	// those times, and the PBs they carry, unread. The time span stays strict.
+	// The timer line never names the boss; pairing with the kill is done by tick
 	// adjacency against the next loot event.
 	private static final Pattern KILL_DURATION = Pattern.compile(
-		"(?:Fight duration|Challenge duration|Corrupted challenge duration"
+		"(?i:Fight duration|Challenge duration|Corrupted challenge duration"
 			+ "|Completion time|Subdued in|Duration):? (?<time>\\d+(?::\\d{2})+(?:\\.\\d{1,2})?)");
 	private static final Pattern PERSONAL_BEST = Pattern.compile(
 		"[Pp]ersonal best[:!]? (?<pb>\\d+(?::\\d{2})+(?:\\.\\d{1,2})?)");
@@ -178,6 +184,12 @@ public class ChronicleEventCapture
 	private final ChronicleApiClient api;
 	private final DrawManager drawManager;
 	private final LocalStore localStore;
+	// Prices are read here for one decision only — whether a drop is worth a frame.
+	// Nothing priced is put on the wire; the payload stays raw ids and quantities.
+	private final ItemManager itemManager;
+	// RuneLite's shared pool. Only the screenshot encode and its push are handed to
+	// it, so it is never held for long.
+	private final ScheduledExecutorService executor;
 
 	// Optional: provided by RuneLite's core Slayer plugin. Absent in a dev-mode
 	// client (or if the user disables Slayer) — stays null and we skip the stamp.
@@ -256,22 +268,41 @@ public class ChronicleEventCapture
 	// can't decide on the spawn — reconcileKillLoot() at GameTick matches them up.
 	private final Map<TileItem, GroundLoot> pendingSelf = new IdentityHashMap<>();
 	private final List<UntakenItem> untakenBatch = new ArrayList<>();
-	private int lastKillTick = -1;
-	// The kill that armed untaken tracking — stamped onto promoted ground loot
-	// so the server's Uncollected ledger can say WHERE things were left behind.
-	private String lastKillSource;
+	// The kills of the last few ticks, each carrying the source name stamped onto
+	// the loot it produced so the Uncollected ledger can say WHERE things were left
+	// behind. One slot was not enough: when several NPCs die inside a single arming
+	// window they all inherit the newest name, so the first kill's pile is filed
+	// under the last kill's monster.
+	private final List<RecentKill> recentKills = new ArrayList<>();
+
+	/** A kill of ours, remembered long enough for its ground items to find it. */
+	private static final class RecentKill
+	{
+		private final int tick;
+		private final String source;
+
+		private RecentKill(int tick, String source)
+		{
+			this.tick = tick;
+			this.source = source;
+		}
+	}
 
 	private static final class UntakenItem
 	{
 		private final int id;
 		private final int qty;
 		private final String source;
+		// The account that earned it. The batch is gathered before a logout and
+		// sent after the next login, which may belong to somebody else.
+		private final String owner;
 
-		private UntakenItem(int id, int qty, String source)
+		private UntakenItem(int id, int qty, String source, String owner)
 		{
 			this.id = id;
 			this.qty = qty;
 			this.source = source;
+			this.owner = owner;
 		}
 	}
 
@@ -282,26 +313,32 @@ public class ChronicleEventCapture
 		private final int despawnTick;
 		private final int visibleTick;
 		private final int spawnTick;
+		private final boolean group;   // group-ironman ownership rather than our own
+		private final String owner;    // the account it spawned for
 		private final String source;   // the kill it belongs to; null until promoted
 
-		private GroundLoot(int id, int qty, int despawnTick, int visibleTick, int spawnTick)
+		private GroundLoot(int id, int qty, int despawnTick, int visibleTick, int spawnTick,
+			boolean group, String owner)
 		{
-			this(id, qty, despawnTick, visibleTick, spawnTick, null);
+			this(id, qty, despawnTick, visibleTick, spawnTick, group, owner, null);
 		}
 
-		private GroundLoot(int id, int qty, int despawnTick, int visibleTick, int spawnTick, String source)
+		private GroundLoot(int id, int qty, int despawnTick, int visibleTick, int spawnTick,
+			boolean group, String owner, String source)
 		{
 			this.id = id;
 			this.qty = qty;
 			this.despawnTick = despawnTick;
 			this.visibleTick = visibleTick;
 			this.spawnTick = spawnTick;
+			this.group = group;
+			this.owner = owner;
 			this.source = source;
 		}
 
 		private GroundLoot withSource(String src)
 		{
-			return new GroundLoot(id, qty, despawnTick, visibleTick, spawnTick, src);
+			return new GroundLoot(id, qty, despawnTick, visibleTick, spawnTick, group, owner, src);
 		}
 	}
 
@@ -327,7 +364,8 @@ public class ChronicleEventCapture
 
 	@Inject
 	ChronicleEventCapture(Client client, ClientThread clientThread, ConfigManager configManager,
-		ChronicleConfig config, ChronicleApiClient api, DrawManager drawManager, LocalStore localStore)
+		ChronicleConfig config, ChronicleApiClient api, DrawManager drawManager, LocalStore localStore,
+		ItemManager itemManager, ScheduledExecutorService executor)
 	{
 		this.client = client;
 		this.clientThread = clientThread;
@@ -336,6 +374,8 @@ public class ChronicleEventCapture
 		this.api = api;
 		this.drawManager = drawManager;
 		this.localStore = localStore;
+		this.itemManager = itemManager;
+		this.executor = executor;
 	}
 
 	/** True once the core Slayer plugin's service is wired (via @PluginDependency).
@@ -364,28 +404,47 @@ public class ChronicleEventCapture
 		slayerPendingTicks = -1;
 		lastSlayerTask = null;
 		// Ground-item refs belong to the scene we're leaving; drop them. The
-		// untaken batch is pending data to send, so it is deliberately kept.
+		// untaken batch is pending data to send, so it is deliberately kept —
+		// each item carries the account it was earned on, and flushUntakenLoot
+		// sends only the ones the account now logging in actually left behind.
 		groundLoot.clear();
 		pendingSelf.clear();
-		lastKillTick = -1;
-		lastKillSource = null;
+		recentKills.clear();
 		// Loot reconciliation state is tick-scoped to the scene we're leaving.
 		pendingClientLoot.clear();
 		serverLootKeys.clear();
 	}
 
-	/** Forward any left-behind loot for the server to price into untakenLoot*.
-	 *  Batched per SOURCE (the kill that armed tracking), so the Uncollected
-	 *  ledger can say where things were left, not just what. */
+	/**
+	 * Forward any left-behind loot for the server to price into untakenLoot*.
+	 * Batched per SOURCE (the kill that armed tracking), so the Uncollected
+	 * ledger can say where things were left, not just what.
+	 *
+	 * <p>Items swept up at a logout are only sent on the next login's ticks, and
+	 * that login can belong to a different player, so each item is emitted under
+	 * the account it was stamped with and the rest are discarded. The flush also
+	 * waits for that account's journal to be mounted: without the wait the local
+	 * record silently refuses the batch while the cloud push still takes it, and
+	 * the two ledgers disagree about the same kill.
+	 */
 	private void flushUntakenLoot()
 	{
 		if (untakenBatch.isEmpty())
 		{
 			return;
 		}
+		String owner = localName();
+		if (owner == null || !localStore.isReadyFor(owner))
+		{
+			return;   // nobody to attribute it to yet — the batch keeps
+		}
 		Map<String, JsonArray> bySource = new HashMap<>();
 		for (UntakenItem it : untakenBatch)
 		{
+			if (!owner.equals(it.owner))
+			{
+				continue;   // left behind by the account before this one
+			}
 			JsonObject o = new JsonObject();
 			o.addProperty("id", it.id);
 			o.addProperty("quantity", it.qty);
@@ -422,10 +481,10 @@ public class ChronicleEventCapture
 		for (Map.Entry<TileItem, GroundLoot> e : pendingSelf.entrySet())
 		{
 			GroundLoot g = e.getValue();
-			int sinceKill = g.spawnTick - lastKillTick;
-			if (lastKillTick >= 0 && sinceKill >= 0 && sinceKill <= KILL_ARM_TICKS)
+			RecentKill kill = killFor(g);
+			if (kill != null)
 			{
-				groundLoot.put(e.getKey(), g.withSource(lastKillSource));   // confirmed kill loot
+				groundLoot.put(e.getKey(), g.withSource(kill.source));   // confirmed kill loot
 				done.add(e.getKey());
 			}
 			else if (now - g.spawnTick > KILL_ARM_TICKS)
@@ -437,6 +496,40 @@ public class ChronicleEventCapture
 		{
 			pendingSelf.remove(t);
 		}
+	}
+
+	/**
+	 * The kill a buffered spawn belongs to: the latest one it could have followed,
+	 * so a burst of kills files each pile under the monster that actually dropped
+	 * it. A GROUP-owned spawn has to match a kill on its OWN tick — on a group
+	 * ironman a team-mate's drops arrive group-owned too, and the wider window
+	 * books what they leave behind into our ledger when they fight beside us.
+	 */
+	private RecentKill killFor(GroundLoot g)
+	{
+		int window = g.group ? 0 : KILL_ARM_TICKS;
+		RecentKill best = null;
+		for (RecentKill k : recentKills)
+		{
+			int since = g.spawnTick - k.tick;
+			if (since < 0 || since > window)
+			{
+				continue;
+			}
+			if (best == null || k.tick > best.tick)
+			{
+				best = k;
+			}
+		}
+		return best;
+	}
+
+	/** Arm untaken tracking: ground items spawning around now are this kill's. */
+	private void armKill(String source)
+	{
+		int now = client.getTickCount();
+		recentKills.removeIf(k -> now - k.tick > KILL_ARM_TICKS);
+		recentKills.add(new RecentKill(now, source));
 	}
 
 	// ── LOOT ──────────────────────────────────────────────────────────────
@@ -465,8 +558,7 @@ public class ChronicleEventCapture
 		// and will supersede this ground-scan copy. flushPendingClientLoot() emits
 		// it a couple of ticks later only if no server event covered the kill.
 		pendingClientLoot.add(new PendingLoot(npc.getId(), client.getTickCount(), data));
-		lastKillTick = client.getTickCount();   // arm untaken-loot tracking
-		lastKillSource = npc.getName();
+		armKill(npc.getName());
 	}
 
 	/**
@@ -501,8 +593,7 @@ public class ChronicleEventCapture
 		data.add("items", itemsToJson(event.getItems()));
 		stampSlayer(data);
 		emit("LOOT", data);
-		lastKillTick = client.getTickCount();   // arm untaken-loot tracking
-		lastKillSource = comp.getName();
+		armKill(comp.getName());
 	}
 
 	/**
@@ -538,6 +629,18 @@ public class ChronicleEventCapture
 		}
 		pendingClientLoot.clear();
 		pendingClientLoot.addAll(survivors);
+	}
+
+	/**
+	 * Drop server-loot keys past the window in which a held client copy could still
+	 * need them. Runs every tick rather than alongside the flush above: for content
+	 * the ground scan never fires for (the Mad Angel case) nothing is ever held, so
+	 * a prune reached only through pending client loot would keep every kill of the
+	 * session and leave the covered-check probing an ever-growing set.
+	 */
+	private void expireServerLootKeys()
+	{
+		int now = client.getTickCount();
 		serverLootKeys.removeIf(k -> now - (int) (k & 0xFFFFFFFFL) > SERVER_LOOT_WINDOW_TICKS + 2);
 	}
 
@@ -577,18 +680,25 @@ public class ChronicleEventCapture
 		// ownership is accepted alongside SELF because a group ironman's OWN
 		// drops arrive GROUP-stamped — the exact reason the Left behind ledger
 		// sat empty on a GIM account (GroundItemsPlugin upstream does the same);
-		// the kill-armed reconcile below still discards group-mates' loot.
+		// a group-owned spawn is then held to the tick of a kill of ours, which is
+		// what keeps a team-mate's drops out of the ledger.
 		TileItem it = event.getItem();
-		if (it == null || (it.getOwnership() != SELF_OWNED
-			&& it.getOwnership() != TileItem.OWNERSHIP_GROUP))
+		if (it == null)
+		{
+			return;
+		}
+		boolean group = it.getOwnership() == TileItem.OWNERSHIP_GROUP;
+		if (!group && it.getOwnership() != SELF_OWNED)
 		{
 			return;
 		}
 		int now = client.getTickCount();
 		// Buffer only — the kill's NpcLootReceived fires AFTER this, so we can't yet
 		// tell kill loot from a manual drop. reconcileKillLoot() decides at GameTick.
+		// The account is read here, while we are certainly logged in as it: left-behind
+		// items are sent after the next login, which may be somebody else's.
 		pendingSelf.put(it, new GroundLoot(it.getId(), it.getQuantity(),
-			it.getDespawnTime(), it.getVisibleTime(), now));
+			it.getDespawnTime(), it.getVisibleTime(), now, group, localName()));
 	}
 
 	@Subscribe
@@ -607,7 +717,7 @@ public class ChronicleEventCapture
 		boolean left = g.despawnTick > 0 && now >= g.despawnTick - 1;
 		if (left)
 		{
-			untakenBatch.add(new UntakenItem(g.id, g.qty, g.source));
+			untakenBatch.add(new UntakenItem(g.id, g.qty, g.source, g.owner));
 		}
 	}
 
@@ -1013,32 +1123,31 @@ public class ChronicleEventCapture
 	public void onChatMessage(ChatMessage message)
 	{
 		ChatMessageType t = message.getType();
+		// Every line the game prints reaches here, public and clan chat included, and
+		// a crowded world delivers hundreds a minute. None of them can carry anything
+		// read below, so the type is settled before paying for the tag strip.
+		if (t != ChatMessageType.MESBOX && t != ChatMessageType.GAMEMESSAGE
+			&& t != ChatMessageType.SPAM)
+		{
+			return;
+		}
 		String msg = Text.removeTags(message.getMessage());
 
 		// Diary completion is usually a MESBOX line, but the same congratulatory
 		// line can also arrive as a plain GAMEMESSAGE — check both so it isn't
 		// silently dropped when the game classifies it as a game message.
-		if (t == ChatMessageType.MESBOX
-			|| t == ChatMessageType.GAMEMESSAGE || t == ChatMessageType.SPAM)
+		Matcher d = DIARY_COMPLETION.matcher(msg);
+		if (d.find())
 		{
-			Matcher d = DIARY_COMPLETION.matcher(msg);
-			if (d.find())
-			{
-				JsonObject data = new JsonObject();
-				data.addProperty("area", d.group("region").trim());
-				data.addProperty("difficulty", d.group("grade").trim().toUpperCase());
-				emit("DIARY", data);
-				return;
-			}
+			JsonObject data = new JsonObject();
+			data.addProperty("area", d.group("region").trim());
+			data.addProperty("difficulty", d.group("grade").trim().toUpperCase());
+			emit("DIARY", data);
+			return;
 		}
 		if (t == ChatMessageType.MESBOX)
 		{
 			return;   // MESBOX only ever carries the diary line handled above
-		}
-
-		if (t != ChatMessageType.GAMEMESSAGE && t != ChatMessageType.SPAM)
-		{
-			return;
 		}
 
 		// Kill count — annotates the next loot event for this source.
@@ -1267,6 +1376,7 @@ public class ChronicleEventCapture
 	{
 		reconcileKillLoot();
 		flushPendingClientLoot();
+		expireServerLootKeys();
 		flushUntakenLoot();
 
 		// Expire a pet prime that never got a name (3-tick window).
@@ -1310,7 +1420,7 @@ public class ChronicleEventCapture
 			// otherwise misread them as pickups.)
 			for (GroundLoot g : groundLoot.values())
 			{
-				untakenBatch.add(new UntakenItem(g.id, g.qty, g.source));
+				untakenBatch.add(new UntakenItem(g.id, g.qty, g.source, g.owner));
 			}
 			groundLoot.clear();
 		}
@@ -1353,15 +1463,22 @@ public class ChronicleEventCapture
 		return Text.removeTags(name).replaceAll("\\s*\\(.+\\)$", "").trim().toLowerCase();
 	}
 
+	/** The logged-in account's name, or null while it cannot be read. */
+	private String localName()
+	{
+		Player lp = client.getLocalPlayer();
+		String name = lp != null ? lp.getName() : null;
+		return name == null || name.isEmpty() ? null : name;
+	}
+
 	private void emit(String type, JsonObject data)
 	{
 		if (client.getGameState() != GameState.LOGGED_IN)
 		{
 			return;
 		}
-		Player lp = client.getLocalPlayer();
-		String name = lp != null ? lp.getName() : null;
-		if (name == null || name.isEmpty())
+		String name = localName();
+		if (name == null)
 		{
 			return;
 		}
@@ -1400,8 +1517,14 @@ public class ChronicleEventCapture
 			try
 			{
 				// Capture the next rendered frame, then send event + PNG together.
+				// The frame comes back ON THE RENDER THREAD, and encoding a 1080p
+				// client window to PNG there stalls the game for tens of
+				// milliseconds — a visible hitch on every boss kill — so the encode
+				// and the push both move to the shared pool. The image handed over
+				// is that frame's own copy, so reading it off the client thread is
+				// safe (RuneLite's own screenshot plugin hands it over the same way).
 				drawManager.requestNextFrameListener(image ->
-					api.postEvent(base, token, body, toPng(image)));
+					executor.submit(() -> api.postEvent(base, token, body, toPng(image))));
 				return;
 			}
 			catch (RuntimeException e)
@@ -1415,12 +1538,11 @@ public class ChronicleEventCapture
 	/** Client-side pre-filter so we don't screenshot every trivial event. The
 	 *  server still enforces the authoritative per-event policy (and prunes
 	 *  e.g. loot below its gp/rarity thresholds). */
-	private static boolean screenshotWorthy(String type, JsonObject data)
+	private boolean screenshotWorthy(String type, JsonObject data)
 	{
 		// Narrow client-side pre-filter matching the server's keep-policy: only a
-		// max-level milestone, a death, a pet, or a KC'd (boss/notable) drop is worth
-		// a frame. The server still prunes loot below its gp floor — the plugin can't
-		// price, so it captures KC'd loot as the candidate and lets the server decide.
+		// max-level milestone, a death, a pet, or a valuable/KC'd drop is worth a
+		// frame. The server still prunes loot below its own gp floor.
 		switch (type)
 		{
 			case "PET":
@@ -1430,10 +1552,10 @@ public class ChronicleEventCapture
 				return data.has("level") && data.get("level").getAsInt() >= 99;
 			case "LOOT":
 				// A boss/KC drop is always a candidate; so is any drop valuable
-				// enough on its own. The plugin already knows GE prices, so a
-				// slayer unique or an on-task boss kill (which carries no
-				// killCount) still earns a frame. The server stays authoritative
-				// and prunes anything below its own gp floor.
+				// enough on its own, priced here through ItemManager so a slayer
+				// unique — or anything from a source that prints no kill count —
+				// still earns a frame. The server stays authoritative and prunes
+				// anything below its own gp floor.
 				return data.has("killCount") || lootValueWorthy(data);
 			default:
 				return false;   // collection / quest / diary / CA / clue → metadata only
@@ -1445,9 +1567,11 @@ public class ChronicleEventCapture
 	 *  stays authoritative and prunes anything below its own configured floor. */
 	private static final long SCREENSHOT_LOOT_MIN_GP = 1_000_000L;
 
-	/** True when the drop's own GE value (Σ priceEach × quantity) clears the
-	 *  floor — so a valuable non-boss drop still earns a frame even with no KC. */
-	private static boolean lootValueWorthy(JsonObject data)
+	/** True when the drop's own GE value (Σ price × quantity) clears the floor —
+	 *  so a valuable non-boss drop still earns a frame even with no KC. The wire
+	 *  payload carries ids and quantities only; the price is read here, on the
+	 *  client thread, purely to make this one decision. */
+	private boolean lootValueWorthy(JsonObject data)
 	{
 		if (!data.has("items") || !data.get("items").isJsonArray())
 		{
@@ -1462,10 +1586,23 @@ public class ChronicleEventCapture
 				continue;
 			}
 			JsonObject it = items.get(i).getAsJsonObject();
-			long price = it.has("priceEach") && !it.get("priceEach").isJsonNull()
-				? it.get("priceEach").getAsLong() : 0L;
+			if (!it.has("id") || it.get("id").isJsonNull())
+			{
+				continue;
+			}
 			long qty = it.has("quantity") && !it.get("quantity").isJsonNull()
 				? it.get("quantity").getAsLong() : 0L;
+			long price;
+			try
+			{
+				// Canonicalised so a noted or placeholder id resolves to the thing
+				// itself, exactly as the journal prices it.
+				price = itemManager.getItemPrice(itemManager.canonicalize(it.get("id").getAsInt()));
+			}
+			catch (RuntimeException ex)
+			{
+				continue;   // an id the cache doesn't know is worth nothing here
+			}
 			total += price * qty;
 			if (total >= SCREENSHOT_LOOT_MIN_GP)
 			{

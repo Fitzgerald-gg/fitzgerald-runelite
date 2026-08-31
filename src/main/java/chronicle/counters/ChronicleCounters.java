@@ -24,7 +24,6 @@ import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
-import net.runelite.client.plugins.xptracker.XpTrackerService;
 
 @Singleton
 public class ChronicleCounters
@@ -40,16 +39,14 @@ public class ChronicleCounters
 	// client thread when the tracker array is lazily built.
 	private volatile java.util.function.BiConsumer<String, Integer> consumableSink;
 
-	// Optional: RuneLite's core XP Tracker plugin. Absent in a dev-mode client
-	// (or if the user disables XP Tracker) — SkillingStatTracker null-guards its
-	// action-count use, so those specific counters just go quiet.
-	@com.google.inject.Inject(optional = true)
-	private XpTrackerService xpTrackerService;
-
-	// Built lazily on the first event so the optional xpTrackerService above —
-	// populated by field injection AFTER this constructor — is available when we
-	// wire the tracker that needs it.
-	private StatTracker[] trackers;
+	// Built lazily on the first event so the consumable sink above — wired at
+	// startUp, AFTER this constructor — is in hand when we build the tracker that
+	// needs it. reset() leans on the same laziness to rebuild after a blind window.
+	// Volatile because reset() arrives from whatever thread stopped or started the
+	// plugin (the EDT for a settings-panel toggle) while the client thread is fanning
+	// events out here: a plain field could leave that thread reading a stale array
+	// forever, or never seeing the rebuild the reset asked for.
+	private volatile StatTracker[] trackers;
 
 	@Inject
 	ChronicleCounters(Client client, ChronicleConfig config, StatStore store,
@@ -69,13 +66,17 @@ public class ChronicleCounters
 
 	private StatTracker[] trackers()
 	{
-		if (trackers == null)
+		// Read the field once. A reset() landing between the null check and the return
+		// would otherwise hand the caller a null array to iterate, and every caller is
+		// an event handler on the client thread with no defence against that.
+		StatTracker[] built = trackers;
+		if (built == null)
 		{
-			trackers = new StatTracker[]{
+			built = new StatTracker[]{
 				new GoldStatTracker(store, client),
 				new ItemStatTracker(store, client, itemManager),
 				new MovementStatTracker(store, client),
-				new SkillingStatTracker(store, client, xpTrackerService, skillDeriver),
+				new SkillingStatTracker(store, client, skillDeriver),
 				new FoodStatTracker(store, client, itemManager, consumableSink),
 				new NPCStatTracker(store),
 				new ExperienceStatTracker(store),
@@ -83,8 +84,9 @@ public class ChronicleCounters
 				new RangedStatTracker(store, client),
 				new CombatStatTracker(store, client),
 			};
+			trackers = built;
 		}
-		return trackers;
+		return built;
 	}
 
 	private boolean active()
