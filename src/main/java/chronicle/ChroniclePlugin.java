@@ -1019,6 +1019,85 @@ public class ChroniclePlugin extends Plugin
 		return skillIcons;
 	}
 
+	/**
+	 * The game's own bosses and activities, by kill count — the collection log
+	 * keeps this list, so it is the one the player already recognises. The drop
+	 * ledger's figure floors it where the ledger has watched more deaths than
+	 * the log has been opened for.
+	 */
+	Map<String, Long> killCounts()
+	{
+		Map<String, Long> out = new java.util.LinkedHashMap<>();
+		JsonObject cl = localStore.clogSnapshot();
+		if (cl.has("kcs") && cl.get("kcs").isJsonObject())
+		{
+			for (Map.Entry<String, com.google.gson.JsonElement> e
+				: cl.getAsJsonObject("kcs").entrySet())
+			{
+				try
+				{
+					long v = e.getValue().getAsLong();
+					if (v > 0)
+					{
+						out.put(e.getKey(), v);
+					}
+				}
+				catch (RuntimeException ignored)
+				{
+					// a non-numeric entry is not a kill count
+				}
+			}
+		}
+		java.util.Map<String, String> byKind = new java.util.HashMap<>();
+		for (String name : out.keySet())
+		{
+			byKind.put(sameThing(name), name);
+		}
+		for (LocalStore.SourceRow r : localStore.dropSources())
+		{
+			String known = byKind.get(sameThing(r.name));
+			if (known != null && r.kc > 0)
+			{
+				out.merge(known, (long) r.kc, Math::max);
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * Everything else the ledger counted: slayer monsters and the rest, which
+	 * the collection log keeps no page for. Kept apart from the list above
+	 * rather than merged into it — without a record of what KIND each source
+	 * was, a pile of arrowtips looted a thousand times would otherwise sit in
+	 * a list of bosses claiming to be one.
+	 */
+	Map<String, Long> ledgerKills()
+	{
+		Map<String, Long> bosses = killCounts();
+		java.util.Set<String> known = new java.util.HashSet<>();
+		for (String name : bosses.keySet())
+		{
+			known.add(sameThing(name));
+		}
+		Map<String, Long> out = new java.util.LinkedHashMap<>();
+		for (LocalStore.SourceRow r : localStore.dropSources())
+		{
+			if (r.kc > 0 && !known.contains(sameThing(r.name)))
+			{
+				out.merge(r.name, (long) r.kc, Math::max);
+			}
+		}
+		return out;
+	}
+
+	/** Loose identity for a source: the collection log says "Tormented Demons"
+	 *  where the ledger says "Tormented Demon", and they are one thing. */
+	private static String sameThing(String name)
+	{
+		String n = name == null ? "" : name.trim().toLowerCase(java.util.Locale.ROOT);
+		return n.endsWith("s") ? n.substring(0, n.length() - 1) : n;
+	}
+
 	/** Level + xp per skill, as the journal last saw them. */
 	java.util.Map<String, long[]> skillSheet()
 	{
@@ -1486,9 +1565,10 @@ public class ChroniclePlugin extends Plugin
 			}
 		}
 		final Map<String, Long> counters = localStore.trackersSnapshot();
+		final Map<String, Long> kcs = killCounts();
 		executor.submit(() ->
 		{
-			historyLog.append(localDir(), rsn, skills, counters);
+			historyLog.append(localDir(), rsn, skills, counters, kcs);
 			// The panel reads the spine from memory, so the line just written has
 			// to reach the cache or the day it closes stays invisible until the
 			// next mount.

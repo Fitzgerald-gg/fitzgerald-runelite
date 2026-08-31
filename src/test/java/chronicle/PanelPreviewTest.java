@@ -161,6 +161,10 @@ public class PanelPreviewTest
 			set(panel, "leftBehindItem", null);
 		}
 		// The pets page, where the journal's own marginalia shows.
+		set(panel, "histBosses", true);
+		shoot(panel, out, prefix + "-history-bosses", "HISTORY");
+		set(panel, "histBosses", false);
+
 		set(panel, "clogTab", "Other");
 		set(panel, "clogPageSel", "All Pets");
 		shoot(panel, out, prefix + "-log-pets", "LOG");
@@ -404,6 +408,38 @@ public class PanelPreviewTest
 		s.journey = store.slayerJourney();
 		s.consumVals = store.consumableValues();
 		s.grinds = new GrindBook(new Gson()).grinds(store.clogSnapshot(), store.dropSources());
+		JsonObject clKc = store.clogSnapshot();
+		if (clKc.has("kcs") && clKc.get("kcs").isJsonObject())
+		{
+			for (Map.Entry<String, com.google.gson.JsonElement> e
+				: clKc.getAsJsonObject("kcs").entrySet())
+			{
+				s.kcs.put(e.getKey(), e.getValue().getAsLong());
+			}
+		}
+		// Mirror the plugin exactly: a ledger source that IS a logged boss folds
+		// into the log's own spelling, or the list shows one thing twice.
+		Map<String, String> byKind = new LinkedHashMap<>();
+		for (String n : s.kcs.keySet())
+		{
+			byKind.put(n.toLowerCase(Locale.ROOT).replaceAll("s$", ""), n);
+		}
+		for (LocalStore.SourceRow r : store.dropSources())
+		{
+			if (r.kc <= 0)
+			{
+				continue;
+			}
+			String known = byKind.get(r.name.toLowerCase(Locale.ROOT).replaceAll("s$", ""));
+			if (known != null)
+			{
+				s.kcs.merge(known, (long) r.kc, Math::max);
+			}
+			else
+			{
+				s.ledgerKcs.merge(r.name, (long) r.kc, Math::max);
+			}
+		}
 		return s;
 	}
 
@@ -737,6 +773,22 @@ public class PanelPreviewTest
 		{
 			return null;   // the stub's journal is a fixture, never a file
 		}
+
+		@Override
+		java.util.Map<String, Long> killCounts()
+		{
+			return kcs;
+		}
+
+		@Override
+		java.util.Map<String, Long> ledgerKills()
+		{
+			return ledgerKcs;
+		}
+
+		final Map<String, Long> ledgerKcs = new LinkedHashMap<>();
+
+		final Map<String, Long> kcs = new LinkedHashMap<>();
 
 		@Override
 		net.runelite.client.game.SkillIconManager skillIcons()

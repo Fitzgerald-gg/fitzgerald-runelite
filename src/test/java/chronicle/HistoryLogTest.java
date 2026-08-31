@@ -86,8 +86,8 @@ public class HistoryLogTest
 		Map<String, Long> opening = new HashMap<>();
 		opening.put("tilesWalked", 10L);
 		opening.put("logsChopped", 7L);
-		log.append(dir, RSN, map("attack", 100L), opening);
-		log.append(dir, RSN, map("attack", 140L), map("tilesWalked", 90L));
+		log.append(dir, RSN, map("attack", 100L), opening, java.util.Collections.emptyMap());
+		log.append(dir, RSN, map("attack", 140L), map("tilesWalked", 90L), java.util.Collections.emptyMap());
 
 		TreeMap<LocalDate, HistoryLog.Baseline> got = log.read(dir, RSN);
 		assertEquals(1, got.size());
@@ -171,7 +171,7 @@ public class HistoryLogTest
 	public void anImportedDayIsJustAnotherLineInTheSameStream()
 	{
 		log.appendImported(dir, RSN, "2024-03-01", map("overall", 12_345L));
-		log.append(dir, RSN, map("overall", 20_000L), map("tilesWalked", 5L));
+		log.append(dir, RSN, map("overall", 20_000L), map("tilesWalked", 5L), java.util.Collections.emptyMap());
 
 		TreeMap<LocalDate, HistoryLog.Baseline> got = log.read(dir, RSN);
 		assertEquals(2, got.size());
@@ -245,8 +245,8 @@ public class HistoryLogTest
 	@Test
 	public void anAppendWithoutAnAccountWritesNothing()
 	{
-		log.append(dir, null, map("attack", 1L), map("tilesWalked", 1L));
-		log.append(dir, "", map("attack", 1L), map("tilesWalked", 1L));
+		log.append(dir, null, map("attack", 1L), map("tilesWalked", 1L), java.util.Collections.emptyMap());
+		log.append(dir, "", map("attack", 1L), map("tilesWalked", 1L), java.util.Collections.emptyMap());
 		log.appendImported(dir, null, "2026-07-01", map("attack", 1L));
 		log.appendImported(dir, RSN, null, map("attack", 1L));
 

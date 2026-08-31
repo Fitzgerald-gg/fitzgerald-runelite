@@ -106,6 +106,9 @@ class ChroniclePanel extends PluginPanel
 	private int dropsShown = ROW_CAP;
 	private String clogTab = "Bosses";
 	private String clogPageSel;
+	// History reads either the skill grid or the kill counts; both answer the
+	// same period, so they share its stepper rather than each owning one.
+	private boolean histBosses;
 	private String histGranularity = "Week";
 	// The period's END date (inclusive); the stepper moves it by one granule.
 	private java.time.LocalDate histCursor = java.time.LocalDate.now();
@@ -2276,6 +2279,128 @@ class ChroniclePanel extends PluginPanel
 		return feed.isEmpty() ? 0 : safeLong(feed.get(0).get("ts"));
 	}
 
+	/**
+	 * What died, and what the period added to it. The collection log's own
+	 * tally is the spine here, floored by the drop ledger, so the list reads as
+	 * the game's bosses and activities rather than every creature ever killed —
+	 * that question is the Drops tab's.
+	 *
+	 * <p>Kill counts only entered the daily baseline when this was built, so a
+	 * period bounded by an older line reports the standing count and no gain.
+	 * Saying nothing is the honest reading; a gain measured against a baseline
+	 * that never held kill counts would be the whole career, every time.
+	 */
+	private void addKillCounts(JPanel p, Map<String, Long> beforeKc, Map<String, Long> nowKc)
+	{
+		Map<String, Long> standing = plugin.killCounts();
+		if (standing.isEmpty())
+		{
+			p.add(note("No kill counts recorded yet — they come from the "
+				+ "collection log and from what the drop ledger witnesses."));
+			return;
+		}
+		Map<String, Long> gained = new LinkedHashMap<>();
+		if (beforeKc != null && !beforeKc.isEmpty() && nowKc != null)
+		{
+			for (Map.Entry<String, Long> e : nowKc.entrySet())
+			{
+				Long was = beforeKc.get(e.getKey());
+				if (was != null && e.getValue() - was > 0)
+				{
+					gained.put(e.getKey(), e.getValue() - was);
+				}
+			}
+		}
+		if (!gained.isEmpty())
+		{
+			long total = 0;
+			for (long v : gained.values())
+			{
+				total += v;
+			}
+			JPanel head = card("The period");
+			head.add(row("Kills", "+" + fmt(total), accent()));
+			p.add(head);
+			p.add(vgap(5));
+		}
+		else if (beforeKc == null || beforeKc.isEmpty())
+		{
+			p.add(note("Kill counts begin their record now — this period has no "
+				+ "earlier count to measure against."));
+			p.add(vgap(4));
+		}
+
+		// Movers first, then the rest by standing count: what changed is the
+		// question the period asks, and the standing list is the context.
+		List<Map.Entry<String, Long>> rows = new ArrayList<>(standing.entrySet());
+		rows.sort((a, b) ->
+		{
+			long ga = gained.getOrDefault(a.getKey(), 0L);
+			long gb = gained.getOrDefault(b.getKey(), 0L);
+			if (ga != gb)
+			{
+				return Long.compare(gb, ga);
+			}
+			return Long.compare(b.getValue(), a.getValue());
+		});
+		JPanel card = card("Bosses and activities");
+		for (Map.Entry<String, Long> e : rows)
+		{
+			card.add(kcRow(e.getKey(), e.getValue(), gained.get(e.getKey())));
+		}
+		p.add(card);
+		p.add(vgap(6));
+
+		// Everything else the ledger counted. It is a different list, not a
+		// longer one: the log knows what a boss is, and this does not.
+		List<Map.Entry<String, Long>> rest = new ArrayList<>(plugin.ledgerKills().entrySet());
+		rest.sort((a, b) ->
+		{
+			long ga = gained.getOrDefault(a.getKey(), 0L);
+			long gb = gained.getOrDefault(b.getKey(), 0L);
+			return ga != gb ? Long.compare(gb, ga) : Long.compare(b.getValue(), a.getValue());
+		});
+		if (!rest.isEmpty())
+		{
+			JPanel other = card("Everything else counted");
+			int mounted = 0;
+			for (Map.Entry<String, Long> e : rest)
+			{
+				if (mounted++ >= histKcShown)
+				{
+					break;
+				}
+				other.add(kcRow(e.getKey(), e.getValue(), gained.get(e.getKey())));
+			}
+			p.add(other);
+			if (rest.size() > histKcShown)
+			{
+				p.add(vgap(3));
+				JButton more = new JButton("Show " + Math.min(ROW_CAP, rest.size() - histKcShown)
+					+ " more of " + fmt(rest.size()));
+				more.addActionListener(e ->
+				{
+					histKcShown += ROW_CAP;
+					rebuild();
+				});
+				p.add(more);
+			}
+			p.add(vgap(6));
+		}
+	}
+
+	private int histKcShown = ROW_CAP;
+
+	/** One counted thing: what it stands at, and what the period added. */
+	private JPanel kcRow(String name, long standing, Long gained)
+	{
+		JPanel r = row(name, fmt(standing) + (gained != null ? "  +" + fmt(gained) : ""),
+			gained != null ? accent() : null);
+		r.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+		r.addMouseListener(clicker(() -> openSourceLoose(name)));
+		return r;
+	}
+
 	// The hiscores order, which is the order every player already reads a
 	// skill list in. Overall is drawn separately, as its own headline.
 	private static final net.runelite.api.Skill[] SKILL_ORDER = {
@@ -2437,6 +2562,27 @@ class ChroniclePanel extends PluginPanel
 			pills.add(pill);
 		}
 		p.add(pills);
+		p.add(vgap(3));
+
+		JPanel lens = new JPanel(new GridLayout(1, 2, 3, 3));
+		lens.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		for (String which : new String[]{"Skills", "Bosses"})
+		{
+			boolean on = "Bosses".equals(which) == histBosses;
+			JLabel t = new JLabel(which, JLabel.CENTER);
+			t.setOpaque(true);
+			t.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
+			t.setFont(FontManager.getRunescapeSmallFont());
+			t.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+			t.setForeground(on ? accent() : ColorScheme.LIGHT_GRAY_COLOR.darker());
+			t.addMouseListener(clicker(() ->
+			{
+				histBosses = "Bosses".equals(which);
+				rebuild();
+			}));
+			lens.add(t);
+		}
+		p.add(lens);
 		p.add(vgap(5));
 
 		// the period under the cursor — or the exact dates the player typed
@@ -2612,7 +2758,15 @@ class ChroniclePanel extends PluginPanel
 				}
 			}
 			gains.sort(Map.Entry.<String, Long>comparingByValue().reversed());
-			addSkillGrid(p, gains, at.getValue().skills);
+			if (histBosses)
+			{
+				addKillCounts(p, before != null ? before.getValue().kcs : null,
+					at.getValue().kcs);
+			}
+			else
+			{
+				addSkillGrid(p, gains, at.getValue().skills);
+			}
 
 			Map<String, Long> beforeCt = before != null ? before.getValue().counters
 				: new LinkedHashMap<>();

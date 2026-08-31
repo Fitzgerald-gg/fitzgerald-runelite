@@ -48,7 +48,7 @@ class HistoryLog
 	 *  Both maps are long-valued: total xp outgrows an int, and the reader takes
 	 *  every number back as a long. */
 	synchronized void append(File dir, String rsn, Map<String, Long> skills,
-		Map<String, Long> counters)
+		Map<String, Long> counters, Map<String, Long> kcs)
 	{
 		if (rsn == null || rsn.isEmpty())
 		{
@@ -69,6 +69,16 @@ class HistoryLog
 			counters.forEach(ct::addProperty);
 		}
 		line.add("counters", ct);
+		// Kill counts ride the same beat as everything else, so a period can say
+		// what it added to a boss and not merely what it stands at. Written from
+		// here on: lines already on the stream simply have no kcs, and a period
+		// bounded by one of those reports no gain rather than inventing one.
+		JsonObject kc = new JsonObject();
+		if (kcs != null)
+		{
+			kcs.forEach(kc::addProperty);
+		}
+		line.add("kcs", kc);
 		try
 		{
 			if (!dir.isDirectory() && !dir.mkdirs())
@@ -95,6 +105,7 @@ class HistoryLog
 	{
 		final Map<String, Long> skills = new java.util.HashMap<>();
 		final Map<String, Long> counters = new java.util.HashMap<>();
+		final Map<String, Long> kcs = new java.util.HashMap<>();
 	}
 
 	/**
@@ -126,6 +137,7 @@ class HistoryLog
 					Baseline b = new Baseline();
 					fill(o, "skills", b.skills);
 					fill(o, "counters", b.counters);
+					fill(o, "kcs", b.kcs);
 					out.put(date, b);   // later lines for a date overwrite: last wins
 				}
 				catch (RuntimeException torn)
