@@ -113,7 +113,7 @@ public class ChatPatternTest
 			"Congratulations, you've completed a Master combat task: Perfect Zulrah.",
 			"Congratulations, you've completed a Grandmaster combat task: Insanity.");
 		rejects(ChronicleEventCapture.COMBAT_TASK,
-			"Retrofitz has completed a Grandmaster combat task: Insanity.",
+			"Someone has completed a Grandmaster combat task: Insanity.",
 			"You have failed a combat task: Perfect Zulrah.",
 			"Congratulations, you've completed a Slayer task and received 15,000 XP.",
 			"New item added to your collection log: Dragon claws.",
@@ -237,7 +237,7 @@ public class ChatPatternTest
 			"Your pet is scared into your backpack.",
 			"You have a funny feeling like you're being watched.",
 			"You feel something weird sneaking into your bank.",
-			"[Clan] Retrofitz: You feel something weird sneaking into your backpack.",
+			"[Clan] Someone: You feel something weird sneaking into your backpack.",
 			"You have a funny feeling like you are being followed.");
 	}
 

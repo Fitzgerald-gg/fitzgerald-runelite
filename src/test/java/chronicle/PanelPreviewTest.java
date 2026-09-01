@@ -216,7 +216,7 @@ public class PanelPreviewTest
 	private StubPlugin fixturePlugin()
 	{
 		StubPlugin s = new StubPlugin(mockItems());
-		s.rsn = "Oxli";
+		s.rsn = "Fixture";
 		s.slayer = new ChronicleEventCapture.SlayerView("Abyssal demons", 63, 184);
 
 		s.lifetime.put("damageDealt", 1_842_337L);

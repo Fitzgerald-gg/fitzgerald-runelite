@@ -47,37 +47,37 @@ public class JournalRenameTest
 	@Test
 	public void journalAndHistoryFollowTogether() throws Exception
 	{
-		write("oxli.json", "{\"journal\":true}");
-		write("oxli.history.jsonl", "{\"day\":1}");
-		assertTrue(LocalStore.migrateJournalFiles(dir, "Oxli", "New Name"));
+		write("alpha.json", "{\"journal\":true}");
+		write("alpha.history.jsonl", "{\"day\":1}");
+		assertTrue(LocalStore.migrateJournalFiles(dir, "Alpha", "New Name"));
 		assertEquals("{\"journal\":true}", read("new-name.json"));
 		assertEquals("{\"day\":1}", read("new-name.history.jsonl"));
-		assertFalse(new File(dir, "oxli.json").exists());
-		assertFalse(new File(dir, "oxli.history.jsonl").exists());
+		assertFalse(new File(dir, "alpha.json").exists());
+		assertFalse(new File(dir, "alpha.history.jsonl").exists());
 	}
 
 	@Test
 	public void aRecordAlreadyFiledUnderTheNewNameIsSetAsideNotAdopted() throws Exception
 	{
-		write("oxli.json", "{\"mine\":true}");
+		write("alpha.json", "{\"mine\":true}");
 		// a freed rsn gets taken, so this could be a stranger's record
-		write("counterfitz.json", "{\"stranger\":true}");
-		assertTrue(LocalStore.migrateJournalFiles(dir, "Oxli", "Counterfitz"));
-		assertEquals("{\"mine\":true}", read("counterfitz.json"));
-		assertFalse(new File(dir, "oxli.json").exists());
-		assertEquals("{\"stranger\":true}", read(onlySidecar("counterfitz.json.conflict-")));
+		write("beta.json", "{\"stranger\":true}");
+		assertTrue(LocalStore.migrateJournalFiles(dir, "Alpha", "Beta"));
+		assertEquals("{\"mine\":true}", read("beta.json"));
+		assertFalse(new File(dir, "alpha.json").exists());
+		assertEquals("{\"stranger\":true}", read(onlySidecar("beta.json.conflict-")));
 	}
 
 	@Test
 	public void theSpineIsSetAsideWithItsRecord() throws Exception
 	{
-		write("oxli.json", "{\"mine\":true}");
-		write("oxli.history.jsonl", "{\"day\":1}");
-		write("counterfitz.json", "{\"stranger\":true}");
-		write("counterfitz.history.jsonl", "{\"day\":99}");
-		assertTrue(LocalStore.migrateJournalFiles(dir, "Oxli", "Counterfitz"));
-		assertEquals("{\"day\":1}", read("counterfitz.history.jsonl"));
-		assertEquals("{\"day\":99}", read(onlySidecar("counterfitz.history.jsonl.conflict-")));
+		write("alpha.json", "{\"mine\":true}");
+		write("alpha.history.jsonl", "{\"day\":1}");
+		write("beta.json", "{\"stranger\":true}");
+		write("beta.history.jsonl", "{\"day\":99}");
+		assertTrue(LocalStore.migrateJournalFiles(dir, "Alpha", "Beta"));
+		assertEquals("{\"day\":1}", read("beta.history.jsonl"));
+		assertEquals("{\"day\":99}", read(onlySidecar("beta.history.jsonl.conflict-")));
 	}
 
 	@Test
@@ -85,20 +85,20 @@ public class JournalRenameTest
 	{
 		// moving the spine alone would splice this account's days onto whatever
 		// record already sits under the new name
-		write("oxli.history.jsonl", "{\"day\":1}");
-		write("counterfitz.json", "{\"stranger\":true}");
-		assertFalse(LocalStore.migrateJournalFiles(dir, "Oxli", "Counterfitz"));
-		assertEquals("{\"stranger\":true}", read("counterfitz.json"));
-		assertEquals("{\"day\":1}", read("oxli.history.jsonl"));
-		assertFalse(new File(dir, "counterfitz.history.jsonl").exists());
+		write("alpha.history.jsonl", "{\"day\":1}");
+		write("beta.json", "{\"stranger\":true}");
+		assertFalse(LocalStore.migrateJournalFiles(dir, "Alpha", "Beta"));
+		assertEquals("{\"stranger\":true}", read("beta.json"));
+		assertEquals("{\"day\":1}", read("alpha.history.jsonl"));
+		assertFalse(new File(dir, "beta.history.jsonl").exists());
 	}
 
 	@Test
 	public void sameSlugIsANoOp() throws Exception
 	{
-		write("oxli.json", "{\"journal\":true}");
-		assertFalse(LocalStore.migrateJournalFiles(dir, "Oxli", "OXLI"));
-		assertEquals("{\"journal\":true}", read("oxli.json"));
+		write("alpha.json", "{\"journal\":true}");
+		assertFalse(LocalStore.migrateJournalFiles(dir, "Alpha", "ALPHA"));
+		assertEquals("{\"journal\":true}", read("alpha.json"));
 	}
 
 	@Test
