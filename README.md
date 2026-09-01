@@ -28,6 +28,17 @@ rebuilt from your own on-task kills.
 On first run it also reads RuneLite's core Loot Tracker archive, which is already on your disk,
 so the record starts years back rather than empty.
 
+## How the collection log is read
+
+Two ways, both driven by you. Logging in gives the completion fraction from varps. Opening the
+log yourself gives the pages you look at — and, on that same open, Chronicle fires the log's own
+Search operation so the server transmits every page at once, which is how one open records the
+whole log instead of only the tab you happened to click. This is the technique WikiSync and
+TempleOSRS use.
+
+It never opens the log for you, and it does nothing while you are viewing someone else's log
+through a POH adventure log. No log, no read.
+
 ## Import
 
 The Journal tab can merge another copy of the same account's record: a backup, another computer,
@@ -46,8 +57,10 @@ additionally sends a copy of the journal upward on the write interval and at log
 
 - One-way. Nothing is ever read back, and every feature works the same with it off.
 - Your own account only. Another player's stats, drops or activity are never submitted.
-- What travels: your display name, event data (raw item ids and quantities), counter totals,
-  per-skill XP, and collection-log and achievement snapshots.
+- What travels: your display name, your account type, and your RuneLite account hash, alongside
+  event data (raw item ids and quantities), counter totals, per-skill XP, collection-log and
+  achievement snapshots, and — on a group ironman — shared-storage movements. The account hash is
+  what lets a server follow an in-game rename without re-keying an alt that shares a token.
 - No images. Chronicle takes no screenshots, so nothing it sends can carry another player's name
   or a line of chat.
 
