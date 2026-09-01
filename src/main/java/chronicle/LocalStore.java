@@ -163,11 +163,13 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			// total as this base + the current session.
 			trackersBase = deepCopy(loaded.getAsJsonObject("trackers"));
 			currentRsn = rsn;
-			// An earlier build could file the same item twice in one source's bag.
+			// What an earlier build, or an import, could leave inconsistent: the same
+			// item twice in one source's bag, a feed line twice, by-item leavings that
+			// no longer sum to the pairs.
 			int healed = dedupeSourceBags() + dedupeFeed() + reconcileUntaken();
 			if (healed > 0)
 			{
-				log.debug("collapsed {} duplicate item entries", healed);
+				log.debug("repaired {} journal entries on load", healed);
 			}
 			// Cleared first: the mirror must describe this account only, or the previous
 			// character's ore would credit this one's drops.
