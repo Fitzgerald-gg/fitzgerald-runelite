@@ -124,6 +124,9 @@ public class ChroniclePlugin extends Plugin
 	@Inject
 	private net.runelite.client.game.SkillIconManager skillIcons;
 
+	@Inject
+	private net.runelite.client.game.SpriteManager sprites;
+
 	// Injected rather than constructed: the Plugin Hub's review rejects a plugin
 	// that builds its own Gson/OkHttp instead of taking the client's.
 	@Inject
@@ -1034,6 +1037,12 @@ public class ChroniclePlugin extends Plugin
 	int combatLevel()
 	{
 		return localStore.combatLevel();
+	}
+
+	// Game sprites, fetched on demand. Null-safe for a dev client with no cache.
+	net.runelite.client.game.SpriteManager sprites()
+	{
+		return sprites;
 	}
 
 	/** The game's own skill sprites, for the History grid. */

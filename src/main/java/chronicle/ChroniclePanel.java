@@ -230,13 +230,16 @@ class ChroniclePanel extends PluginPanel
 		});
 		// ── tabs first (the mock's order), then search ──
 		tabGroup.setLayout(new GridLayout(1, 7, 2, 0));
-		addTab("hitpoints", "Home", View.HOME);
-		addTab("thieving", "Drops", View.DROPS);
-		addTab("slayer", "Slayer", View.SLAYER);
-		addTab("prayer", "Collection log", View.LOG);
-		addTab("overall", "Stats", View.STATS);
-		addTab("farming", "History", View.HISTORY);
-		addTab("fletching", "Journal", View.JOURNAL);
+		// Each tab starts on a skill icon (bundled, always there) and upgrades to
+		// the game sprite that fits it better once the cache answers.
+		addTab("hitpoints", -1, "Home", View.HOME);
+		addTab("thieving", net.runelite.api.gameval.SpriteID.ICON_COINS, "Drops", View.DROPS);
+		addTab("slayer", -1, "Slayer", View.SLAYER);
+		addTab("prayer", net.runelite.api.gameval.SpriteID.BOOKS, "Collection log", View.LOG);
+		addTab("overall", -1, "Stats", View.STATS);
+		addTab("farming", net.runelite.api.gameval.SpriteID.SCROLL_ICON, "History", View.HISTORY);
+		addTab("fletching", net.runelite.api.gameval.SpriteID.QUILL_OBLIQUE_LARGE,
+			"Journal", View.JOURNAL);
 		north.add(tabGroup);
 		north.add(vgap(7));
 		north.add(searchField);
@@ -319,9 +322,20 @@ class ChroniclePanel extends PluginPanel
 		}
 	}
 
-	private void addTab(String icon, String tooltip, View target)
+	private void addTab(String icon, int spriteId, String tooltip, View target)
 	{
 		MaterialTab tab = new MaterialTab(tabIcon(icon), tabGroup, new JPanel());
+		if (spriteId >= 0 && plugin.sprites() != null)
+		{
+			plugin.sprites().getSpriteAsync(spriteId, 0, img ->
+			{
+				if (img != null)
+				{
+					SwingUtilities.invokeLater(() -> tab.setIcon(new ImageIcon(
+						ImageUtil.resizeImage(ImageUtil.grayscaleImage(img), 16, 16))));
+				}
+			});
+		}
 		tab.setToolTipText(tooltip);
 		tab.setOnSelectEvent(() ->
 		{

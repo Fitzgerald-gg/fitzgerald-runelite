@@ -811,6 +811,12 @@ public class PanelPreviewTest
 		final Map<String, Long> kcs = new LinkedHashMap<>();
 
 		@Override
+		net.runelite.client.game.SpriteManager sprites()
+		{
+			return null;   // headless: tabs keep their skill icons
+		}
+
+		@Override
 		net.runelite.client.game.SkillIconManager skillIcons()
 		{
 			return null;   // headless: the grid falls back to a bare level
