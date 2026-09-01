@@ -13,10 +13,8 @@ import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 
 /**
- * Covers the structural per-food key derivation. The counting itself is driven by
- * client events and is exercised in-game; what is pinned here is the naming, because
- * a bad key is invisible at runtime — it just quietly mints a second counter that
- * never aggregates with the real one.
+ * Key derivation for the per-food and per-potion counters. A wrong key fails silently:
+ * it splits one tally across two counters.
  */
 public class FoodStatTrackerTest
 {
@@ -32,8 +30,8 @@ public class FoodStatTrackerTest
 	@Test
 	public void historicalKeyNamesAreReproduced()
 	{
-		// These two predate the structural derivation; the rule has to keep matching
-		// them or the existing server-side totals would fork.
+		// These names predate the derivation rule. If it stops matching them the
+		// journal totals fork.
 		assertEquals("troutEaten", FoodStatTracker.perFoodKey("Trout"));
 		assertEquals("cabbageEaten", FoodStatTracker.perFoodKey("Cabbage"));
 	}
@@ -45,14 +43,11 @@ public class FoodStatTrackerTest
 		assertEquals("admiralPieEaten", FoodStatTracker.perFoodKey("Admiral pie"));
 	}
 
-	/**
-	 * The regression this file was written for: digits survive the key builder, so a
-	 * part-eaten food used to mint a fresh junk key per bite ("2/3 cake" ->
-	 * 23CakeEaten) instead of aggregating onto the whole item.
-	 */
 	@Test
 	public void partEatenFoodsFoldOntoTheWholeItem()
 	{
+		// Digits survive the key builder, so leaving the portion prefix on would give
+		// a fresh 23CakeEaten per bite.
 		assertEquals("cakeEaten", FoodStatTracker.perFoodKey("2/3 cake"));
 		assertEquals("cakeEaten", FoodStatTracker.perFoodKey("1/3 cake"));
 		assertEquals("cakeEaten", FoodStatTracker.perFoodKey("Slice of cake"));
@@ -65,17 +60,16 @@ public class FoodStatTrackerTest
 	public void baseNameStripsOnlyTheLeadingQualifier()
 	{
 		assertEquals("cake", FoodStatTracker.baseFoodName("2/3 cake"));
-		// A whole item is already canonical and must pass through untouched.
 		assertEquals("Chocolate cake", FoodStatTracker.baseFoodName("Chocolate cake"));
 		assertEquals("Cooked karambwan", FoodStatTracker.baseFoodName("Cooked karambwan"));
-		// Only a LEADING qualifier is a portion marker; "half" elsewhere is the name.
+		// "half" only marks a portion when an "a"/"an" follows it. Half moon is an item.
 		assertEquals("Half moon", FoodStatTracker.baseFoodName("Half moon"));
 	}
 
 	@Test
 	public void unnamedItemsProduceNoKey()
 	{
-		// itemName() returns "" for an unresolvable id; that must not mint "Eaten".
+		// itemName() returns "" for an unresolvable id; that must not become "Eaten".
 		assertEquals("", FoodStatTracker.perFoodKey(""));
 		assertEquals("", FoodStatTracker.perFoodKey("   "));
 	}
@@ -83,7 +77,7 @@ public class FoodStatTrackerTest
 	@Test
 	public void potionNameFromDrinkMessage()
 	{
-		// The dose tally arrives as a second sentence; the first stop ends the name.
+		// The doses-left tally is a second sentence, so the first full stop ends the name.
 		assertEquals("prayer potion", FoodStatTracker.potionName(
 			"You drink some of your prayer potion. You have 2 doses of potion left."));
 		assertEquals("divine super combat potion", FoodStatTracker.potionName(

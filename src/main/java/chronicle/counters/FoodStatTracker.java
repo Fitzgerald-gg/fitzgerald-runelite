@@ -41,29 +41,17 @@ import static chronicle.counters.StatKeys.VIALS_SHATTERED;
 /**
  * Counts eating, drinking and passive hitpoint regeneration.
  *
- * <p><b>Eating</b> is driven by the explicit "Eat" menu click, scored only once that
- * item's stack is seen shrinking in the inventory. Hitpoints deliberately play no
- * part in that decision: keying off HP would miscount dropping food on the same tick
- * as a natural regen step. Every food counts, plus a per-food key, with no list to
- * maintain. Drinks and vial-smashing still read off the chat box, which is reliable
- * for those. Natural regeneration has no signal of its own, so it is inferred on each
- * tick: a +1 hitpoint step the most-recent Eat/Drink click can't account for is regen.
+ * <p>An eat is scored off the "Eat" menu click, once that item's stack is seen
+ * shrinking in the inventory; hitpoints play no part, since dropping food on a natural
+ * regen tick looks identical. Drinks and vial-smashing read off the chat box. Regen has
+ * no signal of its own, so a +1 hitpoint step no recent Eat/Drink explains is regen.
  */
 @Slf4j
 public class FoodStatTracker implements StatTracker
 {
-	/**
-	 * Consumables that restore exactly one hitpoint, so a +1 tick right after using
-	 * one is that heal rather than natural regen and must not be counted as both.
-	 * Matched as a substring of the menu target.
-	 *
-	 * <p>Grouped by what they are — the low-heal foods, then the brewed drinks — and
-	 * alphabetical within each group, purely so it stays easy to scan when a new one
-	 * is added. The membership is a fact of the game; the arrangement is just for
-	 * reading.
-	 */
+	// Consumables that heal exactly one hitpoint, so a +1 tick straight after one is
+	// that heal rather than regen. Matched as a substring of the menu target.
 	private static final List<String> SINGLE_HP_HEALS = List.of(
-		// Foods and non-alcoholic sips that heal one.
 		"Anchovies",
 		"Cabbage",
 		"Chopped onion",
@@ -73,7 +61,6 @@ public class FoodStatTracker implements StatTracker
 		"Onion",
 		"Potato",
 		"Pot of cream",
-		// Ales, ciders and brews — all heal one and self-inflict their stat drain.
 		"Asgarnian ale",
 		"Axeman's folly",
 		"Bandit's brew",
@@ -88,33 +75,29 @@ public class FoodStatTracker implements StatTracker
 		"Slayer's respite",
 		"Wizard's mind bomb");
 
-	/** How long a pending Eat stays open waiting for the item to leave the pack. */
+	// How long a pending Eat waits for the item to leave the pack.
 	private static final int EAT_CONFIRM_TICKS = 3;
 
 	private final StatStore store;
 	private final Client client;
 	private final ItemManager itemManager;
 
-	/** Menu target of the latest Eat/Drink click; null once it has been reconciled. */
+	// Menu target of the latest Eat/Drink click; null once reconciled.
 	private String lastConsumed;
 
-	/** Boosted hitpoints observed on the previous tick; -1 before the first reading. */
+	// Boosted hitpoints from the previous tick; -1 before the first reading.
 	private int previousHitpoints = -1;
 
-	/**
-	 * Foods clicked "Eat" but not yet proven to have left the pack. This is a QUEUE,
-	 * not a single slot: combo-eating (a food plus a karambwan on the same tick) and
-	 * fast successive clicks both produce several in flight at once, and a single slot
-	 * would drop all but the last.
-	 */
+	// Foods clicked "Eat" but not yet seen leaving the pack. A queue because
+	// combo-eating (food plus karambwan on one tick) puts several in flight at once.
 	private final List<PendingEat> pendingEats = new ArrayList<>();
 
-	/** Safety cap so a stream of clicks that never resolve can't grow unbounded. */
+	// Cap so clicks that never resolve can't grow the queue unbounded.
 	private static final int MAX_PENDING_EATS = 8;
 
 	private static final class PendingEat
 	{
-		/** Item id, not name: noted and unnoted forms share a name but never an id. */
+		// Keyed by id, because noted and unnoted forms share a name.
 		private final int itemId;
 		private int ticksLeft;
 
@@ -125,26 +108,17 @@ public class FoodStatTracker implements StatTracker
 		}
 	}
 
-	/** Previous inventory contents, used to spot the eaten stack shrinking. */
+	// Previous inventory contents, for spotting the eaten stack shrink.
 	private Map<Integer, Integer> inventorySnapshot;
 
-	/**
-	 * Dose price per potion name, remembered for as long as the client stays logged in.
-	 * The lookup behind it walks every tradeable item name, and in a long fight a dose
-	 * lands every few dozen ticks — on the client thread, where that walk is felt. A
-	 * potion's 4-dose price does not move underneath a session, so one lookup per
-	 * distinct name is enough.
-	 */
+	// Dose price per potion name, held for the session. The lookup behind it walks
+	// every tradeable item name on the client thread, and a 4-dose price won't move
+	// underneath a session.
 	private final Map<String, Integer> dosePrices = new HashMap<>();
 
-	// Journal sink for per-consumable gp (typed key -> price at use). Nullable —
-	// tests build the tracker bare and the counts still flow without it.
+	// Journal sink for per-consumable gp (typed key -> price at use). Null until the
+	// plugin wires it at startUp.
 	private final java.util.function.BiConsumer<String, Integer> consumableSink;
-
-	public FoodStatTracker(StatStore statStore, Client client, ItemManager itemManager)
-	{
-		this(statStore, client, itemManager, null);
-	}
 
 	public FoodStatTracker(StatStore statStore, Client client, ItemManager itemManager,
 		java.util.function.BiConsumer<String, Integer> consumableSink)
@@ -158,17 +132,14 @@ public class FoodStatTracker implements StatTracker
 	@Override
 	public void onMenuOptionClicked(MenuOptionClicked event)
 	{
-		// Stash what the player just chose to consume so the tick handler can
-		// distinguish a 1 HP heal from a tick of natural regen. Eat targets arrive
-		// with colour tags, so strip them now; Drink targets are kept as-is and
-		// cleaned later only if we need to inspect them.
+		// Stash what was just consumed so the tick handler can tell a 1 HP heal from a
+		// regen tick. Eat targets arrive with colour tags; Drink targets are cleaned
+		// later, only if we need to look at them.
 		if ("Eat".equals(event.getMenuOption()))
 		{
 			lastConsumed = Text.removeTags(event.getMenuTarget());
-			// Queue a confirmation. The eat is only scored once this exact item id
-			// leaves the pack, so an interrupted click never counts — and because the
-			// trigger is the "Eat" option (never hitpoints), dropping food while a
-			// natural regen tick lands cannot be mistaken for eating.
+			// Scored only once this exact item id leaves the pack, so an interrupted
+			// click never counts.
 			if (pendingEats.size() < MAX_PENDING_EATS)
 			{
 				pendingEats.add(new PendingEat(event.getItemId(), EAT_CONFIRM_TICKS));
@@ -185,13 +156,12 @@ public class FoodStatTracker implements StatTracker
 	{
 		int hitpoints = client.getBoostedSkillLevel(Skill.HITPOINTS);
 
-		// Only a single-point rise can be regen. If we can't pin that rise on a 1 HP
-		// food, count it as passive regeneration.
+		// Only a single-point rise can be regen. If it can't be pinned on a 1 HP food,
+		// call it passive regeneration.
 		//
-		// Known imperfection inherited from the heuristic: eating a multi-point food
-		// while sitting exactly one below the HP cap yields a +1 step that is
-		// indistinguishable from regen, so it is occasionally miscounted. Rare enough
-		// to leave as-is.
+		// Imperfection in the heuristic: eating a multi-point food while sitting one
+		// below the HP cap gives a +1 step indistinguishable from regen. Rare enough to
+		// leave alone.
 		if (previousHitpoints != -1 && hitpoints == previousHitpoints + 1)
 		{
 			if (lastConsumed == null || !isSingleHpHeal(lastConsumed))
@@ -200,8 +170,8 @@ public class FoodStatTracker implements StatTracker
 			}
 			else
 			{
-				// The rise was the 1 HP food itself. Drop the reference so its heal is
-				// swallowed at most once; worst case, a single regen tick is lost per eat.
+				// The rise was the 1 HP food. Drop the reference so its heal swallows at
+				// most one regen tick.
 				lastConsumed = null;
 			}
 		}
@@ -221,26 +191,23 @@ public class FoodStatTracker implements StatTracker
 	@Override
 	public void onGameStateChanged(GameStateChanged event)
 	{
-		// Any gap in event delivery makes both the snapshot and the queue lies: the
-		// pack can change unobserved while we are away, and onGameTick stops firing
-		// so pending eats never age out. Coming back, a stale snapshot would read
-		// those unobserved departures as consumption. Drop everything and rebuild
-		// from the first inventory event after we are back in-game.
+		// Away from LOGGED_IN the pack changes unobserved and ticks stop firing, so both
+		// the snapshot and the queue go stale. Rebuild from the first inventory event
+		// after we're back in-game.
 		if (event.getGameState() != GameState.LOGGED_IN)
 		{
 			reset();
 		}
-		// Remembered dose prices are world-wide GE figures, the same for every account,
-		// so they carry nothing personal — but the login screen is the one transition
-		// where nothing at all should survive, and it is rare enough that dropping them
-		// costs a single lookup per potion rather than one per region cross.
+		// Remembered dose prices are world-wide GE figures carrying nothing personal,
+		// but the login screen is the one transition where nothing at all survives. A
+		// region cross keeps them.
 		if (event.getGameState() == GameState.LOGIN_SCREEN)
 		{
 			dosePrices.clear();
 		}
 	}
 
-	/** Drop all inferred state. Safe to call at any time; the next tick rebuilds it. */
+	// Safe to call any time; the next tick rebuilds.
 	private void reset()
 	{
 		pendingEats.clear();
@@ -267,8 +234,8 @@ public class FoodStatTracker implements StatTracker
 		}
 
 		// Confirm a pending Eat: the clicked food's own stack must have shrunk. Multi
-		// portion foods (pizzas, cakes) still shrink the whole-item stack, so they
-		// count once per bite as expected.
+		// portion foods (pizzas, cakes) shrink the whole-item stack, so they count once
+		// per bite.
 		if (!pendingEats.isEmpty() && inventorySnapshot != null)
 		{
 			for (Map.Entry<Integer, Integer> before : inventorySnapshot.entrySet())
@@ -278,19 +245,16 @@ public class FoodStatTracker implements StatTracker
 				{
 					continue;   // that stack didn't shrink
 				}
-				// No eat removes two units of one item id at once — the game's eat delay
-				// is several ticks — so a multi-unit shrink is a drop, a bank deposit,
-				// a trade or a death, never a meal. Scoring it would invent counts, so
-				// only a shrink of exactly one can redeem a pending eat. Never break out
-				// of the outer loop: a combo-eat shrinks TWO stacks in a single event,
-				// and each is a separate item id shrinking by one.
+				// The eat delay is several ticks, so no eat removes two units of one item
+				// id at once: a multi-unit shrink is a drop, a deposit, a trade or a
+				// death. Don't break out of the loop either: a combo-eat shrinks two
+				// stacks in one event.
 				if (consumed != 1 || !takePendingEat(before.getKey()))
 				{
 					continue;
 				}
 				store.incrementStat(FOOD_EATEN);
-				// Consumed-gp: priced at the moment of the bite from the client's
-				// own GE feed — the same price-at-record pattern drops use.
+				// Priced at the bite off the client's own GE feed, like drops at the kill.
 				int price = itemManager.getItemPrice(itemManager.canonicalize(before.getKey()));
 				if (price > 0)
 				{
@@ -300,8 +264,7 @@ public class FoodStatTracker implements StatTracker
 				if (!typed.isEmpty())
 				{
 					store.incrementStat(typed);
-					// The habit's cost, filed under the same typed key the
-					// count uses — priced at the bite, like drops at the kill.
+					// Cost filed under the same typed key as the count.
 					if (price > 0 && consumableSink != null)
 					{
 						consumableSink.accept(typed, price);
@@ -338,10 +301,9 @@ public class FoodStatTracker implements StatTracker
 					return dose;
 				}
 			}
-			// An empty result means just as easily that the client's price list has not
-			// finished loading, and remembering a zero from that would leave the potion
-			// unpriced for the rest of the session. Only a search that came back with
-			// something proves this name has no 4-dose form worth asking about again.
+			// An empty result can just mean the client's price list hasn't loaded, and
+			// caching a zero from that would leave the potion unpriced all session. Only
+			// a search that came back with something proves there's no 4-dose form.
 			if (!matches.isEmpty())
 			{
 				dosePrices.put(potion, 0);
@@ -349,7 +311,7 @@ public class FoodStatTracker implements StatTracker
 		}
 		catch (RuntimeException ignored)
 		{
-			// price cache unavailable — the dose goes unpriced, never guessed
+			// price cache unavailable; the dose goes unpriced rather than guessed
 		}
 		return 0;
 	}
@@ -381,8 +343,8 @@ public class FoodStatTracker implements StatTracker
 	static String perFoodKey(String foodName)
 	{
 		StringBuilder key = new StringBuilder();
-		// Drop apostrophes before splitting so a possessive collapses into the word it
-		// belongs to: "Chef's delight" is chefsDelight, not chefSDelight.
+		// Apostrophes go before the split so a possessive collapses into its word:
+		// "Chef's delight" is chefsDelight, not chefSDelight.
 		String cleaned = baseFoodName(foodName).trim().toLowerCase().replace("'", "").replace("’", "");
 		for (String word : cleaned.split("[^a-z0-9]+"))
 		{
@@ -403,10 +365,9 @@ public class FoodStatTracker implements StatTracker
 	}
 
 	/**
-	 * Fold a part-eaten food back onto the whole item it came from, so the bites of
-	 * one cake all land on cakeEaten rather than scattering across cakeEaten,
-	 * 23CakeEaten and 13CakeEaten. Digits survive the key builder, so leaving the
-	 * portion prefix in place would mint a junk key per bite.
+	 * Fold a part-eaten food back onto the whole item, so every bite of one cake lands
+	 * on cakeEaten. Digits survive the key builder, so leaving the portion prefix on
+	 * would mint 23CakeEaten and friends.
 	 */
 	static String baseFoodName(String foodName)
 	{
@@ -434,9 +395,8 @@ public class FoodStatTracker implements StatTracker
 
 		String message = event.getMessage();
 
-		// Eating is NOT counted here. The "You eat the ..." line only fires for a
-		// handful of foods, so most meals went uncounted; it is now driven by the
-		// "Eat" click confirmed against the inventory (see onItemContainerChanged).
+		// Eating isn't counted here: the "You eat the ..." line only fires for a handful
+		// of foods, so most meals went uncounted. See onItemContainerChanged.
 		if (message.contains("You drink"))
 		{
 			// Drinks read "You drink the <x>.", potions read "You drink some of
@@ -452,17 +412,14 @@ public class FoodStatTracker implements StatTracker
 			if (message.contains("You drink some of the") || message.contains("You drink some of your"))
 			{
 				store.incrementStat(POTION_DOSES);
-				// Consumed-gp for a dose: a quarter of the 4-dose GE price — an
-				// estimate (chat carries no item id), erring honest-low for
-				// anything unpriced.
+				// A quarter of the 4-dose price. Chat carries no item id, so this is an
+				// estimate, and anything unpriced errs low.
 				int dose = dosePrice(potionName(message));
 				if (dose > 0)
 				{
 					store.incrementStatBy(CONSUMED_VALUE, dose);
 				}
-				// Per-potion tally beside the aggregate — the same rule that
-				// mints per-food keys, so "Prayer potion" -> prayerPotionDoses
-				// with no list to maintain.
+				// Per-potion tally beside the aggregate: "Prayer potion" -> prayerPotionDoses.
 				String typed = perPotionKey(potionName(message));
 				if (!typed.isEmpty())
 				{
@@ -487,7 +444,6 @@ public class FoodStatTracker implements StatTracker
 		}
 	}
 
-	/** True when the (tag-free) menu target names one of the single-hitpoint heals. */
 	private static boolean isSingleHpHeal(String menuTarget)
 	{
 		String cleaned = Text.removeTags(menuTarget);
@@ -501,7 +457,7 @@ public class FoodStatTracker implements StatTracker
 		return false;
 	}
 
-	/** Extract the item name from a consume line: the text between "the " and the trailing dot. */
+	/** The item name out of a consume line: the text between "the " and the trailing dot. */
 	private static String consumableName(String message)
 	{
 		int from = message.indexOf("the ") + "the ".length();
@@ -510,9 +466,8 @@ public class FoodStatTracker implements StatTracker
 	}
 
 	/**
-	 * Extract the potion name from "You drink some of the/your &lt;x&gt;." —
-	 * handled separately from {@link #consumableName} because the "your" form
-	 * has no "the " to split on.
+	 * The potion name out of "You drink some of the/your &lt;x&gt;." Separate from
+	 * {@link #consumableName} because the "your" form has no "the " to split on.
 	 */
 	static String potionName(String message)
 	{
@@ -535,10 +490,7 @@ public class FoodStatTracker implements StatTracker
 		return to > from ? message.substring(from, to).trim() : "";
 	}
 
-	/**
-	 * "Prayer potion" -&gt; "prayerPotionDoses" — the same minting rule as
-	 * {@link #perFoodKey}, so new potions need no config either.
-	 */
+	/** "Prayer potion" -&gt; "prayerPotionDoses", the same minting rule as {@link #perFoodKey}. */
 	static String perPotionKey(String potionName)
 	{
 		StringBuilder key = new StringBuilder();

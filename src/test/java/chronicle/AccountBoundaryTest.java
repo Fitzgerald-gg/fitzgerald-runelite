@@ -8,7 +8,6 @@ import java.io.File;
 import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.Map;
-import net.runelite.api.ItemComposition;
 import net.runelite.client.game.ItemManager;
 import org.junit.Before;
 import org.junit.Test;
@@ -18,14 +17,9 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Pins the store-level facts the plugin's account-identity guards rest on.
- *
- * <p>The journal deliberately keeps the last account's model mounted after its
- * session ends (the panel still browses it), so "is this model mine?" can only
- * be answered by {@link LocalStore#isReadyFor}. Every read that feeds a cloud
- * push or a history write has to ask. These tests fail if that contract is
- * quietly changed, which is what let one account's lifetime totals be pushed
- * under another's token.
+ * The store-level facts the account-identity guards rest on. A closed session leaves
+ * its model mounted so the panel can still browse it, so {@link LocalStore#isReadyFor}
+ * is the only thing that answers whether a model belongs to the account logged in now.
  */
 public class AccountBoundaryTest
 {
@@ -36,11 +30,6 @@ public class AccountBoundaryTest
 	public void setUp() throws Exception
 	{
 		ItemManager im = Mockito.mock(ItemManager.class);
-		Mockito.when(im.canonicalize(Mockito.anyInt())).thenAnswer(inv -> inv.getArgument(0));
-		Mockito.when(im.getItemPrice(Mockito.anyInt())).thenReturn(10);
-		ItemComposition comp = Mockito.mock(ItemComposition.class);
-		Mockito.when(comp.getName()).thenReturn("Rune dagger");
-		Mockito.when(im.getItemComposition(Mockito.anyInt())).thenReturn(comp);
 		store = new LocalStore(im, new Gson());
 		dir = Files.createTempDirectory("chronicle-boundary").toFile();
 	}
@@ -58,10 +47,8 @@ public class AccountBoundaryTest
 		store.load(dir, "Alpha");
 		store.setTrackers(session("tilesWalked", 500), "Alpha");
 		store.endSession();
-		// The model is still readable — the panel browses the closed session —
-		// so a reader that only checks "is there a model?" sees Alpha's data.
+		// the panel still browses the closed session, so the model stays readable
 		assertEquals(500L, (long) store.trackersSnapshot().get("tilesWalked"));
-		// …but nobody owns it any more. This is the guard's whole basis.
 		assertFalse(store.isReadyFor("Alpha"));
 		assertFalse(store.isReadyFor("Beta"));
 	}
@@ -72,32 +59,28 @@ public class AccountBoundaryTest
 		store.load(dir, "Alpha");
 		store.setTrackers(session("tilesWalked", 500), "Alpha");
 		store.endSession();
-		// Beta is logged in but its journal has not loaded yet: every write path
-		// must no-op rather than fold Beta's session into Alpha's model.
+		// Beta is logged in but its journal isn't mounted yet, so its writes must no-op.
 		store.setTrackers(session("tilesWalked", 7), "Beta");
 		store.record("PET", new com.google.gson.JsonObject(), "Beta");
 		assertEquals(500L, (long) store.trackersSnapshot().get("tilesWalked"));
 		store.load(dir, "Beta");
 		assertTrue(store.isReadyFor("Beta"));
 		assertFalse(store.isReadyFor("Alpha"));
-		// Beta's own journal is its own: none of Alpha's totals came across.
+		// none of Alpha's 500 came across
 		assertTrue(store.trackersSnapshot().isEmpty());
 	}
 
 	@Test
 	public void reloadingALiveAccountWouldDoubleCountItsSession()
 	{
-		// Why the login path must never re-load an already-mounted account (a
-		// world hop and every region load re-fire LOGGED_IN): the lifetime base
-		// is frozen FROM DISK, and the flushed file already contains the session
-		// folded so far. Re-freezing counts it twice — and a journal-absolute
-		// push would make that permanent server-side.
+		// The lifetime base is frozen from disk and the flushed file already holds the
+		// session so far, so a re-load counts that session twice.
 		store.load(dir, "Alpha");
 		store.setTrackers(session("tilesWalked", 500), "Alpha");
 		store.flush(dir);
 		assertEquals(500L, (long) store.trackersSnapshot().get("tilesWalked"));
 
-		store.load(dir, "Alpha");                          // the re-load a hop used to cause
+		store.load(dir, "Alpha");                          // what an unguarded world hop does
 		store.setTrackers(session("tilesWalked", 500), "Alpha");   // same session, still counting
 		assertEquals(1000L, (long) store.trackersSnapshot().get("tilesWalked"));
 	}
@@ -109,7 +92,7 @@ public class AccountBoundaryTest
 		store.setTrackers(session("tilesWalked", 100), "Alpha");
 		store.setTrackers(session("tilesWalked", 250), "Alpha");
 		store.setTrackers(session("tilesWalked", 400), "Alpha");
-		// base(0) + the CURRENT session, not the sum of every refresh.
+		// base(0) + the current session, so 400 rather than 100+250+400
 		assertEquals(400L, (long) store.trackersSnapshot().get("tilesWalked"));
 	}
 }

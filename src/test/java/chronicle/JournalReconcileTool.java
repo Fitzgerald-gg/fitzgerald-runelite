@@ -15,15 +15,14 @@ import org.mockito.Mockito;
 import static org.junit.Assume.assumeTrue;
 
 /**
- * Fold an exported journal into an on-disk one through the plugin's OWN import,
- * for an operator working directly on a machine rather than clicking the panel
- * button. Using the real {@link LocalStore#importJournal} is the whole point:
- * a merge written twice is a merge that can disagree with itself.
+ * Merges an exported journal into an on-disk one from the command line, through the same
+ * {@link LocalStore#importJournal} the panel's import button runs, and prints the before
+ * and after counts.
  *
- * <p>Inert unless pointed at something:
+ * <p>Skipped unless pointed at something:
  * {@code -Dchronicle.dir=<journal dir> -Dchronicle.rsn=<name> -Dchronicle.import=<file>}.
- * The plugin must not be running — it holds the journal in memory and writes
- * over the file on its own interval, which would discard whatever this did.
+ * Shut the plugin down first. A running one holds the journal in memory and will flush it
+ * back over the file.
  */
 public class JournalReconcileTool
 {
@@ -76,6 +75,7 @@ public class JournalReconcileTool
 		System.out.println("  itemised    " + withItems + " of " + store.untakenSources().size());
 	}
 
+	// slayer tasks that carry per-monster rows
 	private static int detailed(LocalStore store)
 	{
 		int n = 0;

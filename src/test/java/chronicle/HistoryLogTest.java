@@ -22,17 +22,8 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Pins the calendar spine's READ contract — the half of the history file that
- * the panel and the year-card export actually depend on.
- *
- * <p>The spine is append-only and deliberately writes a day several times over
- * (login, rollover, logout all append a closing baseline), so the file alone is
- * ambiguous: what makes it a calendar is the rule that the last line for a date
- * is the one that counts, and that a line the reader cannot parse costs only
- * itself. Every figure the History tab shows is the subtraction of two of these
- * baselines, so a reader that merged duplicate days, or that abandoned the file
- * at the first torn line, would not fail loudly — it would quietly report the
- * wrong numbers for the wrong days.
+ * Read contract for the history spine. A date gets written several times over a
+ * session, so the last line for it wins, and a line that won't parse costs only itself.
  */
 public class HistoryLogTest
 {
@@ -60,7 +51,7 @@ public class HistoryLogTest
 		return new File(dir, LocalStore.slug(rsn) + ".history.jsonl");
 	}
 
-	/** Append a line the writer never would — a hand-edited or half-written one. */
+	// write a line the real writer never would: hand-edited, or cut off mid-write
 	private void rawLine(String rsn, String text, boolean terminated) throws Exception
 	{
 		try (Writer w = new OutputStreamWriter(
@@ -74,12 +65,6 @@ public class HistoryLogTest
 		}
 	}
 
-	/**
-	 * Three appends in a day is the normal shape of a session, not a fault. The
-	 * closing figure is the one the calendar wants, and it REPLACES its
-	 * predecessors rather than merging with them — a merge would resurrect
-	 * counters the player's own day had already moved past.
-	 */
 	@Test
 	public void theLastLineForADateIsTheOneThatCounts()
 	{
@@ -94,16 +79,10 @@ public class HistoryLogTest
 		HistoryLog.Baseline b = got.firstEntry().getValue();
 		assertEquals(140L, (long) b.skills.get("attack"));
 		assertEquals(90L, (long) b.counters.get("tilesWalked"));
-		// The earlier line is gone entirely, not folded in underneath.
+		// the later line replaces the earlier one, so logsChopped goes with it
 		assertNull(b.counters.get("logsChopped"));
 	}
 
-	/**
-	 * A crash or a full disk leaves a half-written final line. It costs that line
-	 * and nothing else: the days already closed are the record, and abandoning
-	 * the file at the first parse failure would lose a player's whole history to
-	 * a few stray bytes at the end of it.
-	 */
 	@Test
 	public void aTornFinalLineCostsOnlyItself() throws Exception
 	{
@@ -119,17 +98,11 @@ public class HistoryLogTest
 		assertFalse(got.containsKey(LocalDate.parse("2026-01-03")));
 	}
 
-	/**
-	 * The same resilience in the middle of the stream rather than at the end of
-	 * it. This is the one that matters for a long-lived spine: a day damaged
-	 * years ago must not truncate the calendar at the point of damage and hide
-	 * every day recorded since.
-	 */
 	@Test
 	public void aDamagedLineDoesNotTruncateTheDaysAfterIt() throws Exception
 	{
 		log.appendImported(dir, RSN, "2026-01-01", map("attack", 50L));
-		// A line cut short by a crash, and one whose date no longer reads as one.
+		// one line cut short by a crash, one whose date won't parse
 		rawLine(RSN, "{\"date\":\"2026-01-02\",\"skills\":{\"attack\":60", true);
 		rawLine(RSN, "{\"date\":\"01/02/2026\",\"skills\":{}}", true);
 		log.appendImported(dir, RSN, "2026-01-03", map("attack", 70L));
@@ -140,11 +113,7 @@ public class HistoryLogTest
 		assertEquals(70L, (long) got.get(LocalDate.parse("2026-01-03")).skills.get("attack"));
 	}
 
-	/**
-	 * A day whose line is intact but whose contents are not: the numbers that
-	 * survive are kept and the rest is dropped, because a single unreadable
-	 * counter must not cost the whole day's baseline.
-	 */
+	// a value that won't read as a number drops itself; the rest of the day's baseline stays
 	@Test
 	public void aLineSurvivesTheValuesInsideItThatDoNot() throws Exception
 	{
@@ -157,16 +126,11 @@ public class HistoryLogTest
 		HistoryLog.Baseline partial = got.get(LocalDate.parse("2026-02-02"));
 		assertEquals(70L, (long) partial.skills.get("defence"));
 		assertNull(partial.skills.get("attack"));
-		// A dated line with nothing in it is still a day the calendar knows about.
+		// a dated line with nothing in it still counts as a day
 		assertTrue(got.get(LocalDate.parse("2026-02-03")).skills.isEmpty());
 	}
 
-	/**
-	 * The Wise Old Man import writes the past through the same one-line-per-day
-	 * door as a live session, into the same file — so an imported day and a
-	 * played day are indistinguishable to the reader, and the panel can subtract
-	 * across the join. Imported days carry no counters, only skills.
-	 */
+	// imported past days share the file with played ones and carry skills but no counters
 	@Test
 	public void anImportedDayIsJustAnotherLineInTheSameStream()
 	{
@@ -178,19 +142,15 @@ public class HistoryLogTest
 		HistoryLog.Baseline imported = got.get(LocalDate.parse("2024-03-01"));
 		assertEquals(12_345L, (long) imported.skills.get("overall"));
 		assertTrue(imported.counters.isEmpty());
-		// The played day is the later of the two, whatever today happens to be.
+		// append() dates itself today, so the played day is always the later entry
 		assertEquals(20_000L, (long) got.lastEntry().getValue().skills.get("overall"));
-		// A history import can be re-run; the later line for that date simply wins.
+		// re-running an import is safe; the later line for the date wins
 		log.appendImported(dir, RSN, "2024-03-01", map("overall", 12_400L));
 		assertEquals(12_400L, (long) log.read(dir, RSN)
 			.get(LocalDate.parse("2024-03-01")).skills.get("overall"));
 	}
 
-	/**
-	 * Total experience outgrew an int long ago; the whole stream is long-valued
-	 * for that reason. A silent narrowing here would cap a maxed account's
-	 * overall xp and make every period containing it read as a loss.
-	 */
+	// overall xp outgrew an int long ago; narrowing it here would read as a loss
 	@Test
 	public void figuresBeyondAnIntSurviveTheRoundTrip()
 	{
@@ -199,11 +159,6 @@ public class HistoryLogTest
 			.get(LocalDate.parse("2026-04-01")).skills.get("overall"));
 	}
 
-	/**
-	 * The spine is filed per account. Two accounts played on one client must not
-	 * splice their baselines into a single calendar — the subtraction that builds
-	 * a period would then read one account's totals against the other's.
-	 */
 	@Test
 	public void eachAccountKeepsItsOwnSpine()
 	{
@@ -218,12 +173,7 @@ public class HistoryLogTest
 		assertTrue(spine("Beta").isFile());
 	}
 
-	/**
-	 * ...but one account is one spine however the client spells its name. The
-	 * game reports a display name with spaces where the login had underscores,
-	 * and case travels freely; a spine that forked on any of that would strand
-	 * half a player's history under a name they never chose.
-	 */
+	// the client reports "Alpha Two" where the login was alpha_two; slug() folds both to one file
 	@Test
 	public void oneAccountIsOneSpineHoweverItsNameIsSpelt()
 	{
@@ -236,12 +186,7 @@ public class HistoryLogTest
 		assertEquals(200L, (long) got.get(LocalDate.parse("2026-06-02")).skills.get("overall"));
 	}
 
-	/**
-	 * Without a name there is no account to file under, and the slug would fall
-	 * back to a shared default — so an append that arrives before the player's
-	 * name is known must write nothing at all, rather than start a spine that a
-	 * real account could later be handed.
-	 */
+	// with no name slug() falls back to the shared "profile" file, so append refuses to write
 	@Test
 	public void anAppendWithoutAnAccountWritesNothing()
 	{
@@ -254,7 +199,6 @@ public class HistoryLogTest
 		assertEquals(0, written == null ? 0 : written.length);
 	}
 
-	/** A spine that was never written reads as an empty calendar, not a failure. */
 	@Test
 	public void anAbsentSpineReadsEmpty()
 	{

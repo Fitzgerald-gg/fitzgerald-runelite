@@ -16,15 +16,12 @@ import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * The journal's calendar spine: one JSON line per day per account, appended —
- * never rewritten — to {@code <slug>.history.jsonl} beside the journal.
- *
- * <p>Each line is a CLOSING baseline ({@code {"date","skills","counters"}});
- * a calendar period's story is the subtraction of two baselines. Multiple
- * lines for one date are fine (login, rollover, logout all append) — readers
- * take the last line per date, and a torn final line from a crash is skipped
- * on read, which is all the recovery an append-only stream needs. The History
- * tab and the year-card export both read this stream.
+ * The journal's calendar spine: one JSON line per day per account, appended to
+ * {@code <slug>.history.jsonl} beside the journal and never rewritten. A line is
+ * that day's closing baseline ({@code {"date","skills","counters","kcs"}}), so a
+ * period's gain is one baseline minus another. Several lines for one date are
+ * normal (login, rollover and logout all append); readers take the last line for
+ * a date and skip a torn one. The History tab and PaceBook read it back.
  */
 @Slf4j
 class HistoryLog
@@ -36,17 +33,11 @@ class HistoryLog
 		this.gson = gson;
 	}
 
-	// The last date a baseline was appended for, per this client session — enough
-	// to make the day-rollover append fire exactly once. Keyed by the account's
-	// stream rather than held as one date: two characters played on the same day
-	// each need their own opening line, and a single field would let whichever
-	// logged in first answer for both, leaving the second's spine with nothing to
-	// subtract from for that day.
+	// Last date appended, per account, for this session; gates the rollover append.
+	// Keyed per account so two characters played on one day each still get a line.
 	private final Map<String, String> lastAppendedDate = new java.util.concurrent.ConcurrentHashMap<>();
 
-	/** Append today's closing baseline. Call at login-load, day rollover, logout.
-	 *  Both maps are long-valued: total xp outgrows an int, and the reader takes
-	 *  every number back as a long. */
+	/** Append today's closing baseline. Called at login-load, day rollover and logout. */
 	synchronized void append(File dir, String rsn, Map<String, Long> skills,
 		Map<String, Long> counters, Map<String, Long> kcs)
 	{
@@ -69,10 +60,7 @@ class HistoryLog
 			counters.forEach(ct::addProperty);
 		}
 		line.add("counters", ct);
-		// Kill counts ride the same beat as everything else, so a period can say
-		// what it added to a boss and not merely what it stands at. Written from
-		// here on: lines already on the stream simply have no kcs, and a period
-		// bounded by one of those reports no gain rather than inventing one.
+		// kcs arrived after the rest, so older lines on the stream carry none.
 		JsonObject kc = new JsonObject();
 		if (kcs != null)
 		{
@@ -100,7 +88,6 @@ class HistoryLog
 		}
 	}
 
-	/** One day's closing baseline, as read back from the stream. */
 	static final class Baseline
 	{
 		final Map<String, Long> skills = new java.util.HashMap<>();
@@ -108,10 +95,6 @@ class HistoryLog
 		final Map<String, Long> kcs = new java.util.HashMap<>();
 	}
 
-	/**
-	 * Read the stream back: last line per date wins, torn lines are skipped —
-	 * the whole recovery story an append-only file needs.
-	 */
 	java.util.TreeMap<LocalDate, Baseline> read(File dir, String rsn)
 	{
 		java.util.TreeMap<LocalDate, Baseline> out = new java.util.TreeMap<>();
@@ -142,7 +125,7 @@ class HistoryLog
 				}
 				catch (RuntimeException torn)
 				{
-					// a torn tail from a crash — skip and carry on
+					// torn tail from a crash, skip it
 				}
 			}
 		}
@@ -166,14 +149,13 @@ class HistoryLog
 				}
 				catch (RuntimeException ignored)
 				{
-					// non-numeric — skip
+					// non-numeric value, skip
 				}
 			}
 		}
 	}
 
-	/** Append an imported (historic) baseline for a specific date — the Wise
-	 *  Old Man import writes the past through the same one-line-per-day door. */
+	/** Append a skills-only baseline for a past date, same one line per day as append(). */
 	synchronized void appendImported(File dir, String rsn, String date, Map<String, Long> skills)
 	{
 		if (rsn == null || rsn.isEmpty() || date == null)
@@ -209,11 +191,9 @@ class HistoryLog
 	}
 
 	/**
-	 * Fold another spine file into this account's, skipping days already on
-	 * record. The stream is append-only and readers take the LAST line for a
-	 * date, so an imported day that is already present would silently win over
-	 * the local one; keeping only genuinely new dates makes the import
-	 * idempotent and leaves this client's own measurements authoritative.
+	 * Fold another spine file into this account's, keeping only dates not already
+	 * on record: readers take the last line for a date, so an imported duplicate
+	 * would override the local measurement.
 	 *
 	 * @return how many days came across.
 	 */
@@ -252,7 +232,7 @@ class HistoryLog
 					}
 					catch (RuntimeException torn)
 					{
-						continue;   // a half-written line in the source is skipped, as on read
+						continue;   // half-written source line, skipped as on read
 					}
 					if (date == null || !have.add(date))
 					{
@@ -275,14 +255,12 @@ class HistoryLog
 		return added;
 	}
 
-	/** True once per calendar day for this account: the caller should append a
-	 *  fresh baseline. The account has to be named, because the gate it consults
-	 *  is the one keyed to that account's own stream. */
+	/** True once per calendar day for this account: time to append a fresh baseline. */
 	boolean dayRolledOver(String rsn)
 	{
 		if (rsn == null || rsn.isEmpty())
 		{
-			return false;   // nothing to key on, and append() would refuse it anyway
+			return false;   // nothing to key on, and append() would refuse it too
 		}
 		String today = LocalDate.now(ZoneId.systemDefault()).toString();
 		return !today.equals(lastAppendedDate.get(LocalStore.slug(rsn)));

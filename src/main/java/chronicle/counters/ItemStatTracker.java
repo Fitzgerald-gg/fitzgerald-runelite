@@ -24,12 +24,9 @@ import static chronicle.counters.StatKeys.ITEMS_DROPPED_VALUE;
 import static chronicle.counters.StatKeys.RESOURCES_DROPPED_VALUE;
 
 /**
- * Records small, one-off item interactions that never carry their own attempt
- * count: examining or dropping an item, gathering cabbage or flax by hand, and
- * scattering ashes. Each of these reaches the client either as a menu click or as
- * a line of in-game chat, so those are the only two feeds this tracker listens to.
- * Tallies land in the shared {@link StatStore}; the other event hooks stay as the
- * interface's default no-ops.
+ * Item interactions with no attempt count of their own: examines, drops (and the
+ * value binned), cabbage and flax picks. All of them arrive as a menu click or a
+ * line of chat, so those are the only two hooks implemented here.
  */
 public class ItemStatTracker implements StatTracker
 {
@@ -37,8 +34,8 @@ public class ItemStatTracker implements StatTracker
 	private final Client client;
 	private final ItemManager itemManager;
 
-	// Tells a gathered resource apart from bank junk at the moment of the click.
-	// Nullable — tests build the tracker bare and the plain drop figure still flows.
+	// tells a gathered resource apart from bank junk at the click. nullable: without
+	// one, a drop only feeds the plain dropped-value stat.
 	private final GatheredLedger gatheredLedger;
 
 	public ItemStatTracker(StatStore statStore, Client client, ItemManager itemManager)
@@ -58,8 +55,7 @@ public class ItemStatTracker implements StatTracker
 	@Override
 	public void onMenuOptionClicked(MenuOptionClicked event)
 	{
-		// Comparing the constant first keeps this null-safe when a menu entry
-		// carries no option text.
+		// constant first: a menu entry can carry no option text.
 		final String option = event.getMenuOption();
 		if ("Examine".equals(option))
 		{
@@ -72,18 +68,14 @@ public class ItemStatTracker implements StatTracker
 		}
 	}
 
-	/**
-	 * Add the live GE value of a just-dropped item to {@code itemsDroppedValue}. The
-	 * "Drop" click carries the item id; its quantity is read from the inventory slot
-	 * (param0), so a dropped stack counts its whole worth. Priced at drop time via
-	 * RuneLite's own {@link ItemManager} (canonicalised so notes/placeholders resolve),
-	 * so no price table lives in the plugin and untradeables simply add nothing.
-	 */
+	// the click carries the item id; the stack size comes from the inventory slot in
+	// param0. priced at drop time via ItemManager, canonicalised so notes and
+	// placeholders resolve.
 	private void recordDroppedValue(MenuOptionClicked event)
 	{
 		if (!event.isItemOp())
 		{
-			return;   // a non-inventory "Drop" (rare) carries no item to value
+			return;   // a non-inventory "Drop" has no item to price
 		}
 		final int itemId = event.getItemId();
 		if (itemId <= 0)
@@ -106,16 +98,13 @@ public class ItemStatTracker implements StatTracker
 		{
 			return;
 		}
-		// Clamp the multiply so a huge stack can't overflow int before StatStore
-		// (which then saturates the running total).
+		// clamp the multiply so a big stack can't overflow the int StatStore takes.
 		final long value = (long) each * qty;
 		final int banked = value > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) value;
 		statStore.incrementStatBy(ITEMS_DROPPED_VALUE, banked);
-		// The resource-scoped half of the gathered/dropped pair. This figure is
-		// read beside what the gathering skills produced, and the total above
-		// counts every bin — a bank trip clearing old clue rewards included — so
-		// pairing that total with gathered value would flatter the dropped side.
-		// Only what this account pulled out of the world itself counts here.
+		// the total above counts every bin, bank clear-outs included. this second
+		// figure is read beside gathered value, so only items this account pulled
+		// out of the world count toward it.
 		if (gatheredLedger != null && gatheredLedger.wasGathered(canonical))
 		{
 			statStore.incrementStatBy(RESOURCES_DROPPED_VALUE, banked);
@@ -125,8 +114,6 @@ public class ItemStatTracker implements StatTracker
 	@Override
 	public void onChatMessage(ChatMessage event)
 	{
-		// Only the plain-text feeds (overhead spam, game messages, message boxes)
-		// carry the lines we care about; ignore everything else.
 		switch (event.getType())
 		{
 			case SPAM:
@@ -141,12 +128,8 @@ public class ItemStatTracker implements StatTracker
 
 		if (message.contains("You pick a") || message.contains("You pick some"))
 		{
-			// "You pick a cabbage." / "You pick some flax." — the produce is the
-			// trailing word, i.e. from the last space up to the closing period.
-			// Every spam, game and message-box line carrying the phrase arrives
-			// here, including sentences that run on past the pick, so the period
-			// is looked for after that space rather than assumed to be the first
-			// one on the line. A line offering no such period is not a pick.
+			// "You pick a cabbage." / "You pick some flax." take the trailing word:
+			// last space up to the period after it. no period there, not a pick.
 			final int from = message.lastIndexOf(' ') + 1;
 			final int dot = message.indexOf('.', from);
 			if (dot < 0)

@@ -18,10 +18,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * The prefer-ServerNpcLoot reconciliation: a held NpcLootReceived (client
- * ground-scan) is dropped only when an authoritative ServerNpcLoot covered the
- * SAME kill. These pin the per-tick matching that keeps repeated AoE kills of one
- * NPC from cross-covering a genuinely uncovered kill of the same NPC.
+ * A held ground-scan loot event is dropped only when a ServerNpcLoot covered the same
+ * kill. Keys are per (npcId, tick), so repeated kills of one NPC can't cover each other.
  */
 public class LootReconcileTest
 {
@@ -49,17 +47,15 @@ public class LootReconcileTest
 	public void serverBeyondWindowDoesNotCover()
 	{
 		Set<Long> keys = new HashSet<>();
-		keys.add(slKey(DUST_DEVIL, 103));   // 3 ticks later — outside the window
+		keys.add(slKey(DUST_DEVIL, 103));   // 3 ticks later, outside the window
 		assertFalse(serverCoveredIn(keys, DUST_DEVIL, 100, WINDOW));
 	}
 
 	@Test
 	public void aLaterKillOfSameNpcDoesNotCoverAnEarlierUncoveredOne()
 	{
-		// The whole point of keying per-tick: kill A at 100 fired ONLY a ground-scan
-		// (loot script missed it), kill B of the same NPC at 130 fired a server
-		// event. A must still be emitted as a fallback — B's server key is out of A's
-		// window and must not retroactively suppress it.
+		// the kill at 100 fired only a ground scan; a later kill of the same NPC at 130
+		// fired a server event. The 130 key must not suppress the earlier one.
 		Set<Long> keys = new HashSet<>();
 		keys.add(slKey(DUST_DEVIL, 130));
 		assertFalse(serverCoveredIn(keys, DUST_DEVIL, 100, WINDOW));
@@ -77,7 +73,6 @@ public class LootReconcileTest
 	@Test
 	public void keyIsUniquePerNpcAndTick()
 	{
-		// No collision between a plausible npcId/tick pair and its neighbours.
 		assertTrue(slKey(7249, 100) != slKey(7250, 100));
 		assertTrue(slKey(7249, 100) != slKey(7249, 101));
 		assertTrue(slKey(7249, 100) == slKey(7249, 100));

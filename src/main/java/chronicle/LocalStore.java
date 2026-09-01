@@ -23,44 +23,31 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.game.ItemManager;
 
 /**
- * The local-mode data store: the on-disk record the plugin keeps for a player
- * when they've chosen Local mode, so their stats live on their own machine with
- * no server round-trip.
- *
- * <p>Two artefacts per account under {@code .runelite/chronicle/}:
- * <ul>
- *   <li>{@code <slug>.json} — the durable, accumulating record. Loaded on login
- *       so drops and kill counts build across sessions; rewritten as you play.</li>
- *   The record is what the Chronicle side panel reads and presents — it never
- *   leaves this computer.
- * </ul>
+ * The on-disk journal: one {@code <slug>.json} per account under
+ * {@code .runelite/chronicle/}, loaded at login and rewritten as you play. It is
+ * the record the side panel reads, and it never leaves this computer.
  *
  * <p>Threading: {@link #record} and {@link #setCharacter} run on the client thread
  * (they read {@link ItemManager}); {@link #load} and {@link #flush} run on a
  * background executor. The in-memory model is guarded by {@link #lock}, and the
- * two file-writing methods only hold the lock long enough to serialise a string —
- * the disk write itself happens outside it, so the client thread never blocks on
- * I/O.
+ * file-writing methods hold it only long enough to serialise a string, so the
+ * client thread never blocks on I/O.
  */
 @Singleton
 @Slf4j
 class LocalStore implements chronicle.counters.GatheredLedger
 {
 	static final int SCHEMA = 1;
-	// The journal keeps milestones indefinitely by design; this cap is a
-	// runaway guard, sized far above a decade of play (and above the deep
-	// cloud import's 5,000-event window), not a retention policy.
+	// runaway guard; a decade of play sits far below this.
 	private static final int FEED_CAP = 20000;
-	// Counters that track a peak, not a running total — merged across sessions with
-	// max() rather than a sum (matches CombatStatTracker's setStat semantics).
+	// peak counters: lifetime is max(base, session) rather than base + session.
 	static final java.util.Set<String> MAX_KEYS = new java.util.HashSet<>(
 		java.util.Arrays.asList("highestHit", "highestHitTaken"));
-	// Notable one-off events that belong in the dated feed (LOOT aggregates
-	// into drops, LOOT_UNTAKEN into the untaken ledger — both recorded locally,
-	// just not as feed lines; GROUP_STORAGE is a cloud-only nicety).
+	// Event types kept as dated feed lines. LOOT and LOOT_UNTAKEN are recorded too,
+	// into the drop and untaken ledgers; GROUP_STORAGE isn't kept at all.
 	private static final java.util.Set<String> FEED_TYPES = new java.util.HashSet<>(java.util.Arrays.asList(
 		"PET", "COLLECTION", "COMBAT_ACHIEVEMENT", "QUEST", "DIARY", "CLUE", "DEATH", "SLAYER",
-		"SESSION"));   // the logout diary line — local-only, never pushed
+		"SESSION"));   // SESSION is recorded by the plugin itself, so it stays off the network
 
 	private final ItemManager itemManager;
 	private final Gson gson;
@@ -70,34 +57,26 @@ class LocalStore implements chronicle.counters.GatheredLedger
 	private JsonObject trackersBase;  // lifetime counters frozen at load; +session = lifetime
 	private String currentRsn;        // whose model root holds
 	private volatile boolean ready;   // true once an account's file has been loaded
-	// Why the journal is not currently keeping the record — a write that failed,
-	// or a file this build is too old to open. Null while all is well. The panel
-	// reads it: a journal that stopped reaching disk still looks alive in memory,
-	// and the loss would otherwise surface only at the next login.
+	// Why the journal isn't reaching disk, or null. The panel shows it; a stalled
+	// journal still looks alive in memory otherwise.
 	private volatile String journalWarning;
 
-	// Session-scope tallies for the panel's strip + recent-drop icon row —
-	// in-memory only, reset at the account boundary. Guarded by lock.
+	// Session tallies for the panel strip and recent-drop row. In memory only,
+	// cleared at the account boundary; guarded by lock.
 	private int sessionLoots;
 	private long sessionLootValue;
 	private int sessionUntaken;
 	private long sessionUntakenValue;
 	private final java.util.ArrayDeque<RecentDrop> recentDrops = new java.util.ArrayDeque<>();
 
-	// A runaway guard, not a retention policy: every log, ore, fish and gem in the
-	// game together is a few hundred ids, so a set past this is evidence something
-	// other than a gather is minting entries — and the journal is written whole on
-	// every flush, so an unbounded list would grow the file forever.
+	// runaway guard; every log, ore, fish and gem in the game is a few hundred ids,
+	// and the journal is rewritten whole on every flush.
 	private static final int GATHERED_CAP = 1024;
-	// The gathered-item ledger's fast half: an in-memory mirror of the record's
-	// "gathered_items", so the membership test a drop click asks costs no lock and
-	// no scan. Concurrent because the resolver writes it from the client thread
-	// while load() rebuilds it from the executor. The array on disk is the record;
-	// this is only how it is read.
+	// Lock-free mirror of the record's "gathered_items", read on every drop click.
+	// The resolver writes it on the client thread while load() rebuilds it on the executor.
 	private final java.util.Set<Integer> gatheredItems =
 		java.util.concurrent.ConcurrentHashMap.newKeySet();
 
-	/** One recent drop, panel-facing (immutable copy). */
 	static final class RecentDrop
 	{
 		final int itemId;
@@ -124,8 +103,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 	// Session lifecycle
 	// ------------------------------------------------------------------
 
-	/** Background: load (or start) this account's record so recording accumulates
-	 *  onto its history. Call once per login before recording is relied upon. */
+	/** Mount this account's record, or start one. Runs on the executor; call once
+	 *  per login, before anything records. */
 	void load(File dir, String rsn)
 	{
 		JsonObject loaded = null;
@@ -141,40 +120,31 @@ class LocalStore implements chronicle.counters.GatheredLedger
 					loaded = el.getAsJsonObject();
 				}
 			}
-			catch (Exception e)   // noqa: a torn or hand-broken file starts fresh, aside
+			catch (Exception e)   // noqa: a torn file is set aside below
 			{
 				log.warn("local record unreadable: {}", f, e);
 			}
 			if (loaded == null)
 			{
-				// This file is the only copy of the account's history, and the very
-				// next flush would write a blank skeleton straight over it. A torn
-				// write usually loses only the tail, so keep the bytes: set them
-				// aside under a dated sidecar the player can repair or hand back.
+				// The only copy of this account's history, and the next flush would write
+				// a blank skeleton over it. Keep the bytes under a dated sidecar.
 				setAside(f, "corrupt");
 			}
 		}
 		long fileSchema = loaded != null ? asLong(loaded.get("schema")) : 0;
 		if (fileSchema > SCHEMA)
 		{
-			// The stamp normalise() writes is only worth writing if it is also
-			// read. A record from a later build carries shapes this one has never
-			// heard of; mounting it would read them under today's assumptions,
-			// stamp the version back down and rewrite the file on the next flush —
-			// a client rollback would quietly eat the record. So mount nothing and
-			// write nothing: the file stays exactly as the build that wrote it left
-			// it, and the panel says why there is nothing to show. A LOWER stamp is
-			// where a migration would run; there has not been one yet.
+			// A later build's shapes would be read under today's assumptions, stamped
+			// back down by normalise() and rewritten on the next flush. Mount nothing,
+			// write nothing. A LOWER stamp is where a migration would go; there isn't one.
 			log.warn("journal {} is schema {}; this build reads {}",
 				f.getName(), fileSchema, SCHEMA);
 			journalWarning = "This journal was written by a newer version of Chronicle. "
 				+ "Update the plugin to open it — nothing on disk has been changed.";
 			synchronized (lock)
 			{
-				// Empty rather than null: the panel's reads only test for a model,
-				// and one going null underneath them would throw on the EDT. With
-				// no currentRsn, flush() can never write this placeholder over the
-				// record it stands in for.
+				// Empty rather than null: a model going null under the panel's reads throws
+				// on the EDT. No currentRsn, so flush() can't write it over the real record.
 				root = skeleton(rsn);
 				trackersBase = new JsonObject();
 				currentRsn = null;
@@ -191,21 +161,18 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		synchronized (lock)
 		{
 			root = loaded;
-			// Freeze the loaded lifetime counters; each setTrackers() recomputes the
-			// live total as this-frozen-base + the current session, so a growing
-			// session counter is never double-counted.
+			// Freeze the loaded lifetime counters; setTrackers() recomputes the live
+			// total as this base + the current session.
 			trackersBase = deepCopy(loaded.getAsJsonObject("trackers"));
 			currentRsn = rsn;
-			// A record written by an earlier build can carry the same item twice
-			// in one source's bag; heal it on the way in rather than making the
-			// player re-import to be rid of it.
+			// An earlier build could file the same item twice in one source's bag.
 			int healed = dedupeSourceBags() + dedupeFeed();
 			if (healed > 0)
 			{
 				log.debug("collapsed {} duplicate item entries", healed);
 			}
-			// Rebuilt, not merged: the mirror must describe THIS account only, or
-			// an ore the previous character mined would credit this one's drops.
+			// Cleared first: the mirror must describe this account only, or the previous
+			// character's ore would credit this one's drops.
 			gatheredItems.clear();
 			if (loaded.has("gathered_items") && loaded.get("gathered_items").isJsonArray())
 			{
@@ -220,9 +187,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			}
 			ready = true;
 		}
-		// This account's record opened, so whatever was wrong before belongs to
-		// the last one. A disk still refusing writes re-states itself on the very
-		// next flush.
+		// Whatever was wrong belongs to the last account. A disk still refusing
+		// writes re-states itself on the next flush.
 		journalWarning = null;
 	}
 
@@ -237,9 +203,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			sessionUntaken = 0;
 			sessionUntakenValue = 0;
 			recentDrops.clear();
-			// Not session scratch, but account scope: the next login may be a
-			// different character, and this one's ore must not vouch for theirs.
-			// load() reads it back from the record it was written to.
+			// Account-scoped, so the next character doesn't inherit it; load() reads
+			// it back from the record.
 			gatheredItems.clear();
 		}
 	}
@@ -272,14 +237,10 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		}
 		if (FEED_TYPES.contains(type))
 		{
-			// A new log slot counts the moment it drops — the stored log gains
-			// the item and the finished tally, instead of waiting for the
-			// player to next open their collection log in game.
 			if ("COLLECTION".equals(type))
 			{
 				recordClogSlot(data);
 			}
-			// A completion closes the open task segment in the local journey.
 			if ("SLAYER".equals(type))
 			{
 				recordSlayerCompletion(data);
@@ -292,7 +253,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			{
 				JsonArray feed = root.getAsJsonArray("feed");
 				feed.add(entry);
-				// Keep the newest FEED_CAP entries (feed is append-order = chronological).
+				// append order is chronological, so the oldest goes first
 				while (feed.size() > FEED_CAP)
 				{
 					feed.remove(0);
@@ -311,8 +272,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		Integer kc = data.has("killCount") && !data.get("killCount").isJsonNull()
 			? data.get("killCount").getAsInt() : null;
 
-		// Price + name on the client thread via ItemManager (canonicalised so notes
-		// and placeholders resolve), exactly as the counter tracker does.
+		// Canonicalise so notes and placeholders price as the real item.
 		JsonArray priced = new JsonArray();
 		long batchValue = 0;
 		if (items != null)
@@ -352,9 +312,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			}
 		}
 
-		// Best kill time: the standing PB when the game restated it, else this
-		// kill's own time when it WAS the record. Same rule the site uses, so
-		// the local page and the web page agree on every PB they both know.
+		// The standing PB when the game restated it, else this kill's own time when
+		// it was the record.
 		Double pbCand = null;
 		if (data.has("personalBestTime") && !data.get("personalBestTime").isJsonNull())
 		{
@@ -379,11 +338,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 				slayerLoot(slayerTask, slayerAssignment, batchValue, source, priced);
 			}
 			JsonObject drops = root.getAsJsonObject("drops");
-			// Every read below is field-by-field guarded, the way the seeding path
-			// is: a source entry written by an older era of the journal (or edited
-			// by hand) can be missing its counters or not be an object at all, and
-			// an exception thrown here on the client thread is swallowed by the
-			// event bus — this source's drops would then stop accruing for good.
+			// Guarded field by field: an older journal's source entry (or a hand edit)
+			// can be missing counters, and an exception here is eaten by the event bus.
 			JsonObject src = drops.has(source) && drops.get(source).isJsonObject()
 				? drops.getAsJsonObject(source) : null;
 			if (src == null)
@@ -444,8 +400,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		}
 	}
 
-	/** Refresh the always-current character sheet. Runs on the client thread.
-	 *  {@code collectionLog} is the capture's raw map; it's converted to a tree here. */
+	/** Refresh the character sheet. Runs on the client thread; {@code collectionLog}
+	 *  is the capture's raw map, converted to a tree here. */
 	void setCharacter(String rsn, String accountType, JsonObject skills, int combatLevel,
 		java.util.Map<String, Object> collectionLog, JsonObject achievements)
 	{
@@ -469,10 +425,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			}
 			if (collectionLog != null)
 			{
-				// Max-union into the STORED log rather than replacing it — the
-				// session's capture is partial (pages browsed, varps read), and
-				// clog data only grows, so the union is the whole truth. Port of
-				// the server's _clog_merge.
+				// The session's capture is partial (only the pages browsed) and clog data
+				// only grows, so union into the stored log rather than replacing it.
 				root.add("collection_log", mergeClog(
 					root.has("collection_log") && root.get("collection_log").isJsonObject()
 						? root.getAsJsonObject("collection_log") : new JsonObject(),
@@ -487,10 +441,9 @@ class LocalStore implements chronicle.counters.GatheredLedger
 	}
 
 	/**
-	 * Re-freeze the lifetime base at the CURRENT journal values. Called before
-	 * the session counter store is cleared mid-session (a cloud toggle), so the
-	 * increments already folded in are owned by the base and the fresh
-	 * from-zero session can't erase them on the next recompute.
+	 * Re-freeze the lifetime base at the current journal values. Called before the
+	 * session counter store is cleared (shutdown, or a cloudSync toggle), so the
+	 * fresh from-zero session can't take back what was already folded in.
 	 */
 	void rebase(String rsn)
 	{
@@ -509,9 +462,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 
 	/**
 	 * Refresh the lifetime tracker counters from this session's live totals. Runs on
-	 * the client thread. {@code session} is the trackers' from-zero session snapshot;
-	 * lifetime = frozen-base + session (max for peak counters), so calling this
-	 * repeatedly through a session never double-counts.
+	 * the client thread. {@code session} is the from-zero session snapshot; lifetime
+	 * is base + session (max for the peak counters), so repeat calls never double up.
 	 */
 	void setTrackers(java.util.Map<String, Integer> session, String rsn)
 	{
@@ -544,14 +496,10 @@ class LocalStore implements chronicle.counters.GatheredLedger
 	}
 
 	// ------------------------------------------------------------------
-	// Persist + render (background executor)
+	// Persist (background executor)
 	// ------------------------------------------------------------------
 
-	/**
-	 * Write the JSON record, or do nothing while no account is mounted. The lock
-	 * is held only to serialise the model; the disk write happens outside it, so
-	 * the client thread never waits on I/O.
-	 */
+	/** Write the JSON record, or do nothing while no account is mounted. */
 	void flush(File dir)
 	{
 		String json;
@@ -576,11 +524,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		}
 		catch (Exception e)   // noqa: the model is intact in memory; the next tick retries
 		{
-			// A full, read-only or locked directory drops every write while the
-			// panel — served from memory — goes on looking live, and the loss only
-			// shows at the next login, when the record rolls back to the last write
-			// that landed. The journal is the system of record, so a journal that
-			// is no longer being written has to say so where it is read.
+			// A full, read-only or locked directory drops every write while the panel,
+			// served from memory, goes on looking live. Say so where it is read.
 			log.warn("local flush failed", e);
 			journalWarning = "Could not write the journal to disk — check free space and "
 				+ "permissions on " + dir.getAbsolutePath() + ".";
@@ -682,7 +627,6 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		return out;
 	}
 
-	/** One ranked drop source. */
 	static final class SourceRow
 	{
 		final String name;
@@ -690,9 +634,10 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		final int loots;
 		final long value;
 		final Double pb;
+		// carried out of an older journal's "cloud_items"; nothing writes it now
 		final int cloudItems;
-		// Tracked-since / last-seen (epoch ms; 0 = unknown) — seeded by the
-		// Loot Tracker import's per-source range, extended as play continues.
+		// epoch ms, 0 = unknown; comes in from the Loot Tracker import's per-source
+		// range and extends as play continues.
 		final long firstMs;
 		final long lastMs;
 
@@ -792,7 +737,6 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		}
 	}
 
-	/** One item held in a source's local bag. */
 	static final class BagItem
 	{
 		final int itemId;
@@ -809,9 +753,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		}
 	}
 
-	/** The locally-witnessed item bag for one source, unsorted. */
-	/** One source's whole record from the core Loot Tracker's local store,
-	 *  already canonicalised and priced by the caller (client thread). */
+	/** One source's whole record from the core Loot Tracker's local store, already
+	 *  canonicalised and priced by the caller (client thread). */
 	static final class LootSeed
 	{
 		final String source;
@@ -832,13 +775,11 @@ class LocalStore implements chronicle.counters.GatheredLedger
 	}
 
 	/**
-	 * Adopt the core Loot Tracker's lifetime record — the one local archive
-	 * that predates any server (years of witnessed loot events). Everything
-	 * floors: kc and loots at the tracker's event count (a lower bound of
-	 * true KC; a higher game-reported kc survives), item qty/value by
-	 * id-then-name (a name-keyed cloud row gains its real id), source value
-	 * at the priced sum. first_seen/last_seen extend as min/max. Idempotent —
-	 * a re-run can only raise floors it already set.
+	 * Floor this account's drops with the core Loot Tracker's own lifetime record.
+	 * kc and loots take the tracker's event count as a lower bound (a higher
+	 * game-reported kc survives), item qty/value match by id then by name, source
+	 * value takes the priced sum, first_seen/last_seen extend as min/max. A re-run
+	 * can only raise floors it already set.
 	 */
 	void floorLootTracker(java.util.List<LootSeed> seeds, String rsn)
 	{
@@ -908,7 +849,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 					}
 					if (hit == null)
 					{
-						// a name-keyed cloud adoption gains its real id here
+						// a name-keyed entry picks up its real id here
 						for (java.util.Map.Entry<String, JsonElement> e : items.entrySet())
 						{
 							if (e.getValue().isJsonObject())
@@ -957,6 +898,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		}
 	}
 
+	/** One source's item bag, unsorted. */
 	java.util.List<BagItem> sourceItems(String source)
 	{
 		java.util.List<BagItem> out = new java.util.ArrayList<>();
@@ -1002,11 +944,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		return out;
 	}
 
-	/**
-	 * Left-behind loot: the same price-at-record pattern as drops, aggregated
-	 * per source ({@code untaken: {source: {qty, value}}}). Forward-only and
-	 * local — the morbid ledger of what was declined.
-	 */
+	/** Left-behind loot, priced at record like drops and aggregated per source
+	 *  ({@code untaken: {source: {qty, value}}}). */
 	private void recordUntaken(JsonObject data)
 	{
 		String source = data.has("source") && !data.get("source").isJsonNull()
@@ -1054,7 +993,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			src.addProperty("value", (src.has("value") ? src.get("value").getAsLong() : 0) + value);
 			untaken.add(source, src);
 			root.add("untaken", untaken);
-			// The item lens accumulates beside the source lens, name-keyed.
+			// the same tally keyed by item name
 			JsonObject byItem = root.has("untaken_items") && root.get("untaken_items").isJsonObject()
 				? root.getAsJsonObject("untaken_items") : new JsonObject();
 			for (Object[] row : perItem)
@@ -1066,9 +1005,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 				byItem.add((String) row[0], e);
 			}
 			root.add("untaken_items", byItem);
-			// …and the PAIRING, so the lens can be drilled from either end: which
-			// items a source was left holding, and which sources left an item
-			// behind. Two flat aggregates can answer neither question.
+			// …and the pairing, so the lens drills from either end: which items a
+			// source left, and which sources left an item.
 			JsonObject pairs = root.has("untaken_pairs") && root.get("untaken_pairs").isJsonObject()
 				? root.getAsJsonObject("untaken_pairs") : new JsonObject();
 			JsonObject bag = pairs.has(source) && pairs.get(source).isJsonObject()
@@ -1091,7 +1029,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		}
 	}
 
-	/** One left-behind source (lifetime aggregate). */
+	/** A name/qty/value row: untaken sources, untaken items, task monsters. */
 	static final class UntakenRow
 	{
 		final String name;
@@ -1124,15 +1062,9 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		}
 	}
 
-	/**
-	 * Remember an item id this account gathered. Client thread, once per resolved
-	 * gathering action — so the already-known case, which is all but the first few
-	 * of a career, takes the lock-free mirror and returns.
-	 *
-	 * <p>The record, not the session store, because the question it answers spans
-	 * sessions: an ore mined last week and binned today is still a resource
-	 * dropped, and a set that emptied at logout would call it bank junk.
-	 */
+	/** Remember an item id this account gathered. Client thread, once per resolved
+	 *  gathering action; it lives in the record so an ore mined last week and binned
+	 *  today still reads as a resource dropped. */
 	@Override
 	public void noteGathered(int itemId)
 	{
@@ -1176,7 +1108,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 	// The slayer journey (task-by-task, kept locally)
 	// ------------------------------------------------------------------
 
-	// A runaway guard far above any realistic task history, not a retention policy.
+	// runaway guard; no real task history comes near this.
 	private static final int SLAYER_TASK_CAP = 1000;
 
 	/** The slayer store, created on first use. Callers hold {@code lock}. */
@@ -1237,10 +1169,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			seg.addProperty("assignment", assignment);
 		}
 		seg.addProperty("ts", nowSec());
-		// What the task was actually made of. A "blue dragons" assignment is
-		// rarely one creature — brutals and a Vorkath detour count toward it too —
-		// and the task's own loot is a different question from that monster's
-		// lifetime bag, so both live here rather than being folded into `drops`.
+		// What the task was made of: a "blue dragons" assignment takes brutals too,
+		// and its loot is a different question from the monster's lifetime bag.
 		if (monster != null && !monster.isEmpty())
 		{
 			JsonObject mons = seg.has("monsters") && seg.get("monsters").isJsonObject()
@@ -1270,10 +1200,9 @@ class LocalStore implements chronicle.counters.GatheredLedger
 	}
 
 	/**
-	 * A task completion: close the open segment (opening one first if the whole
-	 * task somehow went unwitnessed). The finished line's exact kill count trues
-	 * up the loot spine — kills the drops never captured surface as
-	 * {@code noLootKills}, the same reconciliation the site performs.
+	 * A task completion: close the open segment, opening one first if the whole task
+	 * went unwitnessed. The finished line's exact kill count trues up the loot spine;
+	 * kills the drops never saw surface as {@code noLootKills}.
 	 */
 	private void recordSlayerCompletion(JsonObject data)
 	{
@@ -1317,18 +1246,16 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			seg.addProperty("open", false);
 			seg.addProperty("ts", nowSec());
 			long done = sl.has("completed") ? asLong(sl.get("completed")) : 0;
-			// The streak line's lifetime total is authoritative when it is ahead;
-			// otherwise this completion simply increments what we hold.
+			// the streak line's lifetime total wins when it's ahead
 			sl.addProperty("completed", streak != null && streak > done ? streak : done + 1);
 			root.addProperty("updated_at", nowSec());
 		}
 	}
 
 	/**
-	 * One-shot inheritance of the cloud's task history: totals floor, and the
-	 * task list adopts wholesale only while the local list is still empty —
-	 * merging two overlapping spines would double tasks, and by the time a
-	 * local spine exists it is the authoritative one.
+	 * Take a whole slayer journey in: totals floor, and the task list is copied only
+	 * while the local one is still empty. Two overlapping spines merged segment by
+	 * segment would double tasks.
 	 */
 	void adoptSlayerJourney(chronicle.ChronicleApiClient.SlayerJourney j, String rsn)
 	{
@@ -1342,7 +1269,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			JsonArray tasks = sl.getAsJsonArray("tasks");
 			if (tasks.size() == 0 && j.tasks != null)
 			{
-				// The cloud sends newest-first; the store keeps oldest-first.
+				// the journey is newest-first, the store keeps oldest-first
 				for (int i = j.tasks.size() - 1; i >= 0; i--)
 				{
 					chronicle.ChronicleApiClient.SlayerTask t = j.tasks.get(i);
@@ -1417,8 +1344,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		}
 	}
 
-	/** Lifetime gp per consumable counter key — accumulated at each bite/dose
-	 *  (plus whatever an old cloud adoption already banked). */
+	/** Lifetime gp per consumable counter key, accumulated at each bite or dose. */
 	java.util.Map<String, Long> consumableValues()
 	{
 		java.util.Map<String, Long> out = new java.util.LinkedHashMap<>();
@@ -1444,7 +1370,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		return out;
 	}
 
-	/** The per-item side of the uncollected ledger (adopted + any local adds). */
+	/** The per-item side of the uncollected ledger. */
 	java.util.List<UntakenRow> untakenItems()
 	{
 		java.util.List<UntakenRow> out = new java.util.ArrayList<>();
@@ -1504,10 +1430,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		}
 	}
 
-	/** The journal-held clog fraction: {finished, available}, zero when unknown. */
-	/** A fresh COLLECTION event lights its slot immediately: the item joins
-	 *  clog_items and the finished tally rises when it's genuinely new. The
-	 *  next full in-game log open reconciles everything via mergeClog. */
+	/** A COLLECTION event lights its slot at once: the item joins clog_items and
+	 *  the finished tally rises when it's new. The next full log open reconciles it. */
 	private void recordClogSlot(JsonObject data)
 	{
 		String name = data.has("itemName") && !data.get("itemName").isJsonNull()
@@ -1543,6 +1467,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		}
 	}
 
+	/** {finished, available} as the journal holds them; zero when unknown. */
 	int[] clogFraction()
 	{
 		synchronized (lock)
@@ -1647,17 +1572,13 @@ class LocalStore implements chronicle.counters.GatheredLedger
 	}
 
 	/**
-	 * Merge another Chronicle journal into this account's record.
+	 * Merge another Chronicle journal into this account's record. Every store floors:
+	 * per-key max, earliest wins on first_seen, best wins on a personal best. An
+	 * import is the same account seen from somewhere else, so its history overlaps
+	 * this one and summing would double every shared kill; flooring makes a repeat
+	 * import a no-op. Runs off the client thread.
 	 *
-	 * <p>Every store merges as a FLOOR — per-key max, oldest-wins on first-seen,
-	 * best-wins on a personal best — never a sum. An import is a record of the
-	 * same account from somewhere else (a server export, another computer, a
-	 * backup), so its history OVERLAPS this one; adding would double every
-	 * shared kill. Flooring makes the operation idempotent: importing the same
-	 * file twice, or importing an older export after a newer one, changes
-	 * nothing. Runs off the client thread.
-	 *
-	 * @return a short human-readable summary of what came across.
+	 * @return a short summary of what came across.
 	 */
 	String importJournal(JsonObject in, String rsn)
 	{
@@ -1723,8 +1644,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 					floorNumber(cur, inc, "loots");
 					floorNumber(cur, inc, "value");
 					floorNumber(cur, inc, "last_seen");
-					// The earliest sighting is the true one: an import can only ever
-					// push "tracked since" further back.
+					// first_seen only ever moves earlier
 					if (inc.has("first_seen") && !inc.get("first_seen").isJsonNull())
 					{
 						long incFirst = asLong(inc.get("first_seen"));
@@ -1734,7 +1654,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 							cur.addProperty("first_seen", incFirst);
 						}
 					}
-					// A personal best is a minimum, not a maximum.
+					// a PB is the lowest time, so this compare is flipped
 					if (inc.has("pb") && !inc.get("pb").isJsonNull())
 					{
 						double incPb = inc.get("pb").getAsDouble();
@@ -1747,11 +1667,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 					{
 						JsonObject bag = cur.has("items") && cur.get("items").isJsonObject()
 							? cur.getAsJsonObject("items") : new JsonObject();
-						// The bag is keyed by ITEM ID; an export that knows only
-						// names is not. Matching on the name first is what stops
-						// an import filing a second, parallel entry for something
-						// already here — two lines for one herb, one holding what
-						// this client saw and one holding the other record's total.
+						// The bag is keyed by item id and an export may know only names, so
+						// match on name first; otherwise one herb ends up on two lines.
 						java.util.Map<String, String> byName = new java.util.HashMap<>();
 						for (java.util.Map.Entry<String, JsonElement> be : bag.entrySet())
 						{
@@ -1778,9 +1695,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 							String key = byName.get(incName.toLowerCase(java.util.Locale.ROOT));
 							if (key == null)
 							{
-								// Nothing here by that name: file it under its id
-								// when the export carried one, so the reader can
-								// draw its sprite.
+								// file it under its id when the export carried one, so
+								// the panel can draw its sprite
 								key = incItem.has("id") && incItem.get("id").getAsInt() > 0
 									? String.valueOf(incItem.get("id").getAsInt()) : ie.getKey();
 							}
@@ -1803,8 +1719,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 					}
 				}
 			}
-			// The dated feed, deduplicated on (timestamp, type) — the same rule
-			// that makes re-importing a no-op.
+			// the dated feed, deduplicated on feedKey
 			if (in.has("feed") && in.get("feed").isJsonArray())
 			{
 				JsonArray feed = root.getAsJsonArray("feed");
@@ -1825,8 +1740,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 					feed.add(e.getAsJsonObject().deepCopy());
 					events++;
 				}
-				// Re-sort: an import interleaves with what is already here, and the
-				// panel reads the feed in stored order.
+				// an import interleaves, and the panel reads the feed in stored order
 				java.util.List<JsonObject> all = new java.util.ArrayList<>(feed.size());
 				for (JsonElement e : feed)
 				{
@@ -1844,16 +1758,15 @@ class LocalStore implements chronicle.counters.GatheredLedger
 				}
 				root.add("feed", rebuilt);
 			}
-			// Collection log: the existing max-union, which is exactly right here.
+			// collection log: the same max-union used on capture
 			if (in.has("collection_log") && in.get("collection_log").isJsonObject())
 			{
 				JsonObject cl = root.has("collection_log") && root.get("collection_log").isJsonObject()
 					? root.getAsJsonObject("collection_log") : new JsonObject();
 				root.add("collection_log", mergeClog(cl, in.getAsJsonObject("collection_log")));
 			}
-			// The gathered-item ledger travels too: without it, ore mined on the
-			// other machine is unrecognised here and binning it later reads as
-			// clearing bank junk rather than throwing back what the world gave.
+			// The gathered ledger travels too, or ore mined on the other machine goes
+			// unrecognised here.
 			if (in.has("gathered_items") && in.get("gathered_items").isJsonArray())
 			{
 				JsonArray have = root.has("gathered_items") && root.get("gathered_items").isJsonArray()
@@ -1921,9 +1834,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 				}
 				root.add("untaken_pairs", pairs);
 			}
-			// The slayer spine adopts only into an empty one: two overlapping
-			// task lists cannot be reconciled segment by segment, and the local
-			// one is the authoritative account of what this client watched.
+			// The spine copies only into an empty one: two overlapping task lists
+			// can't be reconciled segment by segment.
 			if (in.has("slayer") && in.get("slayer").isJsonObject())
 			{
 				JsonObject incSl = in.getAsJsonObject("slayer");
@@ -1941,13 +1853,9 @@ class LocalStore implements chronicle.counters.GatheredLedger
 				}
 				else if (incSl.has("tasks") && incSl.get("tasks").isJsonArray())
 				{
-					// A spine already stands here, so the incoming one is the SAME
-					// history seen from somewhere else — its segments must not be
-					// appended. What it can carry that this one lacks is detail:
-					// which monsters an assignment was made of and what it dropped,
-					// which older records never kept. Matched on the task and its
-					// moment rather than an exact timestamp: the two sides round
-					// that instant differently, so equality would match nothing.
+					// A spine already stands, so take only detail this one lacks (monsters,
+					// items). Matched on task and a nearby ts; the two sides round the
+					// instant differently, so equality would match nothing.
 					for (JsonElement t : incSl.getAsJsonArray("tasks"))
 					{
 						if (!t.isJsonObject())
@@ -2052,14 +1960,10 @@ class LocalStore implements chronicle.counters.GatheredLedger
 	}
 
 	/**
-	 * Identity of a feed line: its kind, the SECOND it happened in, and what it
-	 * was about.
-	 *
-	 * <p>Not the exact instant. One side of an import keeps milliseconds and the
-	 * other keeps seconds as a float, so the same moment arrives a millisecond
-	 * apart and an exact match lets the same log slot be written twice. Nor the
-	 * second alone: a clue casket empties several slots inside one second, and
-	 * those are genuinely different lines.
+	 * Identity of a feed line: its kind, the second it happened in, and what it was
+	 * about. The exact instant won't do, because one side of an import keeps
+	 * milliseconds and the other seconds as a float. The second alone won't either:
+	 * a clue casket empties several slots inside one second.
 	 */
 	private static String feedKey(JsonObject e)
 	{
@@ -2069,8 +1973,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		return kind + "|" + sec + "|" + feedSubject(e);
 	}
 
-	/** What a feed line is ABOUT, for identity: the thing it names, or failing
-	 *  that the whole payload. */
+	/** What a feed line is about: the thing it names, or failing that the payload. */
 	private static String feedSubject(JsonObject e)
 	{
 		if (!e.has("data") || !e.get("data").isJsonObject())
@@ -2086,8 +1989,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 				return d.get(field).getAsString().toLowerCase(java.util.Locale.ROOT);
 			}
 		}
-		// An imported line can carry nothing but a marker; the payload itself is
-		// then the only identity there is, minus the marker.
+		// an imported line can carry only a marker; then the payload is the identity
 		JsonObject bare = d.deepCopy();
 		bare.remove("imported");
 		bare.remove("type");
@@ -2095,10 +1997,9 @@ class LocalStore implements chronicle.counters.GatheredLedger
 	}
 
 	/**
-	 * Collapse feed lines that describe the same moment. The keys the entries
-	 * were written under can differ by a millisecond across an import, so a
-	 * record can hold one log slot twice; the fuller line survives.
-	 * Callers hold {@code lock}. Returns how many were absorbed.
+	 * Collapse feed lines that describe the same moment; the fuller line survives.
+	 * Timestamps can differ by a millisecond across an import, so a record can hold
+	 * one log slot twice. Callers hold {@code lock}. Returns how many were absorbed.
 	 */
 	private int dedupeFeed()
 	{
@@ -2124,8 +2025,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 				continue;
 			}
 			absorbed++;
-			// Keep whichever says more: a line naming its item beats a bare
-			// "imported" marker for the same instant.
+			// keep whichever says more; a named line beats a bare "imported" marker
 			if (payloadSize(o) > payloadSize(held))
 			{
 				best.put(key, o);
@@ -2198,8 +2098,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		root.add(name, cur);
 	}
 
-	/** Items a single source was left holding, richest first (the Left behind
-	 *  lens drilled from the source end). */
+	/** Items one source was left holding, richest first. */
 	java.util.List<BagItem> untakenItemsOf(String source)
 	{
 		java.util.List<BagItem> out = new java.util.ArrayList<>();
@@ -2225,8 +2124,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		return out;
 	}
 
-	/** Sources that left a given item on the ground, most first (the same lens
-	 *  drilled from the item end). */
+	/** Sources that left a given item on the ground, most first. */
 	java.util.List<UntakenRow> untakenSourcesOf(String item)
 	{
 		java.util.List<UntakenRow> out = new java.util.ArrayList<>();
@@ -2352,7 +2250,6 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		return out;
 	}
 
-	/** One pet as the journal remembers it. */
 	static final class PetRow
 	{
 		final String name;
@@ -2370,15 +2267,11 @@ class LocalStore implements chronicle.counters.GatheredLedger
 	}
 
 	/**
-	 * Collapse item entries that name the same thing within one source.
-	 *
-	 * <p>The bag is keyed by item id; a record merged in from elsewhere may know
-	 * only names, and an earlier build filed those alongside rather than into
-	 * the entry already there — so a source could list one herb twice, each line
-	 * holding a different partial count. Both describe the same history, so the
-	 * survivor takes the HIGHER of the two (the same floor rule the rest of the
-	 * merge uses) and keeps the id-bearing key, which is what draws the sprite.
-	 * Callers hold {@code lock}. Returns how many entries were absorbed.
+	 * Collapse item entries that name the same thing within one source. The bag is
+	 * keyed by item id, a merged-in record may know only names, and an earlier build
+	 * filed those alongside the entry already there. The survivor takes the higher of
+	 * the two and keeps the id-bearing key. Callers hold {@code lock}. Returns how
+	 * many entries were absorbed.
 	 */
 	private int dedupeSourceBags()
 	{
@@ -2513,23 +2406,14 @@ class LocalStore implements chronicle.counters.GatheredLedger
 	}
 
 	/**
-	 * Carry an account's journal across an in-game rename: move
-	 * {@code <oldslug>.json} and {@code <oldslug>.history.jsonl} to the new
-	 * name's slugs. Returns true when the journal file itself moved.
+	 * Carry an account's journal across an in-game rename: move {@code <oldslug>.json}
+	 * and {@code <oldslug>.history.jsonl} onto the new name's slugs. True when the
+	 * journal itself moved.
 	 *
-	 * <p>A file already filed under the new slug is set aside rather than left
-	 * to be adopted. The carried journal is the one THIS account has been
-	 * writing to; the resident one is a record nobody here has touched since,
-	 * and freed names get taken — it may well belong to another account that
-	 * once held this name. Loading that record would let this account
-	 * accumulate on top of a stranger's lifetime and, once enrolled, push those
-	 * totals upward under its own token, where the server's floor-merge makes
-	 * them permanent. Nothing is deleted: the resident record keeps every byte
-	 * under a dated sidecar name.
-	 *
-	 * <p>The record and its history spine move together or not at all, for the
-	 * same reason — a spine filed under a slug whose journal belongs to someone
-	 * else would splice two accounts' baselines into one calendar.
+	 * <p>A file already sitting under the new slug is set aside rather than mounted.
+	 * Freed names get taken, so it may belong to a different account, and loading it
+	 * would let this one accumulate on top of a stranger's lifetime. Nothing is
+	 * deleted. The record and its history spine move together for the same reason.
 	 */
 	static boolean migrateJournalFiles(File dir, String oldName, String newName)
 	{
@@ -2542,8 +2426,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		File journal = new File(dir, oldSlug + ".json");
 		if (!journal.isFile())
 		{
-			// Nothing of this account's to carry, so nothing here earns the right
-			// to disturb whatever is filed under the new name.
+			// nothing to carry, so leave whatever is under the new name alone
 			return false;
 		}
 		File target = new File(dir, newSlug + ".json");
@@ -2566,11 +2449,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		return true;
 	}
 
-	/**
-	 * Move a file out of the way under a dated sidecar name, keeping every byte.
-	 * False when it could not be moved, so a caller can leave things as they are
-	 * instead of acting on a clearance that never happened.
-	 */
+	/** Move a file aside under a dated sidecar name, keeping every byte. False when
+	 *  it could not be moved, so the caller can leave things as they are. */
 	private static boolean setAside(File f, String tag)
 	{
 		File aside = new File(f.getParentFile(),
@@ -2581,7 +2461,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			log.warn("kept {} as {}", f.getName(), aside.getName());
 			return true;
 		}
-		catch (Exception e)   // noqa: best-effort; the caller decides what that costs
+		catch (Exception e)   // noqa: best-effort; a false return tells the caller
 		{
 			log.warn("could not set aside {}", f, e);
 			return false;
@@ -2590,11 +2470,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 
 	static String slug(String rsn)
 	{
-		// The slug is a file identity — the journal, its history spine and the
-		// rename comparison are all filed under it — so it has to be a function of
-		// the name alone. The default locale is not: under a Turkish one, lowering
-		// 'I' yields a dotless 'ı' that the ASCII class below then strips, and the
-		// same account would mount a blank record beside its real one.
+		// Locale.ROOT because the slug is a file identity: under a Turkish locale
+		// lowercasing 'I' gives a dotless 'ı' that the ASCII strip below then eats.
 		String s = rsn == null ? ""
 			: rsn.trim().toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]+", "-");
 		s = s.replaceAll("(^-+|-+$)", "");
@@ -2612,10 +2489,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		try (java.io.FileOutputStream out = new java.io.FileOutputStream(tmp))
 		{
 			out.write(content.getBytes(StandardCharsets.UTF_8));
-			// The move below is atomic over the file's NAME, not over its contents:
-			// without forcing the bytes down first, a power cut between the write
-			// and the flush leaves the new name pointing at a zero-length or
-			// half-written record — the very file the load path has to abandon.
+			// The move below is atomic over the file's name only; without forcing the
+			// bytes down first, a power cut leaves that name pointing at a torn record.
 			out.getFD().sync();
 		}
 		try

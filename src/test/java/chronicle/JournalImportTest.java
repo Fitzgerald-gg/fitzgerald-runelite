@@ -17,10 +17,9 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Pins the import's central promise: every store merges as a floor, so folding
- * the same record in twice — or folding an older copy in after a newer one —
- * changes nothing. An import is another copy of the SAME account's history, so
- * anything that added would double every kill the two copies share.
+ * An import is another copy of the same account's history, so it merges as a
+ * floor. Importing twice, or importing an older copy after a newer one, has to
+ * leave the journal unchanged.
  */
 public class JournalImportTest
 {
@@ -94,9 +93,9 @@ public class JournalImportTest
 		LocalStore.SourceRow n = store.dropSources().get(0);
 		assertEquals(300, n.kc);
 		assertEquals(900000L, n.value);
-		// A personal best is a MINIMUM, so the older file's better time does win.
+		// pb merges as the lower time, so the older file's 99.0 loses.
 		assertEquals(42.5, n.pb, 0.001);
-		// …and its earlier first-sighting pushes "tracked since" further back.
+		// first_seen merges the other way, earliest wins.
 		assertEquals(50L, n.firstMs);
 		assertEquals(214, store.slayerJourney().completedTasks);
 	}
@@ -104,26 +103,26 @@ public class JournalImportTest
 	@Test
 	public void localPlayIsNeverOverwrittenByAnImport()
 	{
-		// This client witnessed more than the exported copy holds.
+		// this client has walked further than the exported copy knows about
 		store.setTrackers(java.util.Collections.singletonMap("tilesWalked", 9999), "Tester");
 		store.importJournal(export(), "Tester");
 		assertEquals(9999L, (long) store.trackersSnapshot().get("tilesWalked"));
-		// …while a counter only the export knows about still comes across.
+		// a counter only the export holds still comes across
 		assertEquals(120L, (long) store.trackersSnapshot().get("fishCaught"));
 	}
 
 	@Test
 	public void detailBackfillsIntoSegmentsThatAlreadyExist()
 	{
-		// A spine adopted from an older record: totals, no composition.
+		// an older record: task totals, no monster or item detail
 		store.importJournal(gson.fromJson("{\"slayer\":{\"completed\":2,\"tasks\":["
 			+ "{\"task\":\"Bloodveld\",\"kills\":120,\"value\":50000,\"ts\":1787775856},"
 			+ "{\"task\":\"Jellies\",\"kills\":90,\"value\":9000,\"ts\":1787778099}]}}",
 			JsonObject.class), "Tester");
 		assertEquals(2, store.slayerJourney().tasks.size());
 
-		// The rebuilt export describes the SAME two tasks — its instants round
-		// differently, which is why the match is a window and not equality.
+		// same two tasks, timestamps a couple of seconds off. matching is a
+		// window, not equality.
 		store.importJournal(gson.fromJson("{\"slayer\":{\"completed\":2,\"tasks\":["
 			+ "{\"task\":\"Bloodveld\",\"ts\":1787775854,"
 			+ "  \"monsters\":{\"Bloodveld\":104,\"Mutated Bloodveld\":16},"
@@ -131,7 +130,6 @@ public class JournalImportTest
 			+ "{\"task\":\"Jellies\",\"ts\":1787778098,\"monsters\":{\"Jelly\":90}}]}}",
 			JsonObject.class), "Tester");
 
-		// No segments were appended — the same history seen twice.
 		assertEquals(2, store.slayerJourney().tasks.size());
 		int bloodveld = indexOf("Bloodveld");
 		java.util.List<LocalStore.UntakenRow> mons = store.slayerTaskMonsters(bloodveld);
@@ -162,8 +160,8 @@ public class JournalImportTest
 	{
 		store.importJournal(gson.fromJson("{\"slayer\":{\"tasks\":["
 			+ "{\"task\":\"Bloodveld\",\"kills\":1,\"ts\":1787775856}]}}", JsonObject.class), "Tester");
-		// Same task name, months away: a different assignment entirely, so its
-		// detail must not be folded into this one.
+		// same task name, months away, so a different assignment. its detail
+		// must not fold into the first one.
 		store.importJournal(gson.fromJson("{\"slayer\":{\"tasks\":["
 			+ "{\"task\":\"Bloodveld\",\"ts\":1700000000,\"monsters\":{\"Bloodveld\":99}}]}}",
 			JsonObject.class), "Tester");
@@ -174,9 +172,8 @@ public class JournalImportTest
 	@Test
 	public void anExportThatKnowsOnlyNamesMergesIntoWhatIsAlreadyHere()
 	{
-		// The bag is keyed by item id; the export is keyed by name. Filing the
-		// incoming one alongside listed a source's herb twice, each line holding
-		// a different partial count.
+		// the bag is keyed by item id, the export by name. filing them side by
+		// side listed one item as two lines with split counts.
 		store.record("LOOT", gson.fromJson("{\"source\":\"Herbiboar\","
 			+ "\"items\":[{\"id\":207,\"quantity\":6}]}", JsonObject.class), "Tester");
 		assertEquals(1, store.sourceItems("Herbiboar").size());
@@ -189,14 +186,14 @@ public class JournalImportTest
 		java.util.List<LocalStore.BagItem> bag = store.sourceItems("Herbiboar");
 		assertEquals(1, bag.size());
 		assertEquals("Rune dagger", bag.get(0).name);
-		assertEquals(9, bag.get(0).qty);     // floored to the higher of the two
+		assertEquals(9, bag.get(0).qty);     // the higher of the two counts
 	}
 
 	@Test
 	public void aRecordAlreadyCarryingDuplicatesHealsOnLoad() throws Exception
 	{
-		// What an earlier build wrote: the same item under an id key and a name
-		// key, each holding part of the count.
+		// what an earlier build wrote: one item under both an id key and a name
+		// key, the count split between them.
 		java.io.File f = new java.io.File(dir, "healme.json");
 		java.nio.file.Files.write(f.toPath(), ("{\"schema\":1,\"rsn\":\"Healme\","
 			+ "\"drops\":{\"Herbiboar\":{\"kc\":27,\"loots\":27,\"value\":1,"
@@ -210,15 +207,15 @@ public class JournalImportTest
 		assertEquals(1, bag.size());
 		assertEquals("Grimy ranarr weed", bag.get(0).name);
 		assertEquals(207, bag.get(0).itemId);   // the id-bearing key survives
-		assertEquals(35000L, bag.get(0).value); // and takes the higher figure
+		assertEquals(35000L, bag.get(0).value); // taking the higher value
 	}
 
 	@Test
 	public void theSameMomentArrivingAMillisecondApartIsOneLine()
 	{
-		// The client keeps milliseconds; an exported record keeps seconds as a
-		// float. The same log slot therefore arrives a millisecond off, and an
-		// exact-instant match wrote it twice.
+		// the journal keeps milliseconds, an export keeps seconds as a float,
+		// so the same slot comes back a millisecond off. matching on the exact
+		// instant wrote it twice.
 		store.record("COLLECTION", gson.fromJson(
 			"{\"itemName\":\"Zombie shirt\"}", JsonObject.class), "Tester");
 		long ts = store.feedNewest(1).get(0).get("ts").getAsLong();
@@ -243,8 +240,8 @@ public class JournalImportTest
 	@Test
 	public void twoSlotsInsideOneSecondStayTwoLines()
 	{
-		// A casket empties several slots in the same second, and those are
-		// genuinely different lines — the subject is what separates them.
+		// a casket fills several slots in one second. the item name is what
+		// keeps them apart.
 		store.record("COLLECTION", gson.fromJson(
 			"{\"itemName\":\"Zombie boots\"}", JsonObject.class), "Tester");
 		store.record("COLLECTION", gson.fromJson(

@@ -20,11 +20,9 @@ import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
 
 /**
- * A lifetime-counter tracker. {@link ChronicleCounters} fans the RuneLite event
- * bus out to every registered tracker, so each one implements only the handlers it
- * cares about — the rest are no-ops via the tracker implementations in this package. Trackers write
- * their tallies into the shared {@link StatStore}; they hold no game knowledge the
- * store needs and never talk to the network directly.
+ * A lifetime-counter tracker. {@link ChronicleCounters} hands every subscribed event to
+ * each tracker, so a tracker overrides only the handlers it needs and the rest no-op here.
+ * Tallies go into the shared {@link StatStore}.
  */
 public interface StatTracker
 {

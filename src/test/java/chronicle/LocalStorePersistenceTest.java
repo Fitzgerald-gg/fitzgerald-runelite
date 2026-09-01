@@ -22,11 +22,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Pins the journal's life on disk: a flushed record reloads into the same model,
- * lifetime counters resume from the stored base instead of restarting at zero, a
- * record that cannot be read is kept intact rather than replaced by a blank one,
- * and a record missing its containers (or holding the wrong shape in them) is
- * repaired at load instead of throwing on the next event.
+ * Load and flush of the on-disk journal: what survives a reload, and what a
+ * damaged or half-written record does on the way back in.
  */
 public class LocalStorePersistenceTest
 {
@@ -41,7 +38,7 @@ public class LocalStorePersistenceTest
 		dir = Files.createTempDirectory("chronicle-persist").toFile();
 	}
 
-	/** A store as a freshly started client holds it: nothing mounted yet. */
+	// a store with no account mounted yet
 	private LocalStore newStore()
 	{
 		ItemManager im = Mockito.mock(ItemManager.class);
@@ -53,7 +50,6 @@ public class LocalStorePersistenceTest
 		return new LocalStore(im, new Gson());
 	}
 
-	/** A second client mounting the same account off the same directory. */
 	private LocalStore mounted()
 	{
 		LocalStore store = newStore();
@@ -104,7 +100,7 @@ public class LocalStorePersistenceTest
 		return new Gson().fromJson(read(name), JsonObject.class);
 	}
 
-	/** The one file set aside under {@code prefix} (the timestamp suffix varies). */
+	// the one file set aside under prefix; the timestamp suffix varies
 	private String onlySidecar(String prefix)
 	{
 		String[] hits = dir.list((d, name) -> name.startsWith(prefix));
@@ -133,8 +129,6 @@ public class LocalStorePersistenceTest
 		first.setTrackers(session("deaths", 3), RSN);
 		first.flush(dir);
 
-		// The file is the system of record, not the live object: everything the
-		// panel reads has to come back from disk on the next client.
 		LocalStore second = mounted();
 		LocalStore.SourceRow row = source(second, "Nechryael");
 		assertEquals(7, row.kc);
@@ -146,8 +140,7 @@ public class LocalStorePersistenceTest
 		assertEquals(4151, bag.get(0).itemId);
 		assertEquals(2L, bag.get(0).qty);
 		assertEquals(200L, bag.get(0).value);
-		// Names and prices are frozen at ingest, so the reload must not need an
-		// ItemManager to say what was found or what it was worth that day.
+		// names and prices are frozen at ingest, so they come back off the file
 		assertEquals("Rune dagger", bag.get(0).name);
 
 		List<JsonObject> feed = second.feedNewest(10);
@@ -163,8 +156,8 @@ public class LocalStorePersistenceTest
 	public void lifetimeCountersResumeFromTheStoredBaseNotFromZero()
 	{
 		LocalStore first = mounted();
-		// The session figure is a from-zero running total restated as it grows,
-		// so restating it must not add a second time.
+		// the session figure is a running total restated as it grows, so a repeat
+		// of the same value must not add again
 		first.setTrackers(session("deaths", 4), RSN);
 		first.setTrackers(session("deaths", 4), RSN);
 		assertEquals(Long.valueOf(4), first.trackersSnapshot().get("deaths"));
@@ -184,8 +177,7 @@ public class LocalStorePersistenceTest
 
 		LocalStore second = mounted();
 		second.setTrackers(session("highestHit", 50), RSN);
-		// A smaller hit this session does not raise the lifetime best, and the
-		// two are never added together.
+		// a smaller hit this session leaves the lifetime best alone
 		assertEquals(Long.valueOf(60), second.trackersSnapshot().get("highestHit"));
 
 		second.setTrackers(session("highestHit", 71), RSN);
@@ -195,9 +187,7 @@ public class LocalStorePersistenceTest
 	@Test
 	public void anUnreadableRecordIsKeptAsideRatherThanOverwritten() throws Exception
 	{
-		// A torn write loses the tail, so the file no longer parses. It is the
-		// only copy of the account's history and the next flush would land right
-		// on top of it.
+		// torn write: the tail is gone, so the file won't parse
 		String torn = "{\"schema\":1,\"rsn\":\"Tester\",\"drops\":{\"Nechryael\":{\"kc\":91";
 		write(FILE, torn);
 
@@ -205,7 +195,7 @@ public class LocalStorePersistenceTest
 		store.flush(dir);
 
 		assertEquals(torn, read(onlySidecar(FILE + ".corrupt-")));
-		// Play continues onto a fresh record rather than stalling.
+		// the store carries on into a fresh record
 		kill(store, "Nechryael", 1, 4151, 1);
 		store.flush(dir);
 		assertEquals(1, source(mounted(), "Nechryael").loots);
@@ -214,8 +204,7 @@ public class LocalStorePersistenceTest
 	@Test
 	public void aRecordThatIsNotAnObjectIsTreatedAsUnreadable() throws Exception
 	{
-		// Parseable JSON, but not a record: adopting it would hand every later
-		// read a shape it cannot navigate.
+		// parses fine, but every read downstream expects an object
 		write(FILE, "[1,2,3]");
 		mounted().flush(dir);
 		assertEquals("[1,2,3]", read(onlySidecar(FILE + ".corrupt-")));
@@ -227,9 +216,8 @@ public class LocalStorePersistenceTest
 		write(FILE, "{\"schema\":1,\"rsn\":\"Tester\"}");
 		LocalStore store = mounted();
 
-		// Each ingest path writes straight into its container. Unrepaired, these
-		// throw on the client thread and the event bus swallows it, so the loss
-		// would show up only as counters that quietly stopped moving.
+		// every ingest path writes straight into a container, so a missing one
+		// throws on the client thread and the event bus swallows it
 		kill(store, "Nechryael", 3, 4151, 1);
 		pet(store, "Abyssal orphan");
 		store.setTrackers(session("deaths", 1), RSN);
@@ -242,7 +230,7 @@ public class LocalStorePersistenceTest
 	@Test
 	public void containersHoldingTheWrongShapeAreReplacedNotTrusted() throws Exception
 	{
-		// A hand-edited record: the keys are all present, none of them usable.
+		// hand-edited record: every key present, wrong type in each one
 		write(FILE, "{\"schema\":1,\"rsn\":\"Tester\",\"drops\":[],\"trackers\":7,\"feed\":{}}");
 		LocalStore store = mounted();
 
@@ -260,16 +248,14 @@ public class LocalStorePersistenceTest
 	{
 		write(FILE, "{\"schema\":1,\"rsn\":\"Tester\",\"first_seen\":12345}");
 		mounted().flush(dir);
-		// The dateline the panel prints belongs to the account, not to whichever
-		// session happened to load it last.
+		// the panel's dateline reads this, so a reload must not restamp it
 		assertEquals(12345L, readJson(FILE).get("first_seen").getAsLong());
 	}
 
 	@Test
 	public void anUnmountedStoreWritesNothing()
 	{
-		// Account boundary: with nothing mounted there is no record to write, and
-		// a skeleton written here would be filed under a name we do not know yet.
+		// no account mounted, so there's no name to file a record under
 		newStore().flush(dir);
 		assertFalse(new File(dir, FILE).isFile());
 		assertEquals(0, dir.list().length);
@@ -278,8 +264,8 @@ public class LocalStorePersistenceTest
 	@Test
 	public void theRecordIsFiledUnderTheAccountSlug()
 	{
-		// load() and flush() have to agree on the path, and it is the slug the
-		// rename migration moves when the account is renamed.
+		// load() and flush() have to agree on the path, and the rename migration
+		// moves this slug
 		LocalStore store = newStore();
 		store.load(dir, "Some Name");
 		store.flush(dir);
@@ -289,7 +275,7 @@ public class LocalStorePersistenceTest
 	@Test
 	public void theJournalDirectoryIsCreatedOnFirstFlush()
 	{
-		// First run on a new install: nothing under the profile directory exists.
+		// first run on a new install: nothing under the profile dir exists yet
 		File fresh = new File(dir, "nested/local");
 		LocalStore store = newStore();
 		store.load(fresh, RSN);
@@ -308,9 +294,8 @@ public class LocalStorePersistenceTest
 		assertFalse(store.wasGathered(1333));
 		store.flush(dir);
 
-		// The whole point of keeping this in the record rather than the session
-		// store: an ore mined last week and binned today is still a resource
-		// dropped where it fell, not bank junk being cleared.
+		// ore mined last week and binned today still reads as gathered, so the
+		// ledger lives in the record and not in the session
 		LocalStore next = mounted();
 		assertTrue(next.wasGathered(440));
 		assertFalse(next.wasGathered(1333));
@@ -319,8 +304,8 @@ public class LocalStorePersistenceTest
 	@Test
 	public void anUnmountedStoreRemembersNoGathers()
 	{
-		// Before an account logs in there is no record to write to, and a note
-		// held in memory here would be credited to whoever mounts next.
+		// no record to write to, and a note held in memory would be credited to
+		// whoever mounts next
 		LocalStore store = newStore();
 		store.noteGathered(440);
 		assertFalse(store.wasGathered(440));
@@ -332,8 +317,7 @@ public class LocalStorePersistenceTest
 		LocalStore store = mounted();
 		store.noteGathered(440);
 		store.endSession();
-		// A different character may log in next; this one's ore must not vouch
-		// for what theirs drops.
+		// a different character may log in next
 		assertFalse(store.wasGathered(440));
 	}
 }

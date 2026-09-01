@@ -12,27 +12,21 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The one table that makes every counter presentable: key → (label, family,
- * section) — a direct port of the site's settled tracker taxonomy (the
- * trackers page's COMBAT/LIVING_FLAT/LEDGER sets and SKILLS specs), so the
- * panel and any server page built from the same journal file, label and
- * sort every key the same way.
+ * Presentation table for counter keys: which family a key belongs to, which
+ * section inside it, and what to call it.
  *
- * <p>Four facets, the site's own: Living · Combat · Skilling · Ledger &amp;
- * Roads. Within Skilling each craft owns its keys by explicit claim first,
- * then typed suffix (longest first, so "FailedPickpockets" beats
- * "Pickpockets"). Generic totals ("floors" — logsChopped, bonesBuried) stay
- * OUT of the rows: they head their section, and the unresolved remainder
- * surfaces as a ghost "Other" row so rows always reconcile to the headline.
+ * <p>Four families: Living, Combat, Skilling, Ledger &amp; Roads. In Skilling a
+ * craft claims a key explicitly first, then by typed suffix. Generic totals
+ * ("floors" like logsChopped, bonesBuried) head their section instead of
+ * appearing as rows, and whatever the rows leave over shows as an "Other" row.
  */
 public final class StatRegistry
 {
-	/** Display facets, in the site's tab order. */
+	// order here is the tab order
 	public static final String[] FAMILIES = {
 		"Living", "Combat", "Skilling", "Ledger & Roads"
 	};
 
-	// ── ownership sets, ported verbatim from the site ──────────────────
 	private static final Set<String> COMBAT = new HashSet<>(Arrays.asList(
 		"damageDealt", "damageTaken", "highestHit", "highestHitTaken",
 		"hitsMissed", "hitsBlocked", "deaths", "poisonDamageTaken", "venomDamageTaken",
@@ -47,18 +41,14 @@ public final class StatRegistry
 		"untakenLootValue", "untakenLootCount", "distanceWalked", "distanceRan",
 		"ammoConsumed", "offensiveSpellsCast", "cabbagesPicked", "flaxGathered",
 		"animalsPetted", "patchesRaked", "highAlchemyCasts", "lowAlchemyCasts"));
-	// The site hides these outright: totals whose story other surfaces tell
-	// (History owns xp; the offering-xp figures double-count real Prayer xp).
-	// resourcesDroppedValue is kept out of the rows for the opposite reason — it
-	// is not suppressed but promoted, read as the margin on the row
-	// resourcesGatheredValue heads, where the two together say what neither says
-	// alone. As its own row it would be an orphan gp figure with nothing to be
-	// measured against, and would read as a second "Value dropped".
+	// kept out of the rows. History owns xp, the offering-xp keys double-count
+	// real Prayer xp, and resourcesDroppedValue is drawn as the margin on the
+	// resourcesGatheredValue row instead of standing on its own.
 	private static final Set<String> HIDE = new HashSet<>(Arrays.asList(
 		"totalXpGained", "bowsFletched", "demonicOfferingXp", "sinisterOfferingXp",
 		"resourcesDroppedValue"));
 
-	/** One craft's claim: explicit keys and floors first, then typed suffixes. */
+	// one craft's claim on the key space: named keys, floor totals, typed suffixes
 	private static final class SkillSpec
 	{
 		final String name;
@@ -76,7 +66,8 @@ public final class StatRegistry
 	}
 
 	private static final String[] NONE = {};
-	// Canonical order, ported from the site's SKILLS array.
+	// first match wins in skillOf, so order matters here and inside each craft's
+	// suffix list (FailedPickpockets before Pickpockets)
 	private static final List<SkillSpec> SKILLS = Arrays.asList(
 		new SkillSpec("Woodcutting", new String[]{"LogsChopped"}, new String[]{"logsChopped"}, NONE),
 		new SkillSpec("Fishing", new String[]{"Caught"}, new String[]{"fishCaught"}, NONE),
@@ -114,8 +105,8 @@ public final class StatRegistry
 			new String[]{"seedsPlanted"}),
 		new SkillSpec("Hunter", new String[]{"Trapped", "BirdhousesEmptied"},
 			new String[]{"creaturesTrapped", "birdhousesEmptied"},
-			// herbiboarsHarvested is claimed explicitly so Farming's broad
-			// "Harvested" sweep can't steal it — the implingsCaught precedent.
+			// the explicit claim on herbiboarsHarvested keeps Farming's
+			// "Harvested" sweep off it
 			new String[]{"implingsCaught", "chompyBirdsPlucked", "herbiboarsHarvested"}),
 		new SkillSpec("Prayer",
 			new String[]{"BonesBuried", "AshesScattered", "HeadsReanimated",
@@ -124,15 +115,13 @@ public final class StatRegistry
 				"bonesOffered", "bonesSacrificed", "ashesSacrificed"},
 			NONE),
 		new SkillSpec("Construction", NONE, NONE, new String[]{"constructionBuilds"}),
-		// Salvage splits into what the hook brought up and what the station sorted;
-		// the trials group by course, all four ranks folded together.
 		new SkillSpec("Sailing",
 			new String[]{"SalvagePulled", "SalvageSorted", "TrialsCompleted"},
 			new String[]{"salvagePulled", "salvageSorted", "barracudaTrialsCompleted"},
 			new String[]{"portTasksCompleted"}));
 
-	// Explicit claims resolve before any suffix sweep — a broad suffix
-	// (Fishing "Caught") can never steal another craft's key (implingsCaught).
+	// key -> craft, from the named keys and floors; consulted before the suffix
+	// sweep so a broad suffix (Fishing's "Caught") can't take implingsCaught
 	private static final Map<String, String> KEY_SKILL = new HashMap<>();
 	private static final Set<String> FLOORS = new HashSet<>();
 
@@ -159,7 +148,6 @@ public final class StatRegistry
 
 	static
 	{
-		// The site's LABELS table, plus the panel's own price-at-use counter.
 		LABELS.put("hitpointsRegenerated", "Hitpoints regained");
 		LABELS.put("divinePotionDamage", "Divine potion self-damage");
 		LABELS.put("distanceWalked", "Distance walked");
@@ -168,10 +156,8 @@ public final class StatRegistry
 		LABELS.put("tilesRan", "Tiles run");
 		LABELS.put("coinsFromAlchemy", "Coins from alchemy");
 		LABELS.put("itemsDroppedValue", "Value dropped");
-		// The site's own label for this key is "Resources gathered". The panel's
-		// row carries the PAIR — what the hours produced and what was left where
-		// it fell — and at 214px the sentence only fits if the label keeps the
-		// verb and hands the rest of the line to the two figures.
+		// short because this row carries two figures (gathered and dropped) and
+		// they have to fit the 214px panel
 		LABELS.put("resourcesGatheredValue", "Gathered");
 		LABELS.put("untakenLootValue", "Uncollected loot");
 		LABELS.put("untakenLootCount", "Loot left behind");
@@ -189,14 +175,12 @@ public final class StatRegistry
 		LABELS.put("damageDealtRanged", "— by ranged");
 		LABELS.put("damageDealtMagic", "— by magic");
 		LABELS.put("teleportsFairyRing", "— by fairy ring");
-		// Courier and bounty tasks are both port tasks and both pay the same bag,
-		// so one row covers them.
+		// courier and bounty tasks both land on this one key
 		LABELS.put("portTasksCompleted", "Port tasks");
 		LABELS.put("barracudaTrialsCompleted", "Barracuda trials");
 		LABELS.put("teleportsSpiritTree", "— by spirit tree");
 
-		// Destinations are place names: Title Case, with the punctuation the
-		// camelCase split can't recover — the site's TELE_NAMES, verbatim.
+		// destinations whose real name the camelCase split can't get back to
 		TELE_NAMES.put("teleportsSeersVillage", "Seers' Village");
 		TELE_NAMES.put("teleportsFenkenstrain", "Fenkenstrain's Castle");
 		TELE_NAMES.put("teleportsFortis", "Civitas illa Fortis");
@@ -224,23 +208,20 @@ public final class StatRegistry
 	{
 	}
 
-	/** Keys the panel never shows: diagnostics, plus the site's HIDE set. */
+	// a leading underscore marks an internal diagnostic counter
 	public static boolean hidden(String key)
 	{
 		return key.startsWith("_") || HIDE.contains(key);
 	}
 
-	/**
-	 * Floors are generic totals (logsChopped, bonesBuried, teleportsTotal):
-	 * they head their section rather than appearing as rows, and their
-	 * unresolved remainder reconciles as the ghost "Other" row.
-	 */
+	// floors are the generic totals (logsChopped, teleportsTotal) that head a
+	// section instead of being listed as a row
 	public static boolean isFloor(String key)
 	{
 		return FLOORS.contains(key);
 	}
 
-	/** The craft that owns a key, or null: explicit claim, then suffix. */
+	// the craft that owns a key, or null if no craft claims it
 	public static String skillOf(String key)
 	{
 		String claimed = KEY_SKILL.get(key);
@@ -250,7 +231,7 @@ public final class StatRegistry
 		}
 		if (key.endsWith("Value") || COMBAT.contains(key))
 		{
-			return null;   // value keys and damage are never actions
+			return null;   // gp totals and damage aren't skilling actions
 		}
 		for (SkillSpec s : SKILLS)
 		{
@@ -265,7 +246,7 @@ public final class StatRegistry
 		return null;
 	}
 
-	/** The facet a key files under, one of {@link #FAMILIES}. */
+	// which family a key files under; always one of FAMILIES
 	public static String family(String key)
 	{
 		if (LIVING_FLAT.contains(key))
@@ -297,16 +278,11 @@ public final class StatRegistry
 		{
 			return "Ledger & Roads";
 		}
-		// Everything unclaimed is an odd or an end — visible, never a junk tab.
+		// anything unclaimed lands here rather than dropping out of the panel
 		return "Ledger & Roads";
 	}
 
-	/**
-	 * The section within a facet. Skilling → the craft; Living → Food /
-	 * Potions / "" (flat); Ledger &amp; Roads → The purse / On foot /
-	 * Teleports / Destinations / Odds &amp; ends. Empty string = the facet's
-	 * flat top list.
-	 */
+	// section within the family; "" means the family's flat top list
 	public static String subgroup(String key)
 	{
 		String fam = family(key);
@@ -333,8 +309,8 @@ public final class StatRegistry
 		}
 		if (fam.equals("Ledger & Roads"))
 		{
-			// Fairy rings and spirit trees are transport NETWORKS — a means,
-			// not a place — so they sit with the means, not the destinations.
+			// fairy rings and spirit trees are a means of travel, so they group
+			// with the other means rather than under a destination
 			if (key.startsWith("teleportsVia") || key.equals("teleportsTotal")
 				|| key.equals("teleports") || key.equals("teleportsFairyRing")
 				|| key.equals("teleportsSpiritTree"))
@@ -358,7 +334,7 @@ public final class StatRegistry
 		return "";
 	}
 
-	/** The floor keys whose sum heads a section (empty for floorless ones). */
+	// the floor keys whose sum heads a section; empty when it has none
 	public static List<String> floorKeys(String subgroup)
 	{
 		for (SkillSpec s : SKILLS)
@@ -381,7 +357,7 @@ public final class StatRegistry
 		}
 	}
 
-	/** Human label for a counter key. Never null; unknown keys prettify. */
+	// display label for a key; anything unlisted falls through to prettify
 	public static String label(String key)
 	{
 		String explicit = LABELS.get(key);
@@ -404,17 +380,14 @@ public final class StatRegistry
 		return prettify(key);
 	}
 
-	/**
-	 * The label a key takes as a ROW inside its section: typed keys shed
-	 * their verb ("willowLogsChopped" reads "Willow logs" under WOODCUTTING),
-	 * destinations read as place names, everything else falls to label().
-	 */
+	// label for a key shown as a row under its section heading: typed keys drop
+	// the verb, so willowLogsChopped reads "Willow logs" under Woodcutting
 	public static String rowLabel(String key)
 	{
 		String skill = skillOf(key);
 		if (skill != null && !KEY_SKILL.containsKey(key))
 		{
-			// matched by suffix — find it (longest wins within the owning craft)
+			// matched by suffix, so find which suffix it was
 			for (SkillSpec s : SKILLS)
 			{
 				if (!s.name.equals(skill))
@@ -444,7 +417,6 @@ public final class StatRegistry
 		return label(key);
 	}
 
-	/** Title-Case place name for a destination key, punctuation restored. */
 	private static String teleName(String key)
 	{
 		String fixed = TELE_NAMES.get(key);
@@ -453,7 +425,7 @@ public final class StatRegistry
 			return fixed;
 		}
 		String s = prettify(key.substring("teleports".length()));
-		// Title Case each word — destinations are proper nouns.
+		// title case every word, they're proper nouns
 		StringBuilder out = new StringBuilder(s.length());
 		boolean cap = true;
 		for (char c : s.toCharArray())
@@ -464,7 +436,8 @@ public final class StatRegistry
 		return out.toString();
 	}
 
-	/** Strip a typed key's verb suffix: "willowLogsChopped" → "Willow logs". */
+	// strip a typed key's verb: "willowLogsChopped" -> "Willow logs". the regex
+	// takes the level off NPC-name keys as well.
 	private static String typedName(String key, String suffix)
 	{
 		String base = key.substring(0, key.length() - suffix.length());
@@ -473,12 +446,8 @@ public final class StatRegistry
 		return s.isEmpty() ? label(key) : s;
 	}
 
-	/**
-	 * The typed suffix a key matched within its craft, or null for explicit
-	 * claims and non-typed keys. Drives the second drill level: a craft whose
-	 * typed rows span SEVERAL verbs (Prayer: buried · scattered · ensouled)
-	 * folds each verb into its own sub-section.
-	 */
+	// the suffix a key matched inside its craft, or null for named claims. the
+	// panel groups on it to drill Prayer into buried, scattered, ensouled.
 	public static String suffixOf(String key)
 	{
 		if (KEY_SKILL.containsKey(key))
@@ -507,7 +476,7 @@ public final class StatRegistry
 		return null;
 	}
 
-	/** Reading label for a suffix group: "BonesBuried" → "Bones buried". */
+	// heading for a suffix group: "BonesBuried" -> "Bones buried"
 	public static String suffixLabel(String suffix)
 	{
 		switch (suffix)
@@ -521,9 +490,8 @@ public final class StatRegistry
 		}
 	}
 
-	/** The floor key heading one suffix group, or null when the craft doesn't
-	 *  declare one for it. Convention is the decapitalised suffix; the
-	 *  irregulars are mapped. */
+	// floor key heading one suffix group, or null if the craft declares none.
+	// the floor is usually the decapitalised suffix; irregulars are mapped below.
 	public static String suffixFloor(String craft, String suffix)
 	{
 		String cand;
@@ -571,12 +539,9 @@ public final class StatRegistry
 		return null;
 	}
 
-	/**
-	 * Typed keys are the per-resource ones matched by suffix ("willowLogsChopped",
-	 * "sharkEaten") — the rows a floor reconciles against. Explicit extras
-	 * (foodBurned, implingsCaught) ride in their section but stay out of the
-	 * ghost-"Other" arithmetic, exactly as on the site.
-	 */
+	// typed keys are the per-resource ones matched by suffix (willowLogsChopped,
+	// sharkEaten) that a floor reconciles against. named extras like foodBurned
+	// still show in their section but stay out of the "Other" arithmetic.
 	public static boolean typed(String key)
 	{
 		if (KEY_SKILL.containsKey(key))
@@ -591,13 +556,13 @@ public final class StatRegistry
 			&& (key.endsWith("Eaten") || key.endsWith("Doses"));
 	}
 
-	/** Whether a value renders as gp. */
+	// whether the value renders as gp
 	public static boolean isGp(String key)
 	{
 		return key.endsWith("Value") || key.startsWith("coins");
 	}
 
-	/** camelCase → "Sentence case words"; digits kept, acronyms tolerated. */
+	// camelCase to sentence case: "vialsShattered" -> "Vials shattered"
 	public static String prettify(String key)
 	{
 		StringBuilder out = new StringBuilder(key.length() + 8);
@@ -620,12 +585,8 @@ public final class StatRegistry
 		return polish(out.toString());
 	}
 
-	/**
-	 * Reads-well pass over a prettified label: collapse stuttered words
-	 * ("Logs logs chopped" — item-plus-action keys double up), space out
-	 * parenthesised levels from NPC-name keys ("Guard(level21)" reads as
-	 * "Guard (lvl 21)").
-	 */
+	// tidy a prettified label: item-plus-action keys stutter ("Logs logs
+	// chopped"), and NPC keys turn up with a bracketed level
 	private static String polish(String label)
 	{
 		String s = label.replaceAll("(?<=\\S)\\(", " (")
@@ -649,7 +610,7 @@ public final class StatRegistry
 		return out.toString();
 	}
 
-	/** The site's row order: count desc, then name — deterministic ties. */
+	// count descending, label breaking the tie so the order stays stable
 	public static int compareRows(Map.Entry<String, Long> a, Map.Entry<String, Long> b)
 	{
 		int byValue = Long.compare(b.getValue(), a.getValue());
@@ -657,8 +618,8 @@ public final class StatRegistry
 			: rowLabel(a.getKey()).compareToIgnoreCase(rowLabel(b.getKey()));
 	}
 
-	/** Convenience: all section names a facet renders, in display order.
-	 *  Skilling's crafts order dynamically by total; the rest are fixed. */
+	// section order for the families that have a fixed one. Skilling isn't here:
+	// the panel ranks its crafts by total at render.
 	public static List<String> fixedSections(String family)
 	{
 		switch (family)
@@ -670,16 +631,5 @@ public final class StatRegistry
 			default:
 				return new ArrayList<>(java.util.Collections.singletonList(""));
 		}
-	}
-
-	/** Skill sections in canonical order (panel ranks by total at render). */
-	public static List<String> skillNames()
-	{
-		List<String> out = new ArrayList<>(SKILLS.size());
-		for (SkillSpec s : SKILLS)
-		{
-			out.add(s.name);
-		}
-		return out;
 	}
 }

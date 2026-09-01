@@ -18,10 +18,9 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Pins the LOCAL slayer journey semantics: on-task loot opens/extends the
- * newest segment, a completion closes it and trues the kill count up with
- * {@code noLootKills}, the streak line floors the lifetime total, and the
- * one-shot cloud inheritance only adopts while the local spine is empty.
+ * Slayer journey rules: on-task loot opens or extends the newest segment, a
+ * completion closes it and trues the kills up from the finished line, and the
+ * streak line floors the lifetime total.
  */
 public class LocalSlayerJourneyTest
 {
@@ -100,7 +99,6 @@ public class LocalSlayerJourneyTest
 		assertEquals(150, t.kills);          // trued up to the finished line
 		assertEquals(148, t.noLootKills);    // 150 exact − 2 witnessed
 		assertEquals(214, j.completedTasks); // streak line is authoritative
-		// The next on-task kill opens a NEW segment (the old one is closed).
 		onTaskKill("Nechryael", 130, 1, 1);
 		j = store.slayerJourney();
 		assertEquals(2, j.tasks.size());
@@ -129,10 +127,10 @@ public class LocalSlayerJourneyTest
 		assertEquals(1, j.tasks.size());
 		assertEquals(200, j.completedTasks);
 		assertEquals(8_000_000L, j.totalXpEst);
-		// Re-adoption (or a second server) must not double the spine.
+		// a second pass must not double the spine
 		store.adoptSlayerJourney(inherited, "Tester");
 		assertEquals(1, store.slayerJourney().tasks.size());
-		// Totals still floor upward.
+		// totals still floor upward
 		store.adoptSlayerJourney(new ChronicleApiClient.SlayerJourney(
 			205, 0, 0, 8_500_000L, new java.util.ArrayList<>()), "Tester");
 		assertEquals(205, store.slayerJourney().completedTasks);

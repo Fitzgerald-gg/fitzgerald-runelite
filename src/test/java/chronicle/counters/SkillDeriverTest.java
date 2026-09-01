@@ -19,17 +19,14 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Pins the LOCAL resolver against the same answers the server's
- * {@code _skill_derive_action} gives — the two derive from identical tuples
- * and must agree, or the floor-merge would see phantom drift.
+ * Pins the tuple to the counter keys it derives.
+ * Tuple fields are skill|xp|objId|itemId|qty|target|consumedId.
  */
 public class SkillDeriverTest
 {
 	private final Map<Integer, String> names = new HashMap<>();
-	// The GE as it stands at the moment of each derive; a test moves it to prove
-	// the value is banked at the gather rather than looked up afterwards.
+	// GE price the mocked ItemManager reports; a test moves it mid-run
 	private final Map<Integer, Integer> prices = new HashMap<>();
-	// Stands in for the journal's gathered-item ledger.
 	private final Set<Integer> gathered = new HashSet<>();
 	private final SkillDeriver d;
 
@@ -183,11 +180,10 @@ public class SkillDeriverTest
 		Map<String, Integer> pulled = derive("SAILING|10||32847|1||");
 		assertEquals((Integer) 1, pulled.get("salvagePulled"));
 		assertEquals((Integer) 1, pulled.get("smallSalvagePulled"));
-		// Opulent salvage is 200 xp flat, 205 under a keg of horizons lure. The
-		// number moves, the item does not.
+		// opulent salvage is 200 xp flat, 205 under a keg of horizons lure
 		names.put(32861, "Opulent salvage");
 		assertEquals((Integer) 1, derive("SAILING|205||32861|1||").get("opulentSalvagePulled"));
-		// Sorting: loot comes in, the salvage goes out, and the salvage names the row.
+		// sorting consumes the salvage, so the consumed id names the row
 		names.put(1625, "Uncut opal");
 		Map<String, Integer> sorted = derive("SAILING|95||1625|1||32861");
 		assertEquals((Integer) 1, sorted.get("salvageSorted"));
@@ -203,18 +199,16 @@ public class SkillDeriverTest
 		assertEquals((Integer) 1, marlin.get("temporTantrumTrialsCompleted"));
 		assertEquals((Integer) 1, derive("SAILING|6200|||||").get("jubblyJiveTrialsCompleted"));
 		assertEquals((Integer) 1, derive("SAILING|16050|||||").get("gwenithGlideTrialsCompleted"));
-		// 150 is a lost teak crate and a medium lost casket as often as it is a
-		// Tempor Tantrum, so it is off the ladder.
+		// 150 is a lost teak crate or a medium casket as often as a Tempor
+		// Tantrum, so it's off the ladder
 		assertNull(derive("SAILING|150|||||"));
-		// A courier delivery pays 385 too. The bag every port task hands over is
-		// what tells the two apart.
+		// courier deliveries pay 385 too; only the coin bag separates them
 		names.put(32950, "Medium port coin bag");
 		Map<String, Integer> port = derive("SAILING|385||32950|1||");
 		assertEquals((Integer) 1, port.get("portTasksCompleted"));
 		assertNull(port.get("barracudaTrialsCompleted"));
 		assertEquals((Integer) 1, derive("SAILING|385|||||").get("temporTantrumTrialsCompleted"));
-		// Trawling, sail trimming and cannon fire all drop bare xp that is nobody's
-		// completion.
+		// trawling, sail trimming and cannon fire drop bare xp with no completion behind it
 		assertNull(derive("SAILING|9|||||"));
 	}
 
@@ -250,11 +244,6 @@ public class SkillDeriverTest
 		assertEquals((Integer) 1, derive("FIREMAKING|303|||||").get("magicLogsBurned"));
 	}
 
-	// ── The resource pair ─────────────────────────────────────────────────
-	// These have no server answer to agree with. The server could only ever
-	// multiply a lifetime count by today's market; the value below is minted
-	// here, at the price that stood when the resource came out of the world.
-
 	@Test
 	public void aGatheredResourceIsValuedAtTheMomentItIsGathered()
 	{
@@ -265,10 +254,7 @@ public class SkillDeriverTest
 		assertEquals((Integer) 1, got.get("yewLogsChopped"));
 		assertEquals((Integer) 240, got.get("resourcesGatheredValue"));
 
-		// The market moves; the next log is worth what the market now says, and
-		// the 240 already banked is not revisited. That is the whole reason this
-		// is priced at the gather instead of multiplied out at read time — a
-		// crash would otherwise erase work that was worth something when it was done.
+		// the price moves and the banked 240 isn't revisited
 		prices.put(1515, 5);
 		assertEquals((Integer) 5,
 			derive("WOODCUTTING|175||1515|1||").get("resourcesGatheredValue"));
@@ -279,8 +265,7 @@ public class SkillDeriverTest
 	{
 		names.put(3150, "Karambwanji");
 		prices.put(3150, 30);
-		// Some spots hand over several at once; the value follows the quantity the
-		// typed counter already trusts, not the number of clicks.
+		// one action can land 4, and the value follows qty
 		Map<String, Integer> got = derive("FISHING|5||3150|4||");
 		assertEquals((Integer) 4, got.get("karambwanjiCaught"));
 		assertEquals((Integer) 120, got.get("resourcesGatheredValue"));
@@ -293,8 +278,7 @@ public class SkillDeriverTest
 		Map<String, Integer> got = derive("MINING|5||434|1||");
 		assertEquals((Integer) 1, got.get("rocksMined"));
 		assertNull(got.get("resourcesGatheredValue"));
-		// The ledger records provenance, not worth: an item the GE cannot price is
-		// still one this account pulled out of the ground.
+		// an item the GE can't price still goes in the ledger
 		assertTrue(gathered.contains(434));
 	}
 
@@ -306,9 +290,8 @@ public class SkillDeriverTest
 		Map<String, Integer> got = derive("COOKING|210||385|1||");
 		assertEquals((Integer) 1, got.get("foodCooked"));
 		assertEquals((Integer) 1, got.get("sharkCooked"));
-		// The fish was valued when it was caught. Valuing it again on the range
-		// would count one catch twice, and would make a cooked shark binned after
-		// a burn read as a resource dropped where it fell.
+		// the shark was valued when it was caught; valuing it on the range too
+		// would count the one catch twice
 		assertNull(got.get("resourcesGatheredValue"));
 		assertFalse(gathered.contains(385));
 	}
@@ -316,10 +299,8 @@ public class SkillDeriverTest
 	@Test
 	public void aGatherTheResolverCannotNameIsNotValued()
 	{
-		// The xp ladder still names the tree, but the ARRIVAL is unnamed: nothing
-		// says this nest is the resource rather than something else that happened
-		// to land in the pack on the same tick, so it is neither valued nor
-		// remembered as gathered.
+		// the xp names the tree, but a nest resolves to no woodcutting token, so
+		// nothing is valued or noted as gathered
 		names.put(11941, "Bird nest");
 		prices.put(11941, 4000);
 		Map<String, Integer> got = derive("WOODCUTTING|175||11941|1||");

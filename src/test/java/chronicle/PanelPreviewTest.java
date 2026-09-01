@@ -30,19 +30,10 @@ import org.junit.Test;
 import org.mockito.Mockito;
 
 /**
- * The panel's own eyes: renders every ChroniclePanel surface — each tab, both
- * scopes, drilled and empty states — to PNGs under {@code build/panel-preview/}
- * without a client, a login, or a screenshot round-trip.
- *
- * <p>The stub plugin feeds the panel fixture data shaped like a real account
- * (long source names, wrapped notes, sparse and dense lists — the states that
- * have historically clipped). When a real journal exists on this machine
- * ({@code ~/.runelite/chronicle/}) a second set renders from it through the
- * real {@link LocalStore} parsing, so the previews match the game exactly.
- *
- * <p>Doubles as a regression test: every surface must BUILD headless without
- * throwing — the class of startup NPE that once kept the whole plugin from
- * loading fails here first.
+ * Renders every ChroniclePanel surface to a PNG under {@code build/panel-preview/}
+ * with no client and no login: a fixture set first, then a second set read from the
+ * real journal in {@code ~/.runelite/chronicle/} when there is one. Also a
+ * regression test, since a surface that throws while building fails here.
  */
 public class PanelPreviewTest
 {
@@ -53,16 +44,14 @@ public class PanelPreviewTest
 	public void renderAllSurfaces() throws Exception
 	{
 		System.setProperty("java.awt.headless", "true");
-		// The client's own look-and-feel — scrollbars, viewport backgrounds and
-		// text metrics all match the real sidebar, so a preview IS the panel.
+		// the client's own LAF, so scrollbars and text metrics match the sidebar
 		edt(() -> javax.swing.UIManager.setLookAndFeel(
 			new net.runelite.client.ui.laf.RuneLiteLAF()));
 		File out = new File("build/panel-preview");
 		//noinspection ResultOfMethodCallIgnored
 		out.mkdirs();
-		// A PNG left over from an earlier run is indistinguishable from one this
-		// run produced, so a surface that stopped rendering would keep showing
-		// its last good picture. Every preview here is written from scratch.
+		// wipe the last run's PNGs, or a surface that stopped rendering keeps
+		// showing its old picture
 		File[] stale = out.listFiles((d, n) -> n.endsWith(".png"));
 		if (stale != null)
 		{
@@ -82,7 +71,7 @@ public class PanelPreviewTest
 		}
 	}
 
-	/** Run on the EDT — the panel asserts it, same as in the client. */
+	// all panel work goes through the EDT, same as in the client
 	private static void edt(ThrowingRunnable r) throws Exception
 	{
 		final Exception[] err = {null};
@@ -116,12 +105,12 @@ public class PanelPreviewTest
 
 		shoot(panel, out, prefix + "-home", "HOME");
 		shoot(panel, out, prefix + "-drops", "DROPS");
-		// slayer's journey lands via invokeLater after the first paint — the
-		// second shot renders the settled view over the same file
+		// the journey lands via invokeLater after the first paint, so shoot twice
+		// and let the settled view overwrite the file
 		shoot(panel, out, prefix + "-slayer", "SLAYER");
 		shoot(panel, out, prefix + "-slayer", "SLAYER");
 
-		// the pivot navigation: a source under the glass, then an item
+		// drilled: a source, then an item inside one
 		List<LocalStore.SourceRow> src = stub.dropSources();
 		if (!src.isEmpty())
 		{
@@ -142,7 +131,7 @@ public class PanelPreviewTest
 			}
 		}
 
-		// The task under the glass, and the left-behind lens drilled both ways.
+		// a task drilled, then left-behind by source and by item
 		set(panel, "detailTask", 0);
 		shoot(panel, out, prefix + "-slayer-task", "SLAYER");
 		set(panel, "detailTask", -1);
@@ -160,7 +149,6 @@ public class PanelPreviewTest
 			shoot(panel, out, prefix + "-leftbehind-item", "DROPS");
 			set(panel, "leftBehindItem", null);
 		}
-		// The pets page, where the journal's own marginalia shows.
 		shoot(panel, out, prefix + "-manage", "MANAGE");
 		set(panel, "journalLens", "Slayer");
 		shoot(panel, out, prefix + "-journal-slayer", "JOURNAL");
@@ -191,8 +179,8 @@ public class PanelPreviewTest
 			String slug = fam.toLowerCase().replaceAll("[^a-z]+", "-");
 			shoot(panel, out, prefix + "-stats-" + slug, "STATS");
 		}
-		// one craft opened, to see rows + the ghost "Other" reconciliation —
-		// Prayer additionally opens its verb folds (the second drill level)
+		// one craft open for its rows and the leftover "Other"; Prayer goes a
+		// level deeper into its verb folds
 		set(panel, "statsFamily", "Skilling");
 		expandSection(panel, "Skilling:Cooking");
 		expandSection(panel, "Skilling:Prayer");
@@ -200,7 +188,7 @@ public class PanelPreviewTest
 		expandSection(panel, "Skilling:Prayer:BonesBuried");
 		shoot(panel, out, prefix + "-stats-skilling-open", "STATS");
 		collapseAll(panel);
-		// the roads: Teleports fold open with Destinations nested inside
+		// Teleports open with Destinations nested inside it
 		set(panel, "statsFamily", "Ledger & Roads");
 		expandSection(panel, "Ledger & Roads:Teleports");
 		expandSection(panel, "Ledger & Roads:Destinations");
@@ -216,14 +204,13 @@ public class PanelPreviewTest
 
 		shoot(panel, out, prefix + "-journal", "JOURNAL");
 
-		// search results view
 		setSearch(panel, "dragon");
 		shoot(panel, out, prefix + "-search", "HOME");
 		setSearch(panel, "");
 	}
 
 	// ------------------------------------------------------------------
-	// Fixture data — shaped to stress the layouts that have clipped
+	// Fixture data: long names and dense lists, the states that clip
 	// ------------------------------------------------------------------
 
 	private StubPlugin fixturePlugin()
@@ -246,10 +233,8 @@ public class PanelPreviewTest
 		s.lifetime.put("teleportsGrandExchange", 899L);
 		s.lifetime.put("coinsFromAlchemy", 12_400_310L);
 		s.lifetime.put("coinsSpentAtShops", 1_002_113L);
-		// The pair, on one row: gathered with dropped as its margin. The resource
-		// figure is a SLICE of the whole bin, so the fixture keeps it beneath —
-		// a preview showing the part exceeding the whole is a picture of a bug
-		// that would then read as correct.
+		// resourcesDropped is a slice of itemsDropped, so keep it under or the
+		// row shows a part bigger than its whole
 		s.lifetime.put("itemsDroppedValue", 1_488_120L);
 		s.lifetime.put("resourcesGatheredValue", 4_233_800L);
 		s.lifetime.put("resourcesDroppedValue", 1_142_600L);
@@ -286,8 +271,6 @@ public class PanelPreviewTest
 		s.sources.add(new LocalStore.SourceRow("Crazy archaeologist", 88, 88, 1_204_113L, 31.8, 12));
 		s.sources.add(new LocalStore.SourceRow("Thermonuclear smoke devil", 1_402, 1_390, 19_113_205L, 22.2, 28));
 		s.sources.add(new LocalStore.SourceRow("Brutal black dragon", 950, 921, 15_204_113L, null, 25));
-		s.sessionSources.add(new LocalStore.SourceRow("Abyssal demons", 121, 118, 1_112_400L, null, 0));
-		s.sessionSources.add(new LocalStore.SourceRow("Nechryael", 14, 13, 91_713L, null, 0));
 
 		List<LocalStore.BagItem> bag = new ArrayList<>();
 		bag.add(new LocalStore.BagItem(4151, "Abyssal whip", 3, 5_406_000L));
@@ -329,7 +312,7 @@ public class PanelPreviewTest
 		clog.add("slayer_kcs", skcs);
 		s.clog = clog;
 
-		// a cloud journey, so the Slayer tab renders its full dress
+		// cloud on so Manage draws its sync section; the journey fills Slayer
 		s.cloud = true;
 		List<ChronicleApiClient.SlayerTask> tasks = new ArrayList<>();
 		tasks.add(new ChronicleApiClient.SlayerTask("Abyssal demons", 121, 184, 4,
@@ -383,7 +366,7 @@ public class PanelPreviewTest
 		return e;
 	}
 
-	/** A second stub fed from the REAL journal on this machine, when present. */
+	// a second stub fed from the real journal on this machine, when there is one
 	private StubPlugin realJournalPlugin()
 	{
 		File dir = new File(System.getProperty("user.home"), ".runelite/chronicle");
@@ -409,7 +392,6 @@ public class PanelPreviewTest
 		s.feed = store.feedNewest(2000);
 		s.store = store;
 		s.history = new HistoryLog(new Gson()).read(dir, rsn);
-		// The real journey + dryness, through the real local engines.
 		s.journey = store.slayerJourney();
 		s.consumVals = store.consumableValues();
 		s.grinds = new GrindBook(new Gson()).grinds(store.clogSnapshot(), store.dropSources());
@@ -422,8 +404,8 @@ public class PanelPreviewTest
 				s.kcs.put(e.getKey(), e.getValue().getAsLong());
 			}
 		}
-		// Mirror the plugin exactly: a ledger source that IS a logged boss folds
-		// into the log's own spelling, or the list shows one thing twice.
+		// same fold as ChroniclePlugin.killCounts: a ledger source the clog already
+		// lists collapses into the log's spelling instead of listing twice
 		Map<String, String> byKind = new LinkedHashMap<>();
 		for (String n : s.kcs.keySet())
 		{
@@ -448,13 +430,8 @@ public class PanelPreviewTest
 		return s;
 	}
 
-	/**
-	 * The most recently written journal in the directory. A rename follows the
-	 * account to a new slug, so naming one file here would quietly stop the real
-	 * set from rendering the day the machine's account is renamed. The history
-	 * spine ({@code .history.jsonl}) and half-written {@code .tmp} files are not
-	 * journals and do not match.
-	 */
+	// newest journal in the folder; a rename files the record under a new slug, so
+	// we can't name one. .json only: the history spine is .jsonl, temp writes .tmp
 	private static File newestJournal(File dir)
 	{
 		File[] found = dir.listFiles((d, n) -> n.endsWith(".json"));
@@ -472,13 +449,8 @@ public class PanelPreviewTest
 		return newest;
 	}
 
-	/**
-	 * The account name this journal was written under. LocalStore reaches a file
-	 * by slugging the name it is given, so a name that slugs elsewhere loads an
-	 * empty skeleton instead of the record — the name is therefore only trusted
-	 * when it slugs back to this very file. A slug is its own slug, so the file's
-	 * own stem is the fallback that still resolves.
-	 */
+	// LocalStore reaches a file by slugging the name it's given, so the rsn inside
+	// is only usable when it slugs back to this file. the stem always does.
 	private static String journalRsn(File journal)
 	{
 		String name = journal.getName();
@@ -498,7 +470,7 @@ public class PanelPreviewTest
 		}
 		catch (Exception ignored)
 		{
-			// An unreadable record still renders under the stem it is filed by.
+			// unreadable record still renders under the stem it's filed by
 		}
 		return stem;
 	}
@@ -523,7 +495,7 @@ public class PanelPreviewTest
 	}
 
 	// ------------------------------------------------------------------
-	// The stub: every panel-facing read overridden with plain data
+	// The stub: every panel-facing read answered with plain data
 	// ------------------------------------------------------------------
 
 	static class StubPlugin extends ChroniclePlugin
@@ -536,7 +508,6 @@ public class PanelPreviewTest
 		long sessionLootValue;
 		long[] sessionUntaken = {0, 0};
 		List<LocalStore.SourceRow> sources = new ArrayList<>();
-		List<LocalStore.SourceRow> sessionSources = new ArrayList<>();
 		Map<String, List<LocalStore.BagItem>> bags = new LinkedHashMap<>();
 		List<LocalStore.UntakenRow> untaken = new ArrayList<>();
 		List<LocalStore.UntakenRow> untakenItems = new ArrayList<>();
@@ -747,8 +718,7 @@ public class PanelPreviewTest
 		@Override
 		PaceBook.Pace pace(String skill)
 		{
-			// The real engine over the stub's own spine — the render then proves
-			// the sentence, not a hand-made stand-in for it.
+			// run the real PaceBook over the stub's history rather than faking a pace
 			long xp = 0;
 			if (!history.isEmpty())
 			{
@@ -764,7 +734,7 @@ public class PanelPreviewTest
 		@Override
 		String journalWarning()
 		{
-			return null;   // the stub's journal is a fixture, never a file
+			return null;   // fixture data, so there's no file to warn about
 		}
 
 		@Override
@@ -813,13 +783,13 @@ public class PanelPreviewTest
 		@Override
 		net.runelite.client.game.SpriteManager sprites()
 		{
-			return null;   // headless: tabs keep their skill icons
+			return null;   // headless: no sprite cache
 		}
 
 		@Override
 		net.runelite.client.game.SkillIconManager skillIcons()
 		{
-			return null;   // headless: the grid falls back to a bare level
+			return null;   // headless: skillIcon() catches the NPE, grid shows a bare level
 		}
 
 		@Override

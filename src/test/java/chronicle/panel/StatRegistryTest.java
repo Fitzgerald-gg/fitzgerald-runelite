@@ -23,7 +23,7 @@ public class StatRegistryTest
 	{
 		assertEquals("— by jewellery", StatRegistry.label("teleportsViaJewellery"));
 		assertEquals("Teleports", StatRegistry.label("teleportsTotal"));
-		// destinations read as place names, punctuation restored
+		// destinations read as place names, punctuation and all
 		assertEquals("Varrock", StatRegistry.label("teleportsVarrock"));
 		assertEquals("Seers' Village", StatRegistry.label("teleportsSeersVillage"));
 		assertEquals("Kourend (Memoirs)", StatRegistry.label("teleportsKharedst"));
@@ -32,7 +32,6 @@ public class StatRegistryTest
 	@Test
 	public void facetsMatchTheSite()
 	{
-		// the site's four facets, its ownership sets ported verbatim
 		assertEquals("Combat", StatRegistry.family("damageDealt"));
 		assertEquals("Living", StatRegistry.family("hitpointsRegenerated"));
 		assertEquals("Living", StatRegistry.family("divinePotionDamage"));
@@ -47,7 +46,7 @@ public class StatRegistryTest
 		assertEquals("Skilling", StatRegistry.family("bonesBuried"));
 		assertEquals("Skilling", StatRegistry.family("wyrmBonesBuried"));
 		assertEquals("Skilling", StatRegistry.family("creaturesTrapped"));
-		// unclaimed keys land visibly among the odds & ends
+		// a key no rule claims still shows up, under odds & ends
 		assertEquals("Ledger & Roads", StatRegistry.family("clueScrollsCompleted"));
 		assertEquals("Odds & ends", StatRegistry.subgroup("clueScrollsCompleted"));
 	}
@@ -70,12 +69,12 @@ public class StatRegistryTest
 	@Test
 	public void floorsHeadSectionsNotRows()
 	{
-		// generic totals stay out of the rows and head their section
+		// a floor is the generic total; it heads its section instead of listing as a row
 		assertTrue(StatRegistry.isFloor("logsChopped"));
 		assertTrue(StatRegistry.isFloor("bonesBuried"));
 		assertTrue(StatRegistry.isFloor("teleportsTotal"));
 		assertFalse(StatRegistry.isFloor("willowLogsChopped"));
-		assertFalse(StatRegistry.isFloor("foodEaten"));   // a flat Living row too
+		assertFalse(StatRegistry.isFloor("foodEaten"));   // flat Living row
 		// typed rows reconcile against the floor; explicit extras do not
 		assertTrue(StatRegistry.typed("willowLogsChopped"));
 		assertTrue(StatRegistry.typed("sharkEaten"));
@@ -86,7 +85,7 @@ public class StatRegistryTest
 	@Test
 	public void typedRowsShedTheirVerb()
 	{
-		// the whole suffix sheds — the section header carries the craft
+		// the section header carries the craft, so the row keeps just the item
 		assertEquals("Willow", StatRegistry.rowLabel("willowLogsChopped"));
 		assertEquals("Wyrm", StatRegistry.rowLabel("wyrmBonesBuried"));
 		assertEquals("Shark", StatRegistry.rowLabel("sharkEaten"));
@@ -104,7 +103,6 @@ public class StatRegistryTest
 		assertEquals("Sailing", StatRegistry.skillOf("portTasksCompleted"));
 		assertEquals("Skilling", StatRegistry.family("smallSalvagePulled"));
 		assertEquals("Sailing", StatRegistry.subgroup("smallSalvagePulled"));
-		// the three totals head their groups, the typed rows sit under them
 		assertTrue(StatRegistry.isFloor("salvagePulled"));
 		assertTrue(StatRegistry.isFloor("barracudaTrialsCompleted"));
 		assertFalse(StatRegistry.isFloor("temporTantrumTrialsCompleted"));
@@ -119,7 +117,7 @@ public class StatRegistryTest
 	@Test
 	public void labelsPolish()
 	{
-		// item-plus-action keys stutter; polish collapses the doubled word
+		// keys like logsLogsChopped stutter; polish collapses the doubled word
 		assertEquals("Logs chopped", StatRegistry.prettify("logsLogsChopped"));
 		assertEquals("Guard (lvl 21) pickpockets",
 			StatRegistry.prettify("guard(level21)Pickpockets"));

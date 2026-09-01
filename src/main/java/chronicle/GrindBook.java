@@ -19,19 +19,15 @@ import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * The dryness ledger, computed entirely from the journal: the bundled wiki
- * rate book (per-kill 1/N denominators for collection-log uniques) against the
- * journal's own kill counts and stored collection log. The maths is the site's
- * pet/collection engine verbatim — percentile dry = (1 − (1 − 1/rate)^kc) × 100
- * — so the panel and a synced web page agree on every chase they both know.
- *
- * <p>Only unobtained items rarer than 1/{@link #MIN_DRY_RATE} count as a chase:
- * commons aren't a grind, and forward-only capture can't prove the player
- * doesn't already own them.
+ * Dryness ledger. Measures the bundled wiki rate book (per-kill 1/N denominators
+ * for collection-log uniques) against the journal's own kill counts and stored
+ * collection log. Dry percentile is (1 - (1 - 1/rate)^kc) * 100, same maths the
+ * site uses.
  */
 @Slf4j
 class GrindBook
 {
+	// rate denominator floor for a row to count as a chase; commoner drops aren't a grind.
 	private static final int MIN_DRY_RATE = 100;
 	private static final int MAX_ROWS = 20;
 
@@ -42,7 +38,7 @@ class GrindBook
 		this.gson = gson;
 	}
 
-	// boss display name → {item name → rate denominator}; loaded once, lazily.
+	// boss display name → {item name → rate denominator}, loaded on first use.
 	private volatile Map<String, Map<String, Integer>> drops;
 
 	private Map<String, Map<String, Integer>> book()
@@ -76,7 +72,7 @@ class GrindBook
 						}
 						catch (RuntimeException ignored)
 						{
-							// non-numeric rate — skip the row
+							// non-numeric rate, skip it
 						}
 					}
 					out.put(b.getKey(), items);
@@ -91,7 +87,7 @@ class GrindBook
 		return out;
 	}
 
-	/** "Abyssal Sire" / "abyssal_sire" → "abyssalsire" — bridges snapshot keys. */
+	// "Abyssal Sire" and "abyssal_sire" both normalise to "abyssalsire".
 	private static String norm(String s)
 	{
 		StringBuilder sb = new StringBuilder(s.length());
@@ -105,12 +101,8 @@ class GrindBook
 		return sb.toString();
 	}
 
-	/**
-	 * Compute the active grinds from the journal's stored collection log
-	 * ({@code kcs}, {@code clog_items}, {@code by_cat}) and its drop sources
-	 * (a second KC signal). Runs off the client thread; pure function of its
-	 * inputs.
-	 */
+	// Reads the stored clog (kcs, clog_items, by_cat) and the drop sources for a second
+	// kc signal. Called off the client thread, so keep it a pure function of its args.
 	List<ChronicleApiClient.GrindRow> grinds(JsonObject clog,
 		List<LocalStore.SourceRow> dropSources)
 	{
@@ -119,8 +111,7 @@ class GrindBook
 		{
 			return new ArrayList<>();
 		}
-		// KC per normalised boss key: the clog's own page KCs, floored up by the
-		// drop ledger's per-source kill counts.
+		// kc per normalised boss key: clog page kcs, raised by the drop ledger's own counts.
 		Map<String, Long> kcByNorm = new HashMap<>();
 		if (clog != null && clog.has("kcs") && clog.get("kcs").isJsonObject())
 		{
@@ -143,9 +134,7 @@ class GrindBook
 				}
 			}
 		}
-		// Obtained detection: the global clog-item set (full-log capture makes
-		// this comprehensive once the player opens their log) plus each boss's
-		// own captured page.
+		// an item counts as obtained from either the global clog set or the boss's own page.
 		Set<String> obtained = new HashSet<>();
 		if (clog != null && clog.has("clog_items") && clog.get("clog_items").isJsonObject())
 		{

@@ -2,20 +2,16 @@
  * Copyright (c) 2026, Chronicle
  * All rights reserved.
  *
- * Chat-free skilling detection for EVERY non-combat skill. On each positive XP
- * drop (StatChanged) we forward one raw tuple and let the server resolve it (cloud sync only):
+ * Chat-free skilling detection for every non-combat skill. Each positive XP drop
+ * (StatChanged) becomes one raw tuple that SkillDeriver turns into typed counters:
  *
  *     SKILL | xpDelta | objectId | gainedItemId | gainedQty | targetName | consumedItemId
  *
- * The server picks the best identity signal per skill (audit 2026-07-19):
- *   - gathering (WC/Mine/Fish/Cook): gained ITEM  (oak logs -> oakLogsChopped)
- *   - production (Smith/Fletch/Craft/Herb/Hunter/RC): gained ITEM x qty
- *   - thieving/agility: the interaction TARGET NAME (Master Farmer, Gnome course)
- *   - firemaking/prayer: the CONSUMED item (log burned, bone buried)
- * XP is the success-gate + tiebreak; CHAT (below) is kept ONLY for 0-XP events
- * (failed pickpockets, burnt food, planting) which no XP drop can see. Signals are
- * robust to XP boosts (Lumberjack/Kandarin/Raiments) because the item/target name
- * doesn't move with the multiplier.
+ * Which field names the action varies by skill: gathering and production go by the
+ * gained item, thieving and agility by the interaction target, firemaking and prayer
+ * by the item consumed. XP gates success and breaks ties, and none of those signals
+ * shift with an XP boost (Lumberjack, Kandarin, Raiments). Chat is read only for the
+ * 0-XP outcomes no XP drop can see: failed pickpockets, burnt food, planting.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the conditions of the BSD 2-Clause
@@ -23,13 +19,11 @@
  */
 package chronicle.counters;
 
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
 import net.runelite.api.events.*;
 import net.runelite.client.util.Text;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -39,19 +33,13 @@ import java.util.Set;
 
 import static chronicle.counters.StatKeys.*;
 
-@Slf4j
 public class SkillingStatTracker implements StatTracker
 {
 	private final StatStore statStore;
 	private final Client client;
-	// Local-first: the same tuple derives typed counters HERE, instantly —
-	// the buffered copy still travels for cloud users (floor-merge reconciles).
 	private final SkillDeriver deriver;
 
-	// Every non-combat skill rides the XP tuple. Combat (Att/Str/Def/Range/Magic/HP)
-	// + Slayer are handled by the kill/loot subsystem, not here.
-	// Sailing rides it too: salvage names itself by the item the hook brings up or
-	// the station eats, and a Barracuda Trial pays a bare lump.
+	// Combat skills and Slayer are counted from kills and loot, so they stay out.
 	private static final Set<Skill> DERIVABLE = EnumSet.of(
 		Skill.WOODCUTTING, Skill.MINING, Skill.FISHING, Skill.COOKING,
 		Skill.SMITHING, Skill.FLETCHING, Skill.CRAFTING, Skill.HERBLORE,
@@ -59,7 +47,6 @@ public class SkillingStatTracker implements StatTracker
 		Skill.AGILITY, Skill.PRAYER, Skill.FARMING, Skill.CONSTRUCTION,
 		Skill.SAILING);
 
-	// --- chat-free XP/object/item/target detection state ---
 	private static final int TTL_TICKS = 6;   // forget a clicked target after ~3.6s
 	private final EnumMap<Skill, Integer> xpCache = new EnumMap<>(Skill.class);
 	private final EnumMap<Skill, List<Integer>> tickDrops = new EnumMap<>(Skill.class);
@@ -69,36 +56,28 @@ public class SkillingStatTracker implements StatTracker
 	private int targetTtl = 0;
 	private int tickGainedItem = -1;
 	private int tickGainedQty = 0;
-	// Consumed identity (Firemaking log / Prayer bone) is detected on the
-	// inventory-change tick, but the XP drop can land a tick or two LATER, so it
-	// persists on a short TTL (unlike the gained item, which is same-tick).
+	// the firemaking/prayer xp drop can land a tick or two after the item leaves the
+	// pack, so this one carries a TTL while the gained item stays same-tick.
 	private int lastConsumedItem = -1;
 	private int consumedTtl = 0;
 	private Map<Integer, Integer> invSnapshot = null;
 
-	// --- content-proof weeds counter (Farming raking is 0 XP → no tuple) ---
-	// Weeds are tradeable, bankable and droppable, so their arrival in the pack only
-	// means a patch was raked while a rake is actually under way. Ungated, a bank
-	// withdrawal, a trade or a ground pickup mints patches that were never raked —
-	// and the server's floor-merge makes that inflation permanent, so an honest push
-	// can never walk it back. The window opens on a "Rake" click and is generous
-	// enough to cover the walk to the patch and the swings that clear it.
-	private static final int RAKE_TTL_TICKS = 30;
-	// A patch holds at most three weeds, so a bigger jump is a stack arriving from
-	// somewhere else and is clamped rather than trusted.
+	// Raking is 0 xp, so weeds landing in the pack are the only evidence a patch was
+	// raked. They're also tradeable and bankable, so the count is gated on a recent
+	// "Rake" click: totals only ever climb, and a bank withdrawal would inflate one
+	// for good.
+	private static final int RAKE_TTL_TICKS = 30;   // covers the walk to the patch
+	// a patch holds three weeds; a bigger jump is a stack arriving from elsewhere
 	private static final int RAKE_MAX_PER_EVENT = 3;
 	private int rakeTtl = 0;
 
-	// Residual chat — ONLY things NO XP drop can see: 0-XP outcomes. Gather/produce
-	// verbs are DELIBERATELY absent (the XP tuples count those; forwarding chat too
-	// would double-count). "'s pocket" catches pickpocket success+fail incl. named
-	// NPCs ("You pick Martin's pocket", no "the"); the server keeps only the failure
-	// (success now rides the target-name tuple).
+	// 0-xp outcomes only. Gather and produce lines stay out because the xp tuples
+	// already count those, and chat on top would double them.
 	private static final String[] SKILL_PREFIXES = {
-		"You accidentally burn",   // Cooking burns (0 XP)
-		"You fail to pick",        // Thieving pickpocket FAILURE (success rides the target-name tuple)
-		"You plant ",              // Farming seeds-planted milestone
-		"Rooftop lap", "lap count" // Agility laps (not 1:1 with obstacle XP)
+		"You accidentally burn",   // cooking burns
+		"You fail to pick",        // pickpocket failure; success rides the target-name tuple
+		"You plant ",              // farming seeds planted
+		"Rooftop lap", "lap count" // agility laps, which aren't 1:1 with obstacle xp
 	};
 
 	public SkillingStatTracker(StatStore statStore, Client client, SkillDeriver deriver)
@@ -120,7 +99,7 @@ public class SkillingStatTracker implements StatTracker
 		Integer prev = xpCache.put(skill, xp);
 		if (prev == null)
 		{
-			return;   // login-init: the first drop carries the career total — cache only
+			return;   // first drop after login carries the career total, so just cache it
 		}
 		int delta = xp - prev;
 		if (delta > 0)
@@ -149,10 +128,9 @@ public class SkillingStatTracker implements StatTracker
 			return;
 		}
 		String o = opt.toLowerCase();
-		// Skip obviously non-skilling interactions so a "Talk-to"/"Attack"/"Examine"
-		// right before a skilling XP drop can't mis-tag it. Everything else is
-		// captured broadly; the target is only ever USED when an XP drop pairs with
-		// it, so over-capture is harmless and new content needs no new verb here.
+		// Skip the obvious non-skilling verbs so one landing just before an xp drop
+		// can't mis-tag it. Anything else is captured, since a target is only read
+		// when an xp drop pairs with it.
 		if (o.equals("examine") || o.equals("walk here") || o.equals("cancel")
 			|| o.startsWith("talk") || o.equals("attack") || o.startsWith("trade")
 			|| o.startsWith("follow") || o.startsWith("pay") || o.startsWith("collect"))
@@ -163,7 +141,7 @@ public class SkillingStatTracker implements StatTracker
 		targetTtl = TTL_TICKS;
 		if (object && (o.contains("chop") || o.contains("mine")))
 		{
-			lastObjectId = event.getId();   // live object id (not the stump) — legacy WC/Mining signal
+			lastObjectId = event.getId();   // the live tree/rock, caught before it becomes a stump
 			objectTtl = TTL_TICKS;
 		}
 		if (object && o.equals("rake"))
@@ -198,28 +176,22 @@ public class SkillingStatTracker implements StatTracker
 					tickGainedQty = d;      // +10 darts, +N runes, +1 bar/bow/gem/log/fish
 					if (e.getKey() == ItemID.WEEDS && rakeTtl > 0)
 					{
-						// Raking awards no experience, so no tuple is ever forwarded for
-						// it and the server cannot derive it. Weeds arriving in the pack
-						// mid-rake are the only evidence a patch was raked — and this loop
-						// has already computed that delta, so it costs nothing to read here.
 						statStore.incrementStatBy(PATCHES_RAKED, Math.min(d, RAKE_MAX_PER_EVENT));
-						// One click rakes a patch clear over several swings, so the weed
-						// that just landed keeps the window open for the ones behind it.
+						// one click clears a patch over several swings, so the weed that
+						// just landed keeps the window open for the ones behind it
 						rakeTtl = RAKE_TTL_TICKS;
 					}
 				}
 			}
-			// Consumed identity (Firemaking log, Prayer bone): the item that LEFT
-			// the pack this tick. Ignore stacks that merely dropped below their old
-			// size but are still present in bulk (coins/ammo) by taking the biggest
-			// single decrease of a now-absent-or-reduced consumable.
+			// The item that left the pack this tick: the burnt log, the buried bone.
+			// If several shrank, the last one seen wins.
 			for (Map.Entry<Integer, Integer> e : invSnapshot.entrySet())
 			{
 				int d = e.getValue() - now.getOrDefault(e.getKey(), 0);
 				if (d > 0)
 				{
 					lastConsumedItem = e.getKey();
-					consumedTtl = TTL_TICKS;   // persist: the FM/Prayer XP drop lands a beat later
+					consumedTtl = TTL_TICKS;
 				}
 			}
 		}
@@ -229,8 +201,8 @@ public class SkillingStatTracker implements StatTracker
 	@Override
 	public void onGameTick(GameTick event)
 	{
-		// One tuple per XP drop this tick. All correlated signals are known now
-		// (tick end) regardless of intra-tick event order.
+		// One tuple per xp drop. By tick end every correlated signal has landed,
+		// whatever order the events arrived in.
 		if (!tickDrops.isEmpty())
 		{
 			String gainStr = tickGainedItem > 0 ? Integer.toString(tickGainedItem) : "";
@@ -245,7 +217,7 @@ public class SkillingStatTracker implements StatTracker
 				String objStr = useObj ? Integer.toString(lastObjectId) : "";
 				for (int delta : e.getValue())
 				{
-					// 7-field tuple; targetName may contain spaces but never '|'.
+					// 7 fields; targetName may contain spaces but never '|'.
 					String tuple = skill.name() + "|" + delta + "|" + objStr
 						+ "|" + gainStr + "|" + qtyStr + "|" + target + "|" + consStr;
 					deriver.apply(tuple);
@@ -271,7 +243,6 @@ public class SkillingStatTracker implements StatTracker
 		{
 			rakeTtl--;
 		}
-
 	}
 
 	@Override
@@ -299,28 +270,19 @@ public class SkillingStatTracker implements StatTracker
 	}
 
 	@Override
-	public void onWidgetLoaded(WidgetLoaded event) {}
-
-	@Override
-	public void onWidgetClosed(WidgetClosed event) {}
-
-	@Override
 	public void onGameStateChanged(GameStateChanged event)
 	{
 		GameState state = event.getGameState();
-		// The XP baseline (xpCache) + inventory snapshot are per-CHARACTER, so they
-		// survive a region load (LOADING — fires constantly while moving) and a world
-		// hop (HOPPING — same account). Only a real logout can be followed by a
-		// DIFFERENT account, so LOGIN_SCREEN is the ONLY state that invalidates them.
-		// (Resetting on every non-LOGGED_IN state used to drop one gather action per
-		// region-cross — live-caught: 7 rosewood + 3 maple recorded as 6 + 2.)
+		// xpCache and the inventory snapshot are per-character, so they have to survive
+		// LOADING (fires constantly while moving) and world hops. Resetting them on
+		// every non-LOGGED_IN state lost one gather action per region cross.
 		if (state == GameState.LOGIN_SCREEN)
 		{
 			xpCache.clear();
 			invSnapshot = null;
 		}
-		// Clicked-target + per-tick scratch are region/tick-local: safe to drop on any
-		// transition out of LOGGED_IN so a stale tree/NPC can't mis-tag the next action.
+		// clicked target and per-tick scratch are tick-local, so drop them and a stale
+		// tree or NPC can't mis-tag the next action
 		if (state != GameState.LOGGED_IN)
 		{
 			tickDrops.clear();
@@ -335,10 +297,4 @@ public class SkillingStatTracker implements StatTracker
 			rakeTtl = 0;
 		}
 	}
-
-	@Override
-	public void onHitsplatApplied(HitsplatApplied event) {}
-
-	@Override
-	public void onAnimationChanged(AnimationChanged event) {}
 }

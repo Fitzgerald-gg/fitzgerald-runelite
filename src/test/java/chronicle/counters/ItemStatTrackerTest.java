@@ -25,14 +25,8 @@ import static chronicle.counters.StatKeys.RESOURCES_DROPPED_VALUE;
 import static org.junit.Assert.assertEquals;
 
 /**
- * Pins the drop side of the resource pair.
- *
- * <p>{@code itemsDroppedValue} is the whole bin: every stack ever binned, the
- * junk cleared after a bank trip included. Read beside what the gathering skills
- * produced it would flatter the dropped side badly — one afternoon emptying a
- * bank of old rewards would read as ore abandoned on the ground. The
- * resource-scoped figure exists so the pair compares like with like, and what
- * separates them is the ledger of ids this account has actually gathered.
+ * The drop side of ItemStatTracker: itemsDroppedValue counts every bin, while
+ * resourcesDroppedValue only takes ids the gathered ledger knows.
  */
 public class ItemStatTrackerTest
 {
@@ -76,8 +70,8 @@ public class ItemStatTrackerTest
 		});
 	}
 
-	/** Bin {@code qty} of an item the way the client announces it: an item-op
-	 *  "Drop" click carrying the id, with the quantity read from the pack slot. */
+	// fake a "Drop" item-op click. the tracker takes the id off the entry and the
+	// stack size out of the pack slot named by param0.
 	private void drop(int itemId, int qty)
 	{
 		Mockito.when(pack.getItem(SLOT)).thenReturn(new Item(itemId, qty));
@@ -111,9 +105,7 @@ public class ItemStatTrackerTest
 	@Test
 	public void droppingSomethingNeverGatheredCountsOnlyToTheWholeBin()
 	{
-		// A scimitar came from a kill or a shop, not out of the world by hand.
-		// Left in the resource figure it would answer a question about time spent
-		// gathering with a fact about time spent killing.
+		// a scimitar is kill or shop loot, so the ledger has no gather for it.
 		drop(RUNE_SCIMITAR, 1);
 		assertEquals(15_000, dropped());
 		assertEquals(0, resourcesDropped());
@@ -122,9 +114,6 @@ public class ItemStatTrackerTest
 	@Test
 	public void theSameItemGatheredLaterDoesNotBackdateEarlierDrops()
 	{
-		// Bought logs binned before this account ever cut one: the ledger cannot
-		// say they were gathered, and a later gather must not reach backwards and
-		// re-file them.
 		drop(YEW_LOGS, 10);
 		assertEquals(0, resourcesDropped());
 
@@ -137,8 +126,7 @@ public class ItemStatTrackerTest
 	@Test
 	public void aTrackerWithNoLedgerStillCountsTheWholeBin()
 	{
-		// The journal is not mounted until an account logs in; the plain drop
-		// figure must not depend on it.
+		// with no ledger the plain dropped figure still has to count.
 		Client client = Mockito.mock(Client.class);
 		Mockito.when(client.getItemContainer(InventoryID.INVENTORY)).thenReturn(pack);
 		net.runelite.client.game.ItemManager items =

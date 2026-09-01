@@ -21,25 +21,18 @@ import net.runelite.api.events.ItemContainerChanged;
 import static chronicle.counters.StatKeys.AMMO_CONSUMED;
 
 /**
- * Counts ranged ammunition that leaves the quiver — arrows, bolts and javelins in
- * the worn-ammo slot.
+ * Counts ranged ammo spent out of the worn-ammo slot: arrows, bolts, javelins.
  *
- * <p>A shot drops the ammo-slot quantity by one (or a few, at fast speeds). That is
- * the whole signal, but two other things also shrink the slot and must not count:
- * unequipping ammo (it moves to the pack) and depositing it at a bank (it moves to
- * the bank). So a decrease is only booked once the tick is complete: whatever moved
- * into the pack that tick is subtracted (that's an unequip), and an implausibly
- * large drop is ignored (that's a deposit or a death, not a volley). Ava's-recovered
- * shots never shrink the slot, so this is "ammo consumed" — permanently spent — not
- * "shots fired", which is the more useful figure anyway.
+ * <p>A shot shrinks the slot by one, or a few at fast attack speeds. Unequipping and
+ * banking shrink it too, so a drop is only booked at the end of the tick, minus
+ * whatever landed in the pack, and only if it is small enough to be a volley. Ava's
+ * recoveries never reach the slot, so the tally is ammo gone for good.
  *
- * <p>The blowpipe stores its darts in a var, not the ammo slot, so its shots are not
- * seen here; that's a known gap rather than a miscount.
+ * <p>Blowpipe darts live in a var rather than the ammo slot, so they never show up here.
  */
 public class RangedStatTracker implements StatTracker
 {
-	/** A single tick can't legitimately spend more than a handful of ammo; anything
-	 *  larger is a stack leaving for the bank or on death, not firing. */
+	// a one-tick drop bigger than this is a bank deposit or a death, not shooting
 	private static final int MAX_PER_TICK = 20;
 
 	private final StatStore store;
@@ -47,9 +40,9 @@ public class RangedStatTracker implements StatTracker
 
 	private int wornAmmoId = -1;
 	private int wornAmmoQty;
-	/** Ammo-slot shrinkage seen so far this tick, awaiting the end-of-tick verdict. */
+	// slot shrinkage so far this tick, settled at the tick boundary
 	private int pendingConsume;
-	/** Pack count of the worn ammo id at the last tick boundary, for the unequip check. */
+	// baseline for the unequip check
 	private int packAmmoAtTickStart;
 
 	public RangedStatTracker(StatStore store, Client client)
@@ -73,7 +66,7 @@ public class RangedStatTracker implements StatTracker
 		{
 			pendingConsume += wornAmmoQty - qty;   // slot shrank: a shot, an unequip, or a deposit
 		}
-		// An id change or a rise is an equip/swap — nothing spent; it just rebaselines.
+		// an id change or a rise is an equip or swap, so just rebaseline
 		wornAmmoId = id;
 		wornAmmoQty = qty;
 	}
@@ -84,7 +77,7 @@ public class RangedStatTracker implements StatTracker
 		int packAmmoNow = wornAmmoId != -1 ? packCount(wornAmmoId) : 0;
 		if (pendingConsume > 0)
 		{
-			// Ammo that arrived in the pack this tick came from an unequip, not a shot.
+			// ammo that landed in the pack this tick was unequipped, so it wasn't fired
 			int movedToPack = Math.max(0, packAmmoNow - packAmmoAtTickStart);
 			int consumed = pendingConsume - movedToPack;
 			if (consumed > 0 && consumed <= MAX_PER_TICK)
@@ -101,7 +94,7 @@ public class RangedStatTracker implements StatTracker
 	{
 		if (event.getGameState() != GameState.LOGGED_IN)
 		{
-			// The quiver can change unseen while away; rebaseline instead of counting.
+			// the quiver can change while logged out, so rebaseline instead of counting
 			wornAmmoId = -1;
 			wornAmmoQty = 0;
 			pendingConsume = 0;

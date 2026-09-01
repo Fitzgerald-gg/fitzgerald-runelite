@@ -9,25 +9,18 @@
 package chronicle.counters;
 
 /**
- * Wire names for the counters this client owns.
+ * Journal key names for the counters the trackers write.
  *
- * <p>Only counters the CLIENT computes live here. The great majority of what the
- * profile displays — every per-resource gathering, production and thieving total —
- * is derived server-side from the skill tuples this plugin forwards, and so has no
- * constant in this file: the server mints {@code willowLogsChopped} or
- * {@code lobsterEaten} structurally the first time it sees one, which is what lets a
- * new resource be tracked the day it launches with no plugin update. Adding a name
- * here is therefore the exception, reserved for things no experience drop can express.
+ * <p>Per-resource skilling keys ({@code willowLogsChopped}, {@code lobsterEaten}) are
+ * minted from the action itself by {@link SkillDeriver} and the food tracker, so they
+ * have no constant here. A name lands in this file when no experience drop or item
+ * name can express it.
  *
- * <p>Naming follows two rules. Counters that belong to a family share a <i>prefix</i>
- * rather than a suffix ({@code teleportsVarrock}, not {@code varrockTeleport}) so the
- * family stays contiguous when keys are sorted — which is how they arrive in the API
- * response and how the profile lists them. Everything else is a plain past-tense noun
- * phrase counting the thing that happened.
+ * <p>Families share a prefix: {@code teleportsVarrock}, {@code teleportsCamelot}. The
+ * panel groups them with {@code startsWith}, so a family member named the other way
+ * round sits outside its group.
  *
- * <p>These strings are a durable contract: they are the column names of a player's
- * lifetime history, so renaming one orphans that history unless the stored rows are
- * migrated with it.
+ * <p>Renaming a key orphans everything the journal already stored under the old name.
  */
 public final class StatKeys
 {
@@ -36,29 +29,26 @@ public final class StatKeys
 	}
 
 	// ── Movement ──────────────────────────────────────────────────────────
-	// Measured in tiles. Walking and running are counted apart because the
-	// interesting number is the ratio between them, not the sum.
+	// Counted in tiles, with walking and running kept apart.
 
 	public static final String DISTANCE_WALKED = "distanceWalked";
 	public static final String DISTANCE_RAN = "distanceRan";
 
 	// ── Teleports ─────────────────────────────────────────────────────────
-	// Prefix-grouped so every destination sorts together. TOTAL is incremented
-	// alongside each specific one, so it also covers destinations with no key
-	// of their own.
+	// TOTAL bumps on every teleport, including ones whose destination has no
+	// key of its own.
 
 	public static final String TELEPORTS_TOTAL = "teleportsTotal";
 
-	// HOW you travelled, apart from where: the method family, credited alongside
-	// the destination (a jewellery teleport to Castle Wars ticks both).
+	// The means of travel, ticked alongside the destination: a jewellery hop to
+	// Castle Wars bumps both.
 	public static final String TELEPORTS_VIA_JEWELLERY = "teleportsViaJewellery";
 	public static final String TELEPORTS_VIA_TABLET = "teleportsViaTablet";
 	public static final String TELEPORTS_VIA_SCROLL = "teleportsViaScroll";
 	public static final String TELEPORTS_VIA_SPELL = "teleportsViaSpell";
 	public static final String TELEPORTS_VIA_CAPE = "teleportsViaCape";
 
-	// Jewellery destinations (rings, amulets, necklaces, bracelets — worn, rubbed,
-	// or via the POH jewellery box; several are also nexus/scroll places).
+	// Jewellery destinations: worn, rubbed, or via the POH jewellery box.
 	public static final String TELEPORTS_CASTLE_WARS = "teleportsCastleWars";
 	public static final String TELEPORTS_FEROX_ENCLAVE = "teleportsFeroxEnclave";
 	public static final String TELEPORTS_EMIRS_ARENA = "teleportsEmirsArena";
@@ -92,7 +82,7 @@ public final class StatKeys
 	public static final String TELEPORTS_FOSSIL_ISLAND = "teleportsFossilIsland";
 	public static final String TELEPORTS_LITHKREN = "teleportsLithkren";
 	public static final String TELEPORTS_SLAYER_DUNGEONS = "teleportsSlayerDungeons";
-	// Scroll-of-redirection house tabs, the everyday teleport items, and the rest.
+	// Redirected house tabs, then the everyday teleport items.
 	public static final String TELEPORTS_TAVERLEY = "teleportsTaverley";
 	public static final String TELEPORTS_RIMMINGTON = "teleportsRimmington";
 	public static final String TELEPORTS_RELLEKKA = "teleportsRellekka";
@@ -106,10 +96,7 @@ public final class StatKeys
 	public static final String TELEPORTS_ELEMENTAL_ALTARS = "teleportsElementalAltars";
 	public static final String TELEPORTS_GIANTS_FOUNDRY = "teleportsGiantsFoundry";
 
-	// Named teleport items whose bespoke option ("Empty", "Commune") names no
-	// teleport and no jewellery family — attributed by the item's own name.
-
-	// Standard spellbook + their teleport tablets, each also a portal-nexus row.
+	// Standard spellbook and its tablets.
 	public static final String TELEPORTS_VARROCK = "teleportsVarrock";
 	public static final String TELEPORTS_GRAND_EXCHANGE = "teleportsGrandExchange";
 	public static final String TELEPORTS_LUMBRIDGE = "teleportsLumbridge";
@@ -124,12 +111,11 @@ public final class StatKeys
 	public static final String TELEPORTS_KOUREND = "teleportsKourend";
 	public static final String TELEPORTS_FORTIS = "teleportsFortis";
 	public static final String TELEPORTS_HOUSE = "teleportsHouse";
-	// A "Teleport to Boat" hop (a portal-nexus row / Sailing spell). Its arrival is
-	// the boat's current mooring — a moving target — so this counts the act of going
-	// to the boat, not a fixed place.
+	// Teleport to Boat. The arrival follows the boat's mooring, so this counts the
+	// hop rather than a place.
 	public static final String TELEPORTS_BOAT = "teleportsBoat";
 
-	// Ancient Magicks (also portal-nexus rows).
+	// Ancient Magicks.
 	public static final String TELEPORTS_PADDEWWA = "teleportsPaddewwa";
 	public static final String TELEPORTS_SENNTISTEN = "teleportsSenntisten";
 	public static final String TELEPORTS_KHARYRLL = "teleportsKharyrll";
@@ -139,7 +125,7 @@ public final class StatKeys
 	public static final String TELEPORTS_ANNAKARL = "teleportsAnnakarl";
 	public static final String TELEPORTS_GHORROCK = "teleportsGhorrock";
 
-	// Lunar (also portal-nexus rows).
+	// Lunar.
 	public static final String TELEPORTS_MOONCLAN = "teleportsMoonclan";
 	public static final String TELEPORTS_OURANIA = "teleportsOurania";
 	public static final String TELEPORTS_WATERBIRTH = "teleportsWaterbirth";
@@ -149,7 +135,7 @@ public final class StatKeys
 	public static final String TELEPORTS_CATHERBY = "teleportsCatherby";
 	public static final String TELEPORTS_ICE_PLATEAU = "teleportsIcePlateau";
 
-	// Arceuus (also portal-nexus rows).
+	// Arceuus.
 	public static final String TELEPORTS_ARCEUUS_LIBRARY = "teleportsArceuusLibrary";
 	public static final String TELEPORTS_DRAYNOR_MANOR = "teleportsDraynorManor";
 	public static final String TELEPORTS_BATTLEFRONT = "teleportsBattlefront";
@@ -163,19 +149,13 @@ public final class StatKeys
 	public static final String TELEPORTS_BARROWS = "teleportsBarrows";
 	public static final String TELEPORTS_APE_ATOLL_DUNGEON = "teleportsApeAtollDungeon";
 
-	// Tablet / basalt / scroll destinations that also sit on the nexus (no spell).
+	// Tablet, basalt and scroll destinations with no spell behind them.
 	public static final String TELEPORTS_POLLNIVNEACH = "teleportsPollnivneach";
 	public static final String TELEPORTS_TROLL_STRONGHOLD = "teleportsTrollStronghold";
 	public static final String TELEPORTS_WEISS = "teleportsWeiss";
 
-	// Scroll-of-redirection house tabs. Two of the eight redirect places already
-	// had keys (Yanille above, Pollnivneach here); these are the other six.
-	// Prifddinas doubles as the (eternal) teleport crystal's destination.
-
-	// Skillcape teleports. Most fire a bare "Teleport" whose destination is not in the
-	// menu text, so they are attributed by the cape name in the target instead. Only
-	// the Strength cape among the melee capes teleports (to the Warriors' Guild); the
-	// Magic and Max capes are features, not places, and are left untracked.
+	// Skillcapes. Most fire a bare "Teleport" with no place in the menu text, so
+	// they are matched on the cape name in the target instead.
 	public static final String TELEPORTS_WARRIORS_GUILD = "teleportsWarriorsGuild";
 	public static final String TELEPORTS_CRAFTING_GUILD = "teleportsCraftingGuild";
 	public static final String TELEPORTS_FARMING_GUILD = "teleportsFarmingGuild";
@@ -188,35 +168,33 @@ public final class StatKeys
 
 	public static final String TELEPORTS_SPIRIT_TREE = "teleportsSpiritTree";
 	public static final String TELEPORTS_FAIRY_RING = "teleportsFairyRing";
-	// POH portal nexus: it picks its destination inside a dialog, so the specific
-	// place never reaches a menu/widget event — bucket it by method instead.
+	// Catch-all for a portal nexus row whose destination has no key of its own.
 	public static final String TELEPORTS_NEXUS = "teleportsNexus";
 
 	// ── Combat ────────────────────────────────────────────────────────────
-	// Damage is summed from hitsplats, so it counts what actually landed
-	// rather than what was rolled.
+	// Damage totals come off hitsplats, so they count what landed.
 
 	public static final String DAMAGE_DEALT = "damageDealt";
-	// The same damage, attributed to the style that dealt it (via the combat XP
-	// drop that rides each hit) — a breakdown of damageDealt, not an addition.
+	// The style split of damageDealt, taken from the combat xp drop on the hit. It
+	// skips a hit whose drop is late, so the three won't always add up to the total.
 	public static final String DAMAGE_DEALT_MELEE = "damageDealtMelee";
 	public static final String DAMAGE_DEALT_RANGED = "damageDealtRanged";
 	public static final String DAMAGE_DEALT_MAGIC = "damageDealtMagic";
 	public static final String DAMAGE_TAKEN = "damageTaken";
 	public static final String CONSUMED_VALUE = "consumedValue";
 	public static final String HIGHEST_HIT = "highestHit";
-	/** Biggest single hit ever received (all damage colours + max-hit variants). */
+	// Biggest single hit taken, across every damage colour and the max-hit variants.
 	public static final String HIGHEST_HIT_TAKEN = "highestHitTaken";
 	public static final String HITS_MISSED = "hitsMissed";
 	public static final String HITS_BLOCKED = "hitsBlocked";
 	public static final String DEATHS = "deaths";
-	/** HP bled to poison and venom — their own hitsplat types, so apart from damageTaken. */
+	// Poison and venom carry their own hitsplat types, which damageTaken excludes.
 	public static final String POISON_DAMAGE_TAKEN = "poisonDamageTaken";
 	public static final String VENOM_DAMAGE_TAKEN = "venomDamageTaken";
 
 	// ── Consumables ───────────────────────────────────────────────────────
-	// FOOD_EATEN is the generic floor beneath the typed <food>Eaten family,
-	// so it deliberately shares that family's wording.
+	// foodEaten is the floor under the typed <food>Eaten keys the food tracker
+	// mints beside it, so it shares their wording.
 
 	public static final String FOOD_EATEN = "foodEaten";
 	public static final String POTION_DOSES = "potionDoses";
@@ -229,35 +207,26 @@ public final class StatKeys
 	// ── Inventory and trade ───────────────────────────────────────────────
 
 	public static final String ITEMS_DISCARDED = "itemsDiscarded";
-	/** Live GE value, at the moment of dropping, of everything binned via the Drop menu. */
+	// GE value at the moment of dropping, for everything binned via the Drop menu.
 	public static final String ITEMS_DROPPED_VALUE = "itemsDroppedValue";
 	public static final String EXAMINES = "examines";
 	public static final String COINS_SPENT_AT_SHOPS = "coinsSpentAtShops";
 	public static final String COINS_EARNED_AT_SHOPS = "coinsEarnedAtShops";
 
 	// ── The resource pair ─────────────────────────────────────────────────
-	// Two figures read together and never netted. Gathered says what the time at
-	// the rocks produced; dropped says what was chosen against and left where it
-	// fell. Subtracting one from the other reads a powerminer's whole career as
-	// roughly nothing, and destroys both stories to get there — the same reason
-	// loot walked past is its own lens rather than a deduction from drops.
+	// Two figures read side by side. Netting one against the other reads a
+	// powerminer's whole career as roughly zero.
 
-	/**
-	 * Live GE value, at the moment of gathering, of everything woodcutting,
-	 * mining and fishing produced. Priced at the event like drops and
-	 * consumables: a read-time multiply would re-price a whole career at
-	 * today's GE every time the panel opened.
-	 */
+	// GE value at the moment of gathering, for what woodcutting, mining and fishing
+	// produced. Banked at the event, so a later crash can't re-price a career.
 	public static final String RESOURCES_GATHERED_VALUE = "resourcesGatheredValue";
-	/**
-	 * The slice of {@link #ITEMS_DROPPED_VALUE} that this account gathered
-	 * itself, so the pair above compares like with like.
-	 */
+	// The slice of itemsDroppedValue this account gathered itself, so it compares
+	// like with like against the figure above.
 	public static final String RESOURCES_DROPPED_VALUE = "resourcesDroppedValue";
 
 	// ── Gathered by hand ──────────────────────────────────────────────────
-	// These award no experience, so nothing in the skill pipeline can see
-	// them; they are counted from the inventory instead.
+	// No experience drop behind these, so they're counted off the click or the
+	// inventory instead.
 
 	public static final String CABBAGES_PICKED = "cabbagesPicked";
 	public static final String FLAX_GATHERED = "flaxGathered";
@@ -266,9 +235,8 @@ public final class StatKeys
 
 	// ── Magic and ranged ──────────────────────────────────────────────────
 
-	/** Coins the player has minted via High/Low Alchemy. */
 	public static final String COINS_FROM_ALCHEMY = "coinsFromAlchemy";
-	/** Offensive spell casts (standard/Ancient/Arceuus), splashes included. */
+	// Counted off the cast animation, so a splash still counts.
 	public static final String OFFENSIVE_SPELLS_CAST = "offensiveSpellsCast";
 	public static final String DEMONIC_OFFERINGS_CAST = "demonicOfferingsCast";
 	public static final String SINISTER_OFFERINGS_CAST = "sinisterOfferingsCast";
@@ -276,11 +244,11 @@ public final class StatKeys
 	public static final String ASHES_SACRIFICED = "ashesSacrificed";
 	public static final String DEMONIC_OFFERING_XP = "demonicOfferingXp";
 	public static final String SINISTER_OFFERING_XP = "sinisterOfferingXp";
-	/** Ranged ammunition that has left the quiver (consumed or dropped). */
+	// Ammo that left the quiver. Unequipping it into the pack doesn't count.
 	public static final String AMMO_CONSUMED = "ammoConsumed";
 
 	// ── Experience ────────────────────────────────────────────────────────
 
-	/** Total experience gained across every skill while the plugin was tracking. */
+	// Every skill's gains added up, from the point the plugin started watching.
 	public static final String TOTAL_XP_GAINED = "totalXpGained";
 }

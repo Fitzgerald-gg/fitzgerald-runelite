@@ -15,10 +15,6 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.util.Collection;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -57,23 +53,18 @@ import net.runelite.client.ui.NavigationButton;
 		+ "Chronicle-compatible server you configure.",
 	tags = {"chronicle", "journal", "stats", "tracker", "loot", "slayer", "collection", "osrs"}
 )
-// The Slayer plugin's service supplies the active task so we can tag on-task
-// drops at the kill. Declaring it a dependency guarantees it's loaded (and its
-// service bound) before us — otherwise the on-task stamp silently no-ops.
+// The Slayer plugin's service supplies the active task for on-task drop tagging.
+// The dependency guarantees it's loaded, and its service bound, before us.
 @PluginDependency(SlayerPlugin.class)
-// Non-NPC loot — clue caskets, barrows and every other chest/pickup source —
-// reaches us only as the core Loot Tracker's own LootReceived event, and its
-// stored archive is what a late install inherits its history from. Declaring
-// the dependency guarantees it is loaded before us, so that event source exists.
+// Chest, casket and every other non-NPC pickup reaches us only as the core Loot
+// Tracker's LootReceived, and its archive is what a late install inherits from.
 @PluginDependency(LootTrackerPlugin.class)
 public class ChroniclePlugin extends Plugin
 {
 	static final String GROUP = ChronicleConfig.GROUP; // "chronicle"
 	static final String KEY_TOKEN = "token";
-	// RSProfile-scoped (account-hash-bound, so it survives renames — the same
-	// slot the token lives in): the display name this account's journal is
-	// filed under. Lets the journal FOLLOW an in-game rename instead of the
-	// new name starting a blank record.
+	// RSProfile-scoped, so it's bound to the account hash and survives a rename: the
+	// name this account's journal is filed under, so the record follows the rename.
 	static final String KEY_JOURNAL_NAME = "journalName";
 
 	@Inject
@@ -127,20 +118,14 @@ public class ChroniclePlugin extends Plugin
 	@Inject
 	private net.runelite.client.game.SpriteManager sprites;
 
-	// Injected rather than constructed: the Plugin Hub's review rejects a plugin
-	// that builds its own Gson/OkHttp instead of taking the client's.
+	// Injected: Hub review rejects a plugin that builds its own Gson.
 	@Inject
 	private com.google.gson.Gson gson;
 
 	private HistoryLog historyLog;
 
-	// The parsed calendar spine, kept in memory for the panel. The stream on disk
-	// is append-only and unbounded, and the History tab re-reads it on every pill,
-	// stepper and date click — all on the EDT. Parsing it there put the whole file
-	// on the Swing thread once per repaint, so the read happens on the executor
-	// (at the account's mount and after each appended baseline) and the panel is
-	// handed the finished map. Published wholesale, never mutated in place: the
-	// EDT may be walking the previous copy while the next one is being read.
+	// The calendar spine, parsed off the EDT and published whole. The History tab
+	// re-reads it on every pill, stepper and date click, and the file is unbounded.
 	private volatile String historyCacheRsn;
 	private volatile java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> historyCache;
 	private volatile boolean historyLoading;
@@ -149,45 +134,32 @@ public class ChroniclePlugin extends Plugin
 	private NavigationButton navButton;
 
 	private ScheduledFuture<?> pushTask;
-	private GameState lastState;
 	private boolean pendingEnrolCheck;
-	// True from the moment an account is in-game until its session is torn down.
-	// The teardown trigger can NOT be "the previous state was LOGGED_IN": a
-	// dropped connection arrives at the login screen via CONNECTION_LOST, and
-	// comparing only the immediately-prior state let that path skip the whole
-	// account boundary (session counters, caches and push identity survived into
-	// whichever account logged in next).
+	// True from the moment an account is in-game until its session is torn down. It
+	// can't key off the prior state: a dropped connection arrives via CONNECTION_LOST.
 	private boolean wasLoggedIn;
 
-	// Cached from the last successful harvest while logged in, so a logout push
-	// works even after the RSProfile has been cleared.
+	// Kept from the last harvest so a logout push still works once the RSProfile is gone.
 	private volatile String cachedToken;
 	private volatile String cachedName;
 	private volatile Map<String, Integer> cachedSnapshot;
 	private volatile String cachedAccountType;
 
-	// True while the Loot Tracker adoption is between its off-thread read and the
-	// client-thread apply that writes the one-shot flag: the refresh that fires in
-	// that window must not start the archive over.
+	// Set while the Loot Tracker adoption is between its off-thread read and the
+	// client-thread apply; a refresh in that window must not start it over.
 	private volatile boolean lootImportRunning;
 
-	// Counters the server computes from OTHER data at read time (untaken loot from
-	// forwarded events; resource value priced from the gathering counters), so
-	// pushing them as counters would double-present them — the only keys the
-	// upward sync withholds. The journal now mints resourcesGatheredValue itself,
-	// at the prices that stood when the ore came out of the rock; that figure is
-	// the local record's, and it stays home rather than colliding with the
-	// server's own re-derivation at today's market.
+	// Keys the upward push withholds: the server re-derives these from other data at
+	// read time, so sending them as counters would double-present them.
 	private static final java.util.Set<String> PUSH_EXCLUDE = new java.util.HashSet<>(
 		java.util.Arrays.asList("untakenLootValue", "untakenLootCount", "resourcesGatheredValue"));
 
-	// The wiki drop-rate book for the local dryness ledger (lazy-loaded).
+	// The wiki drop-rate book behind the dryness ledger.
 	private GrindBook grindBook;
 
 	// Panel-facing status.
 	private volatile String enrolledRsn;
-	// The logged-in name (the journal's account identity; also the cloud push's
-	// name when sync is on).
+	// The logged-in name: the journal's identity, and the push name when cloud is on.
 	private volatile String localName;
 	private volatile String statusLine = "Waiting for a login.";
 
@@ -200,8 +172,7 @@ public class ChroniclePlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		// Built here, not in a field initializer: field injection has run by now,
-		// so both take the client's Gson.
+		// Built here so field injection has already supplied the client's Gson.
 		historyLog = new HistoryLog(gson);
 		grindBook = new GrindBook(gson);
 		panel = new ChroniclePanel(this);
@@ -214,18 +185,12 @@ public class ChroniclePlugin extends Plugin
 		clientToolbar.addNavigation(navButton);
 		refreshPanel();
 
-		// The raw-event capture taps (loot/level/kc → /api/events) live in their
-		// own eventbus-registered object so this class stays focused on enrol +
-		// the counter push loop.
 		eventCapture.reset();
 		eventBus.register(eventCapture);
-		// Toggling the plugin fires no GameStateChanged, so the trackers' own
-		// inference state (inventory snapshots, in-flight clicks) would survive the
-		// blind window with nothing to invalidate it. Clear it here instead.
+		// Toggling the plugin fires no GameStateChanged, so nothing else clears the
+		// trackers' inference state (inventory snapshots, in-flight clicks).
 		counters.reset();
-		// Native lifetime-counter trackers feed the in-memory StatStore; the
-		// refresh loop folds it into the journal (and the push loop mirrors the
-		// journal upward when cloud sync is on).
+		// Consumables are priced as they're used and folded straight into the journal.
 		counters.setConsumableSink((key, gp) ->
 		{
 			String who = localName;
@@ -234,19 +199,15 @@ public class ChroniclePlugin extends Plugin
 				localStore.addConsumableValue(key, gp, who);
 			}
 		});
-		// The gathered-item ledger IS the journal: the resolver notes each gather
-		// into the record and the drop tracker reads it back, so an ore mined a
-		// month ago still counts as a resource when it is finally binned. A
-		// session-scoped set would answer that question wrong at every login.
+		// Gathers are noted in the journal and read back later, so an ore mined a month
+		// ago still counts as gathered when it's finally binned.
 		counters.setGatheredLedger(localStore);
 		eventBus.register(counters);
-		// Passive collection-log capture — reads the completion fraction on login
-		// and scrapes whatever clog page the player opens themselves; the push loop
-		// flushes it. Never opens the log or prompts (Jagex/Hub automation rules).
+		// Passive clog capture: reads the completion fraction on login and scrapes pages
+		// the player opens. Never opens the log itself (Jagex/Hub automation rules).
 		clogCapture.reset();
 		eventBus.register(clogCapture);
-		// Achievement-state change gate starts empty, so the first push after a
-		// (re)start always sends a full snapshot.
+		// The change gate starts empty, so the first push after a restart sends everything.
 		achievementSync.reset();
 
 		reschedulePushLoop();
@@ -256,15 +217,12 @@ public class ChroniclePlugin extends Plugin
 			eventCapture.hasSlayerService() ? "AVAILABLE" : "MISSING");
 
 		// If the plugin is toggled on mid-session, catch the already-logged-in case.
-		lastState = client.getGameState();
-		if (lastState == GameState.LOGGED_IN)
+		if (client.getGameState() == GameState.LOGGED_IN)
 		{
 			pendingEnrolCheck = true;
-			// Enabled mid-session: no LOGGED_IN transition will arrive, so arm the
-			// teardown flag here or this session's logout does nothing at all.
+			// No LOGGED_IN transition will arrive, so arm the teardown flag by hand.
 			wasLoggedIn = true;
-			// The clog fraction varps normally arrive with the LOGGED_IN
-			// transition, which has already happened — read them now.
+			// The clog fraction varps arrived with a LOGGED_IN we missed; read them now.
 			clientThread.invoke(() -> clogCapture.primeFromVarps(client));
 		}
 	}
@@ -285,9 +243,8 @@ public class ChroniclePlugin extends Plugin
 			clientToolbar.removeNavigation(navButton);
 			navButton = null;
 		}
-		// The panel's repeating timers hold a reference to it (and to us): left
-		// running they rebuild a detached panel every few seconds forever, and
-		// each plugin toggle leaks another one.
+		// The panel's repeating timers keep it (and us) alive; left running, every
+		// plugin toggle leaks another detached panel rebuilding itself forever.
 		final ChroniclePanel dying = panel;
 		if (dying != null)
 		{
@@ -295,24 +252,16 @@ public class ChroniclePlugin extends Plugin
 		}
 		panel = null;
 		pendingEnrolCheck = false;
-		// Bank the session before dropping it. Toggling the plugin off (or closing
-		// the client, which shuts plugins down) used to discard everything counted
-		// since the last five-minute fold — the journal is the system of record,
-		// so it must be written on the way out, not just on the interval.
+		// Bank the session on the way out. A plugin toggle, or a client exit that shuts
+		// plugins down, would otherwise drop everything counted since the last fold.
 		if (localName != null && localStore.isReadyFor(localName))
 		{
 			localStore.setTrackers(sessionView(), localName);
-			// Re-freeze the base at what we just folded in. The store outlives a
-			// plugin toggle while the counters do not, so without this the next
-			// recompute would be base + an empty session and roll the journal
-			// back to its login values — the same trap the cloud toggle has.
+			// Re-freeze the base on what was just folded in: the store outlives a toggle
+			// but the counters don't, so a recompute would roll back to login values.
 			localStore.rebase(localName);
-			// The fold above is lock-guarded and has to happen here, before the
-			// stores are dropped; the write is an fsync and an atomic move, and a
-			// settings-panel toggle stops the plugin ON THE EDT — disk work belongs
-			// on neither the Swing thread nor the client's. The executor outlives a
-			// toggle, so hand it over there; the client-exit path is not something
-			// the pool outlives, so that one keeps its write inline.
+			// A settings toggle stops the plugin on the EDT and the flush is an fsync plus
+			// a move; the executor outlives a toggle, the client-exit path does not.
 			if (javax.swing.SwingUtilities.isEventDispatchThread())
 			{
 				executor.submit(() -> localStore.flush(localDir()));
@@ -322,9 +271,8 @@ public class ChroniclePlugin extends Plugin
 				localStore.flush(localDir());
 			}
 		}
-		// While we are unregistered no events reach the trackers, so the store stops
-		// tracking reality — and the player may switch accounts before toggling us
-		// back on. Forget the totals so the next login counts its own session.
+		// No events reach the trackers while we're unregistered, and the player may
+		// switch accounts before toggling us back on. Drop the totals.
 		statStore.clear();
 		wasLoggedIn = false;
 	}
@@ -341,18 +289,8 @@ public class ChroniclePlugin extends Plugin
 			this::scheduledPush, minutes, minutes, TimeUnit.MINUTES);
 	}
 
-	/**
-	 * On-task drop tagging needs RuneLite's Slayer plugin ENABLED. The
-	 * {@code @PluginDependency} guarantees it's loaded (so its service binds),
-	 * but a user could still toggle it off — in which case there's no active
-	 * task to read, so nudge them via the side-panel status.
-	 */
-	/**
-	 * Chest and casket loot arrives only through the core Loot Tracker's event.
-	 * The dependency above guarantees the plugin is LOADED, but the player can
-	 * still switch it off — in which case that loot is simply never seen, so say
-	 * so in the panel rather than quietly under-recording.
-	 */
+	// Chest and casket loot arrives only through the core Loot Tracker. The
+	// dependency loads it, but the player can still switch it off.
 	private void warnIfLootTrackerDisabled()
 	{
 		try
@@ -378,6 +316,8 @@ public class ChroniclePlugin extends Plugin
 		}
 	}
 
+	// On-task drop tagging needs RuneLite's Slayer plugin enabled; the dependency
+	// only guarantees it is loaded.
 	private void warnIfSlayerDisabled()
 	{
 		try
@@ -417,14 +357,11 @@ public class ChroniclePlugin extends Plugin
 		}
 		else if (state == GameState.LOGIN_SCREEN && wasLoggedIn)
 		{
-			// Any arrival at the login screen from an in-game session closes it —
-			// including the CONNECTION_LOST route a dropped connection takes. A
-			// world HOP is still deliberately NOT a logout: it never reaches the
-			// login screen, and it is the same account with the same totals.
+			// Any arrival at the login screen from an in-game session closes it,
+			// CONNECTION_LOST included. A world hop never reaches the login screen.
 			wasLoggedIn = false;
 			onLogout();
 		}
-		lastState = state;
 	}
 
 	@Subscribe
@@ -445,14 +382,8 @@ public class ChroniclePlugin extends Plugin
 			return; // wait for the name to populate
 		}
 		pendingEnrolCheck = false;
-		// LOGGED_IN fires again on every world hop and every region load, for the
-		// SAME account and the SAME session. Re-running the load below would
-		// re-freeze the journal's lifetime base at values that ALREADY contain
-		// this session (the base is frozen from disk, and the session store is
-		// deliberately not cleared on a hop) — every counter banked before the
-		// hop would be counted twice, and a journal-absolute push would make that
-		// permanent server-side. It would also discard any records folded in
-		// since the last flush. So: an already-loaded account only refreshes.
+		// LOGGED_IN fires again on every world hop and region load for the same session;
+		// reloading would re-freeze the lifetime base over totals it already holds.
 		if (name.equals(localName) && localStore.isReadyFor(name))
 		{
 			refreshPanel();
@@ -462,9 +393,7 @@ public class ChroniclePlugin extends Plugin
 			}
 			return;
 		}
-		// The journal always runs: remember whose account this is and load its
-		// on-disk record so the record keeps accumulating across sessions. No
-		// enrolment, no network — cloud sync below is additive when configured.
+		// A new account for this session: mount its journal. Nothing here touches the network.
 		localName = name;
 		sessionStartMs = System.currentTimeMillis();
 		if (!cloudActive())
@@ -473,11 +402,8 @@ public class ChroniclePlugin extends Plugin
 		}
 		refreshPanel();
 		final String who = name;
-		// The account's RSProfile remembers which name its journal is filed
-		// under. A different name at login means an in-game rename — move the
-		// journal (and its history spine) to the new slug BEFORE loading, so
-		// the record continues instead of restarting blank. The pointer is
-		// read here (client thread) and updated after the load settles.
+		// A different name on the RSProfile pointer means an in-game rename: move the
+		// journal and its spine to the new slug before loading so the record continues.
 		final String priorName = trimToNull(
 			configManager.getRSProfileConfiguration(GROUP, KEY_JOURNAL_NAME));
 		executor.submit(() ->
@@ -490,11 +416,9 @@ public class ChroniclePlugin extends Plugin
 			}
 			configManager.setRSProfileConfiguration(GROUP, KEY_JOURNAL_NAME, who);
 			localStore.load(localDir(), who);
-			// Parse this account's calendar spine here, on the same off-thread
-			// mount as its journal, so the History tab opens from memory.
+			// Same off-thread mount as the journal, so the History tab opens from memory.
 			reloadHistory(who);
-			// A different account's journal is now mounted: drop the panel views
-			// built from the previous one (task journey, dryness, open drill-downs).
+			// A different journal is mounted now; drop the panel views built on the last one.
 			ChroniclePanel p = panel;
 			if (p != null)
 			{
@@ -522,10 +446,8 @@ public class ChroniclePlugin extends Plugin
 			reschedulePushLoop();
 			if ("serverBaseUrl".equals(key))
 			{
-				// A push token is issued BY one server and means nothing to another,
-				// so repointing the URL must not carry the old host's secret to the
-				// new one. Drop it; a token pasted into the settings re-seeds on the
-				// next login, and an empty one simply means no cloud.
+				// A token is issued by one server and means nothing to another, so
+				// repointing the URL drops it. A pasted one re-adopts on the next login.
 				clientThread.invoke(() ->
 				{
 					if (trimToNull(config.manualToken()) == null)
@@ -539,18 +461,12 @@ public class ChroniclePlugin extends Plugin
 			}
 			if ("cloudSync".equals(key) || "serverBaseUrl".equals(key))
 			{
-				// A settings write arrives on whatever thread made it — the EDT, for
-				// the settings panel. The block below shares the counter stores with
-				// the client thread's refresh and push: if one of those folds the
-				// session in between the rebase and the clear, the journal briefly
-				// holds base + session twice, and any push landing in that window
-				// mirrors the doubled absolutes upward for good (the server
-				// floor-merges). Run it where every other counter writer runs.
+				// A settings write arrives on whatever thread made it, the EDT for the settings
+				// panel. The stores below are the client thread's, so do the work there.
 				clientThread.invoke(() ->
 				{
-					// Fold the running session into the journal and re-freeze its base
-					// BEFORE clearing the counter store — the journal is always-on, so a
-					// cloud toggle must never cost it the increments since the last flush.
+					// Fold and re-freeze before clearing the store, or the toggle costs the journal
+					// every increment since the last flush.
 					final String who = localName;
 					if (who != null)
 					{
@@ -558,8 +474,7 @@ public class ChroniclePlugin extends Plugin
 						localStore.rebase(who);
 						executor.submit(() -> localStore.flush(localDir()));
 					}
-					// The session store restarts from zero either side of the toggle;
-					// the rebase above already banked its increments in the journal.
+					// The session restarts from zero; the rebase above already banked its increments.
 					statStore.clear();
 					counters.reset();
 				});
@@ -574,14 +489,11 @@ public class ChroniclePlugin extends Plugin
 	}
 
 	// ------------------------------------------------------------------
-	// Cloud identity (upward sync only — no enrolment, no downward calls)
+	// Cloud identity (upward only)
 	// ------------------------------------------------------------------
 
-	/**
-	 * Adopt this account's push token: a pasted override from the settings, or
-	 * whatever an earlier install left on the RSProfile. No token means no cloud —
-	 * the journal carries on identically either way. Runs on the client thread.
-	 */
+	// Takes this account's push token: a pasted override, or whatever an earlier
+	// install left on the RSProfile. No token means no cloud. Client thread.
 	private void adoptToken(String name)
 	{
 		String override = trimToNull(config.manualToken());
@@ -611,11 +523,10 @@ public class ChroniclePlugin extends Plugin
 	// Harvest + push
 	// ------------------------------------------------------------------
 
-	/** Scheduled on the executor; hops to the client thread to read config. */
+	// Scheduled on the executor; hops to the client thread to read config.
 	private void scheduledPush()
 	{
-		// The journal refreshes every cycle; cloud pushes ride the same cadence
-		// when configured. Order matters not — different sinks, same harvest.
+		// The journal refreshes every cycle; the cloud push rides the same cadence.
 		clientThread.invoke(this::refreshLocal);
 		if (cloudActive())
 		{
@@ -623,10 +534,10 @@ public class ChroniclePlugin extends Plugin
 		}
 	}
 
-	/** Runs on the client thread. Harvests the current counters and pushes them. */
+	// Client thread. Harvests the current counters and pushes them.
 	private void pushCurrent()
 	{
-		// Hard stop for local mode: nothing in this method may touch the network.
+		// Nothing below may touch the network without a configured server.
 		if (!cloudActive())
 		{
 			return;
@@ -641,23 +552,20 @@ public class ChroniclePlugin extends Plugin
 		{
 			return;
 		}
-		// Stamp fires with the account's stable hash so the server can adopt an
-		// in-game rename automatically (verified as the same account, not an alt).
+		// The account hash lets the server follow a rename instead of reading it as an alt.
 		api.setAccountHash(client.getAccountHash());
 		String token = trimToNull(configManager.getRSProfileConfiguration(GROUP, KEY_TOKEN));
 		if (token == null)
 		{
-			return; // not enrolled yet
+			return;   // no token, no cloud
 		}
-		// Flush any collection-log pages viewed since the last push (the server
-		// merges partial snapshots).
+		// Flush any clog pages viewed since the last push; the server merges partials.
 		if (clogCapture.isDirty())
 		{
 			api.pushClog(config.serverBaseUrl(), token, name, clogCapture.snapshot());
 			clogCapture.clearDirty();
 		}
-		// Achievement state (quests / diaries / combat tasks) — whole-snapshot
-		// sync, sent only when it differs from the last copy the server acked.
+		// Quests, diaries and combat tasks: whole snapshot, sent only when it changed.
 		final JsonObject achievements = achievementSync.snapshot();
 		if (achievementSync.changedSince(achievements))
 		{
@@ -670,14 +578,8 @@ public class ChroniclePlugin extends Plugin
 					}
 				});
 		}
-		// The JOURNAL is the system of record. Fold the running session into it,
-		// then mirror its lifetime absolutes upward — the server is a passive copy
-		// (the discord bot's feed), never a source.
-		// The journal must be the one belonging to the account we are about to
-		// push AS. Between an account switch and the completion of the new
-		// journal's async load, the store still holds the previous account's
-		// model — pushing then would file one player's lifetime under another's
-		// token, permanently (the server floor-merges).
+		// The journal is the record; the push mirrors its absolutes upward. Guarded on
+		// the store's identity: a switch mid-load would push another player's lifetime.
 		if (!name.equals(localName) || !localStore.isReadyFor(name))
 		{
 			return;
@@ -686,7 +588,7 @@ public class ChroniclePlugin extends Plugin
 		Map<String, Integer> snapshot = journalAbsolutes(name);
 		if (snapshot.isEmpty())
 		{
-			return;   // nothing journaled yet on this account — nothing to push
+			return;   // nothing journaled yet on this account
 		}
 		cachedToken = token;
 		cachedName = name;
@@ -699,11 +601,7 @@ public class ChroniclePlugin extends Plugin
 			harvestSkills(), this::onPushResult);
 	}
 
-	/**
-	 * Maps the in-game account-type varbit (IRONMAN, 1777) to the server's account
-	 * tag, so the profile's account_type stays in sync with the game with no manual
-	 * tagging. Empty for a normal account — nothing to tag.
-	 */
+	// The IRONMAN varbit's values as the server's account tags; empty for a normal account.
 	private static String accountTypeTag(int varbit)
 	{
 		switch (varbit)
@@ -718,18 +616,12 @@ public class ChroniclePlugin extends Plugin
 		}
 	}
 
-	/**
-	 * The journal's lifetime counters, clamped to the wire's int shape. This is
-	 * the ONLY thing the counter push sends — what the journal says is what the
-	 * server gets, so a fresh server (or a wiped one) rebuilds entirely from the
-	 * client and "server on or off" makes no difference to what the player sees.
-	 */
+	// The journal's lifetime counters, clamped to the wire's int shape.
 	private Map<String, Integer> journalAbsolutes(String rsn)
 	{
 		Map<String, Integer> out = new java.util.HashMap<>();
-		// The store keeps the PREVIOUS account's model mounted until the next
-		// load completes, so an unguarded read during the login gap would hand
-		// one account's lifetime totals to another's push.
+		// The previous account's model stays mounted until the next load lands, so an
+		// unguarded read here would hand its totals to another account's push.
 		if (rsn == null || !localStore.isReadyFor(rsn))
 		{
 			return out;
@@ -745,23 +637,17 @@ public class ChroniclePlugin extends Plugin
 		return out;
 	}
 
-	/** Runs on the client thread (GameStateChanged). Best-effort final push. */
+	// Client thread (GameStateChanged). Best-effort final push.
 	private void onLogout()
 	{
-		// The journal always closes out the session: fold the final counters in,
-		// write, end the session so a different account logging in next can't
-		// record onto this model.
-		// Guarded on the store's own identity: if this account's journal never
-		// finished loading (a logout inside the login gap), the mounted model
-		// belongs to somebody else and must not be written or frozen here.
+		// Fold, write and end the session so a different account logging in next can't
+		// record onto this model. Guarded in case the load never finished.
 		if (localName != null && localStore.isReadyFor(localName))
 		{
 			localStore.setTrackers(sessionView(), localName);
 			appendHistoryBaseline();
 			recordSessionLine();
-			// Freeze the journal's totals for the final push BEFORE the stores
-			// reset — the logout flush sends exactly what the journal will say
-			// on the next login.
+			// Freeze the totals for the final push before the stores reset.
 			Map<String, Integer> fresh = journalAbsolutes(localName);
 			if (!fresh.isEmpty())
 			{
@@ -771,18 +657,12 @@ public class ChroniclePlugin extends Plugin
 		executor.submit(() -> localStore.flush(localDir()));
 		localStore.endSession();
 		eventCapture.resetSessionFlags();
-		// Account boundary for the achievement gate too: the next login must
-		// sync its own snapshot even if it happens to serialize identically.
+		// Reset the gate so the next login syncs its own snapshot even if identical.
 		achievementSync.reset();
-		// These totals belong to the account that just logged out. Drop them here
-		// so a DIFFERENT account logging in next can never inherit them.
+		// These totals belong to the account that just left; the next must not inherit them.
 		statStore.clear();
-		// Take the push identity by value, then CLEAR it. The cache is what makes
-		// a logout flush possible after the RSProfile has gone; left standing, it
-		// becomes the identity of whichever account logs in next — a token-less
-		// alt would flush ITS journal under this account's token and name, which
-		// the server accepts and floor-merges permanently. (localName is kept:
-		// the panel still browses the closed session's journal.)
+		// Take the push identity by value, then clear it: left standing it becomes the
+		// identity of whoever logs in next. localName stays so the panel can browse.
 		final String token = cachedToken;
 		final String who = cachedName;
 		final String type = cachedAccountType;
@@ -801,7 +681,6 @@ public class ChroniclePlugin extends Plugin
 			null, this::onPushResult);   // logout flush: client unreadable, skip skills
 	}
 
-
 	private void onPushResult(ChronicleApiClient.PushResult result)
 	{
 		if (result.ok)
@@ -811,9 +690,8 @@ public class ChroniclePlugin extends Plugin
 		}
 		else if (result.code == 409)
 		{
-			// The server holds higher totals than this journal — usually another
-			// computer's journal is ahead. The client is authoritative for its own
-			// record, so surface it rather than silently rewriting either side.
+			// The server holds higher totals than this journal, usually another computer.
+			// The client stays authoritative for its own record, so just surface it.
 			statusLine = "Server totals are ahead of this journal (another computer?) at "
 				+ nowClock() + ".";
 			log.debug("push 409 — server ahead; journal stays authoritative");
@@ -827,22 +705,14 @@ public class ChroniclePlugin extends Plugin
 		refreshPanel();
 	}
 
-	/**
-	 * The current in-memory counter snapshot — this session's increments,
-	 * counted from zero by the trackers ({@link chronicle.counters.ChronicleCounters})
-	 * and the local resolver. No RuneLite config is read or written for counters.
-	 */
+	// This session's increments, counted from zero by the trackers.
 	Map<String, Integer> harvest()
 	{
 		return statStore.snapshotAll();
 	}
 
-	/**
-	 * Per-skill level + XP for the live push, so the site profile reflects current
-	 * stats between daily hiscores snapshots. Keyed by the lowercase skill name to
-	 * match the server's snapshot shape, plus an "overall" total. Client thread only
-	 * (called from pushCurrent) — the skill accessors require it.
-	 */
+	// Per-skill level and xp for the push, keyed by lowercase skill name, plus an
+	// "overall" total. Client thread only, the skill accessors require it.
 	private JsonObject harvestSkills()
 	{
 		JsonObject skills = new JsonObject();
@@ -855,9 +725,8 @@ public class ChroniclePlugin extends Plugin
 			JsonObject o = new JsonObject();
 			o.addProperty("level", client.getRealSkillLevel(s));
 			o.addProperty("xp", client.getSkillExperience(s));
-			// ROOT, never the default locale: this key IS the shape the journal,
-			// the history spine and the panel all read back, and a Turkish-locale
-			// JVM would file MINING under a dotless "mınıng" nothing looks for.
+			// ROOT locale: the default would file MINING under a dotless "mınıng" on a
+			// Turkish JVM, which the journal, spine and panel never look for.
 			skills.add(s.name().toLowerCase(java.util.Locale.ROOT), o);
 		}
 		JsonObject overall = new JsonObject();
@@ -886,8 +755,8 @@ public class ChroniclePlugin extends Plugin
 		return enrolledRsn;
 	}
 
-	/** Cloud sync active: opted in AND pointed at a server. The journal itself
-	 *  always runs while the plugin is on — only the network needs a gate. */
+	// Cloud sync active: opted in and pointed at a server. Only the network is
+	// gated; the journal runs whenever the plugin is on.
 	boolean cloudActive()
 	{
 		return config.cloudSync() && !config.serverBaseUrl().trim().isEmpty();
@@ -895,13 +764,13 @@ public class ChroniclePlugin extends Plugin
 
 	// ── Panel-facing reads ─────────────────────────────────────────────
 
-	/** Lifetime counters as the journal knows them (base + session, floored). */
+	// Lifetime counters as the journal knows them (base + session, floored).
 	Map<String, Long> lifetimeCounters()
 	{
 		return localStore.trackersSnapshot();
 	}
 
-	/** This session's own increments (max-type keys as absolutes). */
+	// This session's own increments (max-type keys as absolutes).
 	Map<String, Integer> sessionCounters()
 	{
 		return sessionView();
@@ -917,7 +786,7 @@ public class ChroniclePlugin extends Plugin
 		return localStore.sourceItems(source);
 	}
 
-	/** The journal's task-by-task slayer journey (panel fetches on first open). */
+	// The journal's task-by-task slayer journey; the panel fetches on first open.
 	void fetchSlayerJourney(
 		java.util.function.Consumer<ChronicleApiClient.SlayerJourney> onDone)
 	{
@@ -955,9 +824,8 @@ public class ChroniclePlugin extends Plugin
 		return eventCapture.slayerView();
 	}
 
-	/** The calendar spine as last parsed. Called from the panel's rebuild (EDT),
-	 *  so it never touches the disk: a cold cache asks the executor for one and
-	 *  the panel rebuilds when it lands. */
+	// The spine as last parsed. Called from the panel's rebuild on the EDT, so it
+	// never reads disk: a cold cache asks the executor and the panel rebuilds later.
 	java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> historyBaselines()
 	{
 		String rsn = localName;
@@ -988,16 +856,13 @@ public class ChroniclePlugin extends Plugin
 		return new java.util.TreeMap<>();
 	}
 
-	/**
-	 * Re-read the spine from disk and publish it to the panel. Executor only —
-	 * this is the file read the EDT must not do.
-	 */
+	// Executor only: the spine read the EDT must not do, published to the panel.
 	private void reloadHistory(String rsn)
 	{
 		java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> read =
 			historyLog.read(localDir(), rsn);
-		// An account switch can overtake the read: the panel must never be handed
-		// the previous player's calendar under the current player's name.
+		// An account switch can overtake the read; don't hand the panel the previous
+		// player's calendar under the current player's name.
 		if (rsn.equals(localName))
 		{
 			historyCache = read;
@@ -1006,9 +871,8 @@ public class ChroniclePlugin extends Plugin
 		}
 	}
 
-	/** The earliest thing the record knows about — the honest "kept since",
-	 *  which the Loot Tracker inheritance often pushes years before the file
-	 *  itself was created. Epoch millis, or 0 when nothing is dated. */
+	// The earliest date the record knows about, which the Loot Tracker inheritance
+	// often puts years before the file. Epoch millis, 0 when nothing is dated.
 	long keptSince()
 	{
 		long earliest = Long.MAX_VALUE;
@@ -1033,30 +897,25 @@ public class ChroniclePlugin extends Plugin
 		return earliest == Long.MAX_VALUE ? 0 : earliest;
 	}
 
-	/** The combat level as the journal last saw it, or 0. */
+	// The combat level as the journal last saw it, or 0.
 	int combatLevel()
 	{
 		return localStore.combatLevel();
 	}
 
-	// Game sprites, fetched on demand. Null-safe for a dev client with no cache.
 	net.runelite.client.game.SpriteManager sprites()
 	{
 		return sprites;
 	}
 
-	/** The game's own skill sprites, for the History grid. */
+	// Skill sprites for the History grid.
 	net.runelite.client.game.SkillIconManager skillIcons()
 	{
 		return skillIcons;
 	}
 
-	/**
-	 * The game's own bosses and activities, by kill count — the collection log
-	 * keeps this list, so it is the one the player already recognises. The drop
-	 * ledger's figure floors it where the ledger has watched more deaths than
-	 * the log has been opened for.
-	 */
+	// Bosses and activities by kill count, as the collection log lists them, floored
+	// by the drop ledger where it has watched more kills than the log has recorded.
 	Map<String, Long> killCounts()
 	{
 		Map<String, Long> out = new java.util.LinkedHashMap<>();
@@ -1096,13 +955,8 @@ public class ChroniclePlugin extends Plugin
 		return out;
 	}
 
-	/**
-	 * Everything else the ledger counted: slayer monsters and the rest, which
-	 * the collection log keeps no page for. Kept apart from the list above
-	 * rather than merged into it — without a record of what KIND each source
-	 * was, a pile of arrowtips looted a thousand times would otherwise sit in
-	 * a list of bosses claiming to be one.
-	 */
+	// Everything else the ledger counted, which the collection log has no page for.
+	// Kept apart: with no record of a source's kind, arrowtips would sit among bosses.
 	Map<String, Long> ledgerKills()
 	{
 		Map<String, Long> bosses = killCounts();
@@ -1122,15 +976,15 @@ public class ChroniclePlugin extends Plugin
 		return out;
 	}
 
-	/** Loose identity for a source: the collection log says "Tormented Demons"
-	 *  where the ledger says "Tormented Demon", and they are one thing. */
+	// Loose identity for a source: the collection log says "Tormented Demons" where
+	// the ledger says "Tormented Demon", and they are one thing.
 	private static String sameThing(String name)
 	{
 		String n = name == null ? "" : name.trim().toLowerCase(java.util.Locale.ROOT);
 		return n.endsWith("s") ? n.substring(0, n.length() - 1) : n;
 	}
 
-	/** Level + xp per skill, as the journal last saw them. */
+	// Level + xp per skill, as the journal last saw them.
 	java.util.Map<String, long[]> skillSheet()
 	{
 		return localStore.skillSheet();
@@ -1176,7 +1030,7 @@ public class ChroniclePlugin extends Plugin
 		return localStore.pets();
 	}
 
-	/** The pace of a skill, measured over the days it actually moved. */
+	// The pace of a skill, measured over the days it actually moved.
 	PaceBook.Pace pace(String skill)
 	{
 		java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> spine = historyBaselines();
@@ -1189,10 +1043,8 @@ public class ChroniclePlugin extends Plugin
 		{
 			// not a real skill name, or the client is unreadable — no pace
 		}
-		// The spine files every skill under its lowercase name (harvestSkills
-		// writes them that way), while the panel asks with the section's own
-		// capitalisation — so the lookup has to be normalised or it silently
-		// finds no day on which the skill ever moved.
+		// The spine files skills lowercase (harvestSkills writes them that way) while the
+		// panel asks with its own capitalisation, so normalise or nothing ever matches.
 		return PaceBook.forSkill(spine, skill.toLowerCase(java.util.Locale.ROOT), xp);
 	}
 
@@ -1211,9 +1063,8 @@ public class ChroniclePlugin extends Plugin
 		return localStore.consumableValues();
 	}
 
-	/** The dryness ledger, computed from the journal's own collection log +
-	 *  kill counts against the bundled wiki rate book (panel fetches once per
-	 *  session on demand; the maths is the site's: 1 − (1 − 1/rate)^kc). */
+	// Dryness, computed from the journal's own collection log and kill counts against
+	// the bundled wiki rate book. The panel fetches once per session.
 	void fetchGrinds(java.util.function.Consumer<java.util.List<ChronicleApiClient.GrindRow>> onDone)
 	{
 		final String rsn = localName;
@@ -1227,7 +1078,7 @@ public class ChroniclePlugin extends Plugin
 		executor.submit(() -> onDone.accept(grindBook.grinds(clog, sources)));
 	}
 
-	/** True once this session produced an on-task slayer kill. */
+	// True once this session produced an on-task slayer kill.
 	boolean slayerSeenThisSession()
 	{
 		return eventCapture.slayerSeenThisSession();
@@ -1235,16 +1086,12 @@ public class ChroniclePlugin extends Plugin
 
 	private volatile long sessionStartMs;
 
-	/**
-	 * The logout diary line: one dated feed entry closing the session — the
-	 * habit of a journal without the labour of one. Local-only, never pushed;
-	 * skipped when the session was too slight to be worth a line.
-	 */
+	// The logout diary line: one dated feed entry closing the session. Local only,
+	// skipped when the session was too slight to be worth a line.
 	private void recordSessionLine()
 	{
-		// Wall-clock, so an NTP correction or a resumed VM can move the start ahead
-		// of now mid-session. Floored: a clock that jumps backwards should read as
-		// a short session, never as a diary line of negative minutes.
+		// Wall-clock: an NTP correction or a resumed VM can put the start ahead of now,
+		// so floor it rather than write a line of negative minutes.
 		long mins = sessionStartMs > 0
 			? Math.max(0, (System.currentTimeMillis() - sessionStartMs) / 60_000) : 0;
 		Map<String, Integer> sess = sessionView();
@@ -1270,12 +1117,8 @@ public class ChroniclePlugin extends Plugin
 		return localStore.sessionUntakenTally();
 	}
 
-	/**
-	 * Session counters shaped for DISPLAY: peak keys (highest hit and friends)
-	 * only appear when this session actually beat the journal's lifetime record — the
-	 * journal-write path keeps its absolutes, but the panel must never show a
-	 * lifetime peak as a session feat.
-	 */
+	// Session counters shaped for display: peak keys only survive when this session
+	// beat the journal's lifetime record, so an old peak can't read as a session feat.
 	Map<String, Integer> sessionDisplayCounters()
 	{
 		Map<String, Integer> out = new java.util.HashMap<>(sessionView());
@@ -1290,7 +1133,7 @@ public class ChroniclePlugin extends Plugin
 		return out;
 	}
 
-	/** The client's Gson, shared with the panel so nothing constructs its own. */
+	// The client's Gson, shared with the panel so nothing constructs its own.
 	com.google.gson.Gson gson()
 	{
 		return gson;
@@ -1301,18 +1144,14 @@ public class ChroniclePlugin extends Plugin
 		return localStore.items();
 	}
 
-	/** RSN to show in the panel: the enrolled name when syncing, else the local one. */
+	// Name to show in the panel: the synced name when cloud is on, else the local one.
 	String displayRsn()
 	{
 		return cloudActive() && enrolledRsn != null && !enrolledRsn.isEmpty() ? enrolledRsn : localName;
 	}
 
-	/**
-	 * This session's own counter increments, straight from the trackers — the
-	 * store counts from zero at each account boundary, so the harvest IS the
-	 * session. Max-type keys pass through as absolutes (the journal takes their
-	 * max); everything else drops non-positive noise.
-	 */
+	// This session's increments, straight from the trackers. Max-type keys pass
+	// through as absolutes (the journal takes their max); the rest drops noise.
 	Map<String, Integer> sessionView()
 	{
 		Map<String, Integer> abs = harvest();
@@ -1327,9 +1166,7 @@ public class ChroniclePlugin extends Plugin
 		return out;
 	}
 
-	// Settled once per client run: every flush, load and history append asks for
-	// the journal directory, and the adoption below is a one-shot that must not be
-	// re-decided under a running session.
+	// Cached once per client run; every flush, load and history append asks for it.
 	private static volatile File journalDir;
 
 	private static File localDir()
@@ -1344,7 +1181,7 @@ public class ChroniclePlugin extends Plugin
 		return dir;
 	}
 
-	/** Copy the always-current character sheet into the local store. Client thread. */
+	// Client thread. Copies the current character sheet into the journal.
 	private void gatherCharacter()
 	{
 		if (client.getGameState() != GameState.LOGGED_IN)
@@ -1359,38 +1196,26 @@ public class ChroniclePlugin extends Plugin
 		}
 		localStore.setCharacter(name, accountTypeTag(client.getVarbitValue(VarbitID.IRONMAN)),
 			harvestSkills(), lp.getCombatLevel(), clogCapture.snapshot(), achievementSync.snapshot());
-		// The session's counters fold into the lifetime trackers through the
-		// SESSION view (max-keys as absolutes, noise dropped) — the journal's
-		// additive base does the lifetime arithmetic.
+		// The journal's additive base does the lifetime arithmetic from the session view.
 		localStore.setTrackers(sessionView(), name);
 	}
 
-	/** The journal's refresh: gather the sheet, fold the session in, rewrite the page. */
 	private void refreshLocal()
 	{
 		gatherCharacter();
-		// Only once the journal is actually mounted: a baseline's counters come
-		// from it, so a day closed while nothing is mounted (the record still
-		// loading, or declined) would append a line of zeroes that every later
-		// subtraction over the spine reads as a collapse.
+		// Only with the journal mounted: a baseline's counters come from it, so a day
+		// closed mid-load appends a line of zeroes every later subtraction reads as a collapse.
 		if (localName != null && localStore.isReadyFor(localName))
 		{
 			localStore.setTrackers(sessionView(), localName);
-			// The calendar spine: one closing baseline per day, appended — the
-			// History tab and the year cards are subtractions over this stream.
+			// One closing baseline per day; the History tab and year cards subtract over it.
 			if (historyLog.dayRolledOver(localName))
 			{
 				appendHistoryBaseline();
 			}
 		}
-		// First run PER ACCOUNT: adopt the core Loot Tracker's lifetime record —
-		// the one LOCAL archive predating any server, so an install late in an
-		// account's life starts years deep. Reading the ACTIVE RS profile's keys
-		// keeps it own-account by construction (league and alt profiles have
-		// different keys); the one-shot flag is RSProfile-scoped for the same
-		// reason — each account inherits its own archive, not just whichever
-		// logged in first. Purely local, no network; the floors are idempotent,
-		// so a re-run can never double anything.
+		// First run per account: adopt the core Loot Tracker's archive so a late install
+		// starts years deep. Own-account by the RSProfile keys, and the floors are idempotent.
 		if (localName != null && localStore.isReadyFor(localName)
 			&& !"true".equals(configManager.getRSProfileConfiguration(GROUP, "lootTrackerImported")))
 		{
@@ -1399,12 +1224,7 @@ public class ChroniclePlugin extends Plugin
 		executor.submit(() -> localStore.flush(localDir()));
 	}
 
-	/**
-	 * One Loot Tracker source as parsed off the client thread: its raw item ids
-	 * and quantities, still unnamed and unpriced. The ItemManager reads that turn
-	 * these into bag items are the only part of the adoption the client thread
-	 * owes us.
-	 */
+	/** One Loot Tracker source as parsed off the client thread: raw ids and quantities. */
 	private static final class RawSource
 	{
 		final String source;
@@ -1423,25 +1243,19 @@ public class ChroniclePlugin extends Plugin
 		}
 	}
 
-	/**
-	 * Called from the refresh on the client thread; hands the archive off. The
-	 * config scan and the JSON parse are the bulk of the work and read no game
-	 * state, so they belong on the executor — done inline, an account with a
-	 * years-deep Loot Tracker stalled the client for several frames on the one
-	 * login where the plugin is supposed to be invisible.
-	 */
+	// Client thread. The config scan and JSON parse read no game state and are the
+	// bulk of the work, so they go to the executor; inline they stalled the login.
 	private void importLootTracker()
 	{
-		// The RSProfile flag is only written once the adoption lands, so without
-		// this the next refresh would start a second read over the same archive.
+		// The RSProfile flag is only written once the adoption lands, so the next refresh
+		// would otherwise start a second read over the same archive.
 		if (lootImportRunning)
 		{
 			return;
 		}
 		lootImportRunning = true;
 		final String who = localName;
-		// Read here, on the account being imported FOR: the archive stays
-		// own-account even if a switch overtakes the read below.
+		// Read on the account being imported for, so a switch mid-read can't cross accounts.
 		final String profileKey = configManager.getRSProfileKey();
 		executor.submit(() ->
 		{
@@ -1460,7 +1274,7 @@ public class ChroniclePlugin extends Plugin
 		});
 	}
 
-	/** Executor: the config-archive scan and its JSON parse, no game state. */
+	// Executor: the config-archive scan and its JSON parse, no game state.
 	private java.util.List<RawSource> readLootTrackerArchive(String profileKey)
 	{
 		java.util.List<RawSource> out = new java.util.ArrayList<>();
@@ -1522,13 +1336,12 @@ public class ChroniclePlugin extends Plugin
 		return out;
 	}
 
-	/** Client thread (ItemManager naming and pricing). Flag set on success. */
+	// Client thread, for the ItemManager naming and pricing. Flag set on success.
 	private void adoptLootTrackerArchive(String rsn, java.util.List<RawSource> parsed)
 	{
 		try
 		{
-			// A switch can land while the archive is being read: one account's
-			// Loot Tracker must never be floored into another's journal.
+			// A switch can land mid-read; don't floor one account's archive into another's.
 			if (rsn == null || !rsn.equals(localName) || !localStore.isReadyFor(rsn))
 			{
 				return;
@@ -1567,7 +1380,7 @@ public class ChroniclePlugin extends Plugin
 		}
 	}
 
-	/** Client thread. Appends today's closing skills+counters baseline. */
+	// Client thread. Appends today's closing skills+counters baseline.
 	private void appendHistoryBaseline()
 	{
 		final String rsn = localName;
@@ -1575,10 +1388,8 @@ public class ChroniclePlugin extends Plugin
 		{
 			return;
 		}
-		// Long, not int: the "overall" entry is the account's total xp, which
-		// passes 2,147,483,647 well before a maxed account and would wrap
-		// negative on the way in — and this stream is the durable record, so a
-		// wrapped baseline stays wrong for every reader that ever subtracts it.
+		// Long: the "overall" entry is total xp, past Integer.MAX_VALUE well before a
+		// maxed account, and it would wrap negative into a stream nothing rewrites.
 		final Map<String, Long> skills = new java.util.HashMap<>();
 		JsonObject sk = harvestSkills();
 		if (sk != null)
@@ -1596,9 +1407,8 @@ public class ChroniclePlugin extends Plugin
 		executor.submit(() ->
 		{
 			historyLog.append(localDir(), rsn, skills, counters, kcs);
-			// The panel reads the spine from memory, so the line just written has
-			// to reach the cache or the day it closes stays invisible until the
-			// next mount.
+			// The panel reads the spine from memory, so the line just written has to reach
+			// the cache or the closed day stays invisible until the next mount.
 			reloadHistory(rsn);
 		});
 	}
@@ -1608,24 +1418,17 @@ public class ChroniclePlugin extends Plugin
 		return statusLine;
 	}
 
-	/**
-	 * Why the journal is not keeping the record — a write that failed, or a file
-	 * a newer build wrote — or null while it is. Panel-facing, and never about
-	 * the server: the on-disk record is the one that matters, cloud or not.
-	 */
+	// Why the journal isn't keeping the record (a failed write, or a file a newer
+	// build wrote), or null while it is.
 	String journalWarning()
 	{
 		return localStore.journalWarning();
 	}
 
 	/**
-	 * Merge a Chronicle journal file into this account's record. The file is a
-	 * journal in the same shape this plugin writes, so an export from anywhere —
-	 * a server that holds an older copy, another computer, last month's backup —
-	 * can be folded in without the plugin ever reading from a network. Every
-	 * store merges as a floor, so importing twice is the same as importing once.
-	 * If the file has a {@code .history.jsonl} sibling, its calendar spine comes
-	 * across too.
+	 * Merge a Chronicle journal file into this account's record. Every store merges
+	 * as a floor, so importing twice is the same as importing once. A sibling
+	 * {@code .history.jsonl} brings its calendar spine across too.
 	 */
 	void actionImport(File file)
 	{
@@ -1665,7 +1468,7 @@ public class ChroniclePlugin extends Plugin
 			{
 				return;
 			}
-			// The calendar spine travels beside the journal, not inside it.
+			// The spine travels beside the journal in its own file.
 			File spine = new File(file.getParentFile(),
 				file.getName().replaceAll("\\.json$", "") + ".history.jsonl");
 			int days = spine.isFile() ? historyLog.importSpine(localDir(), rsn, spine) : 0;
@@ -1677,18 +1480,15 @@ public class ChroniclePlugin extends Plugin
 		});
 	}
 
-	/**
-	 * Show the player their journal. There is nothing to export: the record is
-	 * already a plain JSON file on their own disk, so the honest gesture is to
-	 * open the folder it lives in rather than to manufacture a second copy.
-	 */
+	// There's nothing to export: the record is already a plain JSON file on the
+	// player's disk, so open the folder rather than write a second copy.
 	void actionOpenJournalFolder()
 	{
 		executor.submit(() ->
 		{
 			if (localName != null && localStore.isReadyFor(localName))
 			{
-				localStore.flush(localDir());   // show it current, not as of the last fold
+				localStore.flush(localDir());   // flush so the folder shows it current
 			}
 			File dir = localDir();
 			dir.mkdirs();
@@ -1741,12 +1541,9 @@ public class ChroniclePlugin extends Plugin
 		return s.isEmpty() ? null : s;
 	}
 
-	/** Small programmatic icon so the repo ships no binary assets. */
 	private static BufferedImage buildIcon()
 	{
-		// A small open book — the Chronicle. Distinct from every text-badge
-		// icon on the rail (and from the old plugin's "F", so a dev client
-		// running both is never ambiguous).
+		// A small open book, distinct from the text-badge icons on the rail.
 		BufferedImage img = new BufferedImage(24, 24, BufferedImage.TYPE_INT_ARGB);
 		Graphics2D g = img.createGraphics();
 		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);

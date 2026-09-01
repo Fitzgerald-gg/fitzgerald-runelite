@@ -61,20 +61,13 @@ import net.runelite.client.util.Text;
 import net.runelite.http.api.loottracker.LootRecordType;
 
 /**
- * Captures RAW game events and fires them at {@code POST /api/events/<token>}.
+ * Turns game events into journal entries: LOOT, LEVEL, DEATH, COLLECTION, PET,
+ * QUEST, COMBAT_ACHIEVEMENT, DIARY, SLAYER, CLUE, GROUP_STORAGE, LOOT_UNTAKEN.
  *
- * <p>This is the thin half of the thin-client/fat-server split: it sends only
- * raw fields (item ids + quantity, boss name, skill/level) and NEVER computes
- * GE prices, drop rarity, or item names — the server enriches all of that from
- * its nightly price/drop cache. So new game content (bosses, drops, prices)
- * needs no plugin release; only a RuneLite client-API change would.
- *
- * <p>Registered on the EventBus by {@link ChroniclePlugin} (register/unregister
- * in startUp/shutDown) rather than being a plugin itself. Backbone taps: LOOT
- * (npc + event loot) and LEVEL (real level-ups, warmed up + tick-batched to
- * avoid login false positives), with a kill-count chat tap that annotates loot.
- * DEATH / COLLECTION / PET / QUEST / COMBAT_ACHIEVEMENT / DIARY / SLAYER / CLUE
- * taps are the next increment (see plugin/REBUILD_V2.md).
+ * <p>Registered on the EventBus by {@link ChroniclePlugin} in startUp/shutDown
+ * rather than being a plugin itself. Every tap ends at {@link #emit}: the on-disk
+ * journal always gets the event, and a copy goes to the configured server only
+ * when cloud sync is switched on.
  */
 @Slf4j
 @Singleton
@@ -83,23 +76,18 @@ public class ChronicleEventCapture
 	static final String GROUP = ChronicleConfig.GROUP;   // "chronicle"
 	static final String KEY_TOKEN = "token";
 
-	/** Ordinary skills cap here; a reported level above it is not a real level-up. */
+	// ordinary skills stop here; a reported level above it isn't a real level-up.
 	private static final int MAX_LEVEL = 99;
 
-	// Chat-driven detection. The literal message text below is what the game itself
-	// prints — those strings are established from the OSRS Wiki, and being the game's
-	// own words they are the same for anyone who reads them. The way each line is
-	// taken apart — which spans are captured, their names, how the numbers are read —
-	// is this plugin's own; group names are the fields the server ingest expects, and
-	// every pattern is pinned by a positive/negative corpus in ChatPatternTest. All
-	// matching runs AFTER Text.removeTags, so the red <col> wrapper is already gone.
-	// The lines only appear with the usual chat settings on: kill-count spam-filter
-	// off, collection-log "new addition" notification on, CA "repeat completion" off.
+	// Chat taps. Everything below matches AFTER Text.removeTags, so the <col>
+	// wrapper is already gone. The lines only print with the usual chat settings:
+	// kill-count spam filter off, collection-log notification on, CA repeat
+	// completion off.
 
-	// "Your Zulrah kill count is: 501.", plus the raid shape "Your completed Theatre
-	// of Blood: Hard Mode count is: 40." One expression covers both: the optional
-	// "completed " prefix, the optional tally word (which raids omit), and a lazy
-	// name so a mode suffix's own colon stays part of the name. Ends in a full stop.
+	// "Your Zulrah kill count is: 501." and the raid shape "Your completed Theatre
+	// of Blood: Hard Mode count is: 40." One expression covers both: optional
+	// "completed " prefix, optional tally word (raids omit it), lazy name so a mode
+	// suffix's own colon stays in the name.
 	static final Pattern KILL_COUNT = Pattern.compile(
 		"^Your (?:completed )?(?<subject>.+?)"
 			+ "(?: (?:kill|chest|lap|harvest|success|completion))? count is: (?<tally>[\\d,]+)\\.$");
@@ -107,62 +95,54 @@ public class ChronicleEventCapture
 	static final Pattern COLLECTION_ITEM = Pattern.compile(
 		"^New item added to your collection log: (?<entry>.+)$");
 
-	// Tier is a single word (Grandmaster among them); the challenge name is the rest
-	// of the line, trimmed of an optional trailing stop.
+	// the tier is one word; the challenge is the rest of the line, trailing stop optional.
 	static final Pattern COMBAT_TASK = Pattern.compile(
 		"^Congratulations, you've completed an? (?<grade>\\w+) combat task: (?<challenge>.+?)\\.?$");
 	private static final Pattern COMBAT_TASK_POINTS = Pattern.compile("\\s*\\(\\d+ points?\\)$");
 
-	// "You have completed 87 hard Treasure Trails." The tier is spelled out as an
-	// explicit set rather than a wildcard, and the closing full stop is required —
-	// which is what separates the running tally from the singular reward-open line
-	// "You have completed a hard Treasure Trail." (an "a", no stop-anchored count).
+	// "You have completed 87 hard Treasure Trails." Tiers are an explicit set and the
+	// closing stop is required, so the singular reward-open line ("You have completed
+	// a hard Treasure Trail.") doesn't match.
 	static final Pattern CLUE_COMPLETION = Pattern.compile(
 		"^You have completed (?<tally>[\\d,]+) (?<rank>beginner|easy|medium|hard|elite|master)"
 			+ " Treasure Trails?\\.$");
 
-	// MESBOX. More text follows the area name, so this is a find, not a full match,
-	// and the region span is lazy up to " area" so "Lumbridge & Draynor" stays whole.
+	// more text follows the area name, so this has to be a find(); the region span is
+	// lazy up to " area" so "Lumbridge & Draynor" stays whole.
 	static final Pattern DIARY_COMPLETION = Pattern.compile(
 		"Congratulations! You have completed all of the (?<grade>\\w+) tasks in the (?<region>.+?) area");
 
-	// Slayer prints the finished-task line and, separately, a running total. The
-	// finished line's count and creature are pulled apart into their own spans here
-	// rather than captured as one blob, so no second split step is needed. The
+	// Slayer prints a finished-task line and, separately, a running total. The
 	// finished line is NOT $-anchored: modern OSRS appends " You gained N xp." after
 	// the creature, and creature's [^.]+ already stops at the first period. On the
-	// total line an optional qualifier word before "task" is the game's (e.g. a
-	// "Wilderness" task, or a master name as in "…1 Mortimer task;…"); "at least" is
-	// also optional, and a numeric total is required so "…enough tasks to unlock…"
-	// is ignored.
+	// total line the qualifier before "task" is the game's ("N Wilderness tasks",
+	// "…1 Mortimer task;…"), and a numeric total is required so "…enough tasks to
+	// unlock…" is ignored.
 	static final Pattern SLAYER_FINISHED = Pattern.compile(
 		"^You have completed your task! You killed (?<slain>[\\d,]+) (?<creature>[^.]+)\\.");
 	static final Pattern SLAYER_TOTAL = Pattern.compile(
 		"^You've completed (?:at least )?(?<total>[\\d,]+) (?<qual>[A-Za-z]+ )?tasks?"
 			+ "(?:;| and received)");
 
-	// The two real pet lines are spelled out in full, so a near-miss the game also
-	// prints — "being watched", "into your bank" — cannot slip through.
+	// spelled out in full so the near-misses the game also prints ("being watched",
+	// "sneaking into your bank") can't slip through.
 	static final Pattern PET_RECEIVED = Pattern.compile(
 		"^(?:You have a funny feeling like you're being followed"
 			+ "|You feel something weird sneaking into your backpack"
 			+ "|You have a funny feeling like you would have been followed\\.\\.\\.)\\.?$");
 
-	// Carries no coin value and no trailing stop, unlike the sibling "Valuable drop:
-	// …(N coins)" line and the "<player> received a drop: …." clan broadcast.
+	// no coin value and no trailing stop, so the sibling "Valuable drop: …(N coins)"
+	// line and the "<player> received a drop: …." clan broadcast stay out.
 	static final Pattern UNTRADEABLE_DROP = Pattern.compile("^Untradeable drop: (?<dropped>.+)$");
 
-	// Boss timers. The game phrases them several ways — "Fight duration: 1:26.40
-	// (new personal best)", "Duration: 36:04. Personal best: 31:12", "Subdued in
-	// 6:23" — and raid lines lead with their own prose ("Congratulations - your
-	// raid is complete! Duration: …"), so this is a find, not a full match. Longer
-	// labels precede "Duration" in the alternation so it can't shadow them. The
-	// label is read without regard to case: the raids bury theirs mid-sentence in
-	// lower case — Tombs of Amascut prints "…challenge completion time: 25:33.60",
-	// the Theatre "…total completion time: …" — and a capitals-only label left
-	// those times, and the PBs they carry, unread. The time span stays strict.
-	// The timer line never names the boss; pairing with the kill is done by tick
-	// adjacency against the next loot event.
+	// Boss timers, phrased several ways: "Fight duration: 1:26.40 (new personal
+	// best)", "Duration: 36:04. Personal best: 31:12", "Subdued in 6:23". Raid lines
+	// lead with their own prose ("Congratulations - your raid is complete! Duration:
+	// …"), so this is a find(). Longer labels precede "Duration" in the alternation
+	// so it can't shadow them, and the label is case-insensitive because the raids
+	// bury theirs mid-sentence in lower case (ToA "…challenge completion time:
+	// 25:33.60", ToB "…total completion time: …"). The timer line never names the
+	// boss; pairing with the kill is tick adjacency against the next loot event.
 	static final Pattern KILL_DURATION = Pattern.compile(
 		"(?i:Fight duration|Challenge duration|Corrupted challenge duration"
 			+ "|Completion time|Subdued in|Duration):? (?<time>\\d+(?::\\d{2})+(?:\\.\\d{1,2})?)");
@@ -177,54 +157,53 @@ public class ChronicleEventCapture
 	private final ChronicleApiClient api;
 	private final LocalStore localStore;
 
-	// Optional: provided by RuneLite's core Slayer plugin. Absent in a dev-mode
-	// client (or if the user disables Slayer) — stays null and we skip the stamp.
+	// from RuneLite's core Slayer plugin. Stays null in a dev-mode client, or when the
+	// user turns Slayer off; we skip the task stamp then.
 	@com.google.inject.Inject(optional = true)
 	private SlayerPluginService slayerService;
 
 	private final Map<Skill, Integer> knownLevels = new EnumMap<>(Skill.class);
 	private final Set<Skill> pendingLevels = new HashSet<>();
 	private final Map<String, Integer> recentKc = new HashMap<>();
-	// The most recent boss-timer chat line, held a few ticks to annotate the
-	// kill's loot event — one-shot, so a later unrelated kill can't inherit it.
+	// the most recent boss-timer chat line, held a few ticks to annotate the kill's
+	// loot event. One-shot, so a later unrelated kill can't inherit it.
 	private static final int KILL_TIME_PAIR_TICKS = 4;
 	private double lastKillTimeSec = -1;
 	private double lastPbTimeSec = -1;
 	private boolean lastKillPb;
 	private int lastKillTimeTick = -1;
-	// The last NPC seen locking onto us, for death attribution when nothing is
-	// still engaged at the death tick (poison after the attacker moved on).
+	// the last NPC seen locking onto us, for death attribution when nothing is still
+	// engaged at the death tick (poison after the attacker moved on).
 	private static final int ATTACKER_MEMORY_TICKS = 50;
 	private String lastAttackerName;
 	private int lastAttackerTick = -1;
 
 	// ── GIM group storage ─────────────────────────────────────────────────
-	// Deposits/withdrawals are derived by diffing the shared bank's TEMP
-	// container between the first server sync after the interface opens (the
-	// baseline) and its state when the interface closes — the game only commits
-	// the session's edits on close, so per-click tracking would count changes
-	// the player backed out of.
+	// Deposits/withdrawals come from diffing the shared bank's TEMP container
+	// between the first server sync after the interface opens and its state when the
+	// interface closes. The game only commits the session's edits on close, so
+	// per-click tracking would count changes the player backed out of.
 	private boolean groupStorageOpen;
 	private Map<Integer, Integer> groupStorageBaseline;
 	private Map<Integer, Integer> groupStorageCurrent;
-	// A kill's loot can arrive via BOTH NpcLootReceived and ServerNpcLoot in
-	// current RuneLite (they are NOT mutually exclusive, and RuneLite applies no
-	// suppression). NpcLootReceived is a client-side GROUND-ITEM SCAN — it guesses
-	// which floor items belong to the corpse — so when several NPCs die on one tick
-	// (bursting/barrage) it mis-attributes the pile, handing one kill's coins to
-	// another and leaving that one with just its bones. ServerNpcLoot comes from the
-	// game's own loottracker_add_loot script and is exact per kill. So we PREFER the
-	// server event: each NpcLootReceived is held briefly and dropped if a
-	// ServerNpcLoot covered the same NPC on the same kill's tick; the ground-scan is
-	// emitted only as a FALLBACK for NPCs the loot script doesn't fire for.
+
+	// ── Loot reconciliation ───────────────────────────────────────────────
+	// A kill's loot can arrive via BOTH NpcLootReceived and ServerNpcLoot; RuneLite
+	// suppresses neither. NpcLootReceived is a client-side ground-item scan that
+	// guesses which floor items belong to the corpse, so when several NPCs die on one
+	// tick (bursting/barrage) it mis-attributes the pile. ServerNpcLoot comes from the
+	// game's own loottracker_add_loot script and is exact per kill, so we prefer it:
+	// each NpcLootReceived is held briefly and dropped if a ServerNpcLoot covered the
+	// same NPC on the same kill's tick. The ground scan is emitted only as a fallback
+	// for NPCs the loot script doesn't fire for.
 	private static final int SERVER_LOOT_WINDOW_TICKS = 2;
 	// (npcId, tick) pairs a ServerNpcLoot reported, so a held client copy can tell
-	// whether its own kill was covered — keyed per-tick so repeated kills of the
-	// same NPC don't cross-cover a genuinely uncovered one.
+	// whether its own kill was covered. Keyed per-tick so repeated kills of the same
+	// NPC don't cross-cover a genuinely uncovered one.
 	private final Set<Long> serverLootKeys = new HashSet<>();
 	private final List<PendingLoot> pendingClientLoot = new ArrayList<>();
 
-	/** A NpcLootReceived built at kill time, awaiting the server-vs-client verdict. */
+	// an NpcLootReceived built at kill time, waiting on the server-vs-client verdict.
 	private static final class PendingLoot
 	{
 		private final int npcId;
@@ -240,28 +219,25 @@ public class ChronicleEventCapture
 	}
 
 	// ── Untaken loot ───────────────────────────────────────────────────────
-	// The player's own ground items from a kill, keyed by TileItem identity (the
-	// same instance is redelivered on despawn). We only arm tracking for a few
-	// ticks after a kill so manual drops aren't counted. On despawn we ask the
-	// item's own scheduled despawn tick whether it timed out (left behind) or was
-	// taken early; the timed-out ones are batched and forwarded for the server to
-	// price into the untakenLoot* counters.
+	// The player's own ground items from a kill, keyed by TileItem identity (the same
+	// instance is redelivered on despawn). Tracking is armed for only a few ticks
+	// after a kill so manual drops aren't counted. On despawn we ask the item's own
+	// scheduled despawn tick whether it timed out (left behind) or was taken early;
+	// the timed-out ones are batched into a LOOT_UNTAKEN event.
 	private static final int SELF_OWNED = TileItem.OWNERSHIP_SELF;
 	private static final int KILL_ARM_TICKS = 3;
 	private final Map<TileItem, GroundLoot> groundLoot = new IdentityHashMap<>();
-	// Self-owned items seen this-and-recent ticks, awaiting a kill to confirm them
-	// as loot. RuneLite fires ItemSpawned BEFORE the kill's NpcLootReceived, so we
-	// can't decide on the spawn — reconcileKillLoot() at GameTick matches them up.
+	// Self-owned items seen on recent ticks, awaiting a kill to confirm them as loot.
+	// RuneLite fires ItemSpawned BEFORE the kill's NpcLootReceived, so the spawn
+	// can't decide; reconcileKillLoot() matches them up at GameTick.
 	private final Map<TileItem, GroundLoot> pendingSelf = new IdentityHashMap<>();
 	private final List<UntakenItem> untakenBatch = new ArrayList<>();
-	// The kills of the last few ticks, each carrying the source name stamped onto
-	// the loot it produced so the Uncollected ledger can say WHERE things were left
-	// behind. One slot was not enough: when several NPCs die inside a single arming
-	// window they all inherit the newest name, so the first kill's pile is filed
-	// under the last kill's monster.
+	// The kills of the last few ticks, each carrying the source name stamped onto the
+	// loot it produced so the Uncollected ledger can say where things were left. A
+	// single slot files every pile from a burst of kills under the last monster.
 	private final List<RecentKill> recentKills = new ArrayList<>();
 
-	/** A kill of ours, remembered long enough for its ground items to find it. */
+	// a kill of ours, remembered long enough for its ground items to find it.
 	private static final class RecentKill
 	{
 		private final int tick;
@@ -279,8 +255,8 @@ public class ChronicleEventCapture
 		private final int id;
 		private final int qty;
 		private final String source;
-		// The account that earned it. The batch is gathered before a logout and
-		// sent after the next login, which may belong to somebody else.
+		// the account that earned it. The batch is gathered before a logout and sent
+		// after the next login, which may belong to somebody else.
 		private final String owner;
 
 		private UntakenItem(int id, int qty, String source, String owner)
@@ -297,25 +273,23 @@ public class ChronicleEventCapture
 		private final int id;
 		private final int qty;
 		private final int despawnTick;
-		private final int visibleTick;
 		private final int spawnTick;
 		private final boolean group;   // group-ironman ownership rather than our own
 		private final String owner;    // the account it spawned for
 		private final String source;   // the kill it belongs to; null until promoted
 
-		private GroundLoot(int id, int qty, int despawnTick, int visibleTick, int spawnTick,
+		private GroundLoot(int id, int qty, int despawnTick, int spawnTick,
 			boolean group, String owner)
 		{
-			this(id, qty, despawnTick, visibleTick, spawnTick, group, owner, null);
+			this(id, qty, despawnTick, spawnTick, group, owner, null);
 		}
 
-		private GroundLoot(int id, int qty, int despawnTick, int visibleTick, int spawnTick,
+		private GroundLoot(int id, int qty, int despawnTick, int spawnTick,
 			boolean group, String owner, String source)
 		{
 			this.id = id;
 			this.qty = qty;
 			this.despawnTick = despawnTick;
-			this.visibleTick = visibleTick;
 			this.spawnTick = spawnTick;
 			this.group = group;
 			this.owner = owner;
@@ -324,28 +298,26 @@ public class ChronicleEventCapture
 
 		private GroundLoot withSource(String src)
 		{
-			return new GroundLoot(id, qty, despawnTick, visibleTick, spawnTick, group, owner, src);
+			return new GroundLoot(id, qty, despawnTick, spawnTick, group, owner, src);
 		}
 	}
 
-	// A pet-drop message primes us; the pet NAME then arrives on a following
-	// collection-log / untradeable line within a tick or two. Window it so a
-	// later unrelated clog entry isn't mistaken for the pet.
+	// A pet-drop message primes us; the pet NAME arrives on a following
+	// collection-log / untradeable line a tick or two later. Windowed so a later
+	// unrelated clog entry isn't mistaken for the pet.
 	private int petPendingTicks = -1;
-	// Slayer completion spans two lines ("You killed 150 X" + "You've completed
-	// N tasks"); stash the task string until we emit.
+	// Slayer completion spans two lines ("You killed 150 X" + "You've completed N
+	// tasks"); stash the task string until we emit.
 	private String pendingSlayerTask;
 	private String pendingSlayerMonster;
 	private Integer pendingSlayerKills;
 	// Ticks since a finished-task line armed a pending completion; -1 = idle. If the
-	// "You've completed N tasks" streak line never finalises it within the window
-	// (reworded/missed/wrong chat type), the finished line IS itself a real
-	// completion, so we flush it rather than silently drop it. Disarmed the moment
-	// the streak line processes, so this never double-emits.
+	// streak line never finalises it within the window (reworded, missed, wrong chat
+	// type), the finished line is itself a real completion and gets flushed. Disarmed
+	// the moment the streak line processes, so this can't double-emit.
 	private int slayerPendingTicks = -1;
-	// The task name seen at KILL time (via the loot stamp, when getTask() is still
-	// valid). RuneLite clears getTask() on the completing tick, so at the streak
-	// line the live service is empty — this is the authoritative fallback identity.
+	// The task name seen at KILL time, via the loot stamp. RuneLite clears getTask()
+	// on the completing tick, so by the streak line the live service is empty.
 	private String lastSlayerTask;
 
 	@Inject
@@ -360,14 +332,14 @@ public class ChronicleEventCapture
 		this.localStore = localStore;
 	}
 
-	/** True once the core Slayer plugin's service is wired (via @PluginDependency).
-	 *  If false, on-task drop tagging is inactive. */
+	// false means the core Slayer plugin's service never bound, so on-task drop
+	// tagging is inactive.
 	boolean hasSlayerService()
 	{
 		return slayerService != null;
 	}
 
-	/** Reset per-login state so we don't emit stale level-ups after a hop/relog. */
+	// clear per-login state so nothing from the last session leaks into this one.
 	void reset()
 	{
 		knownLevels.clear();
@@ -385,30 +357,23 @@ public class ChronicleEventCapture
 		pendingSlayerKills = null;
 		slayerPendingTicks = -1;
 		lastSlayerTask = null;
-		// Ground-item refs belong to the scene we're leaving; drop them. The
-		// untaken batch is pending data to send, so it is deliberately kept —
-		// each item carries the account it was earned on, and flushUntakenLoot
-		// sends only the ones the account now logging in actually left behind.
+		// Ground-item refs belong to the scene we're leaving, so drop them. The
+		// untaken batch is kept: each item carries the account it was earned on, and
+		// flushUntakenLoot only sends the ones belonging to whoever logs in next.
 		groundLoot.clear();
 		pendingSelf.clear();
 		recentKills.clear();
-		// Loot reconciliation state is tick-scoped to the scene we're leaving.
+		// loot reconciliation is tick-scoped to the scene we're leaving.
 		pendingClientLoot.clear();
 		serverLootKeys.clear();
 	}
 
-	/**
-	 * Forward any left-behind loot for the server to price into untakenLoot*.
-	 * Batched per SOURCE (the kill that armed tracking), so the Uncollected
-	 * ledger can say where things were left, not just what.
-	 *
-	 * <p>Items swept up at a logout are only sent on the next login's ticks, and
-	 * that login can belong to a different player, so each item is emitted under
-	 * the account it was stamped with and the rest are discarded. The flush also
-	 * waits for that account's journal to be mounted: without the wait the local
-	 * record silently refuses the batch while the cloud push still takes it, and
-	 * the two ledgers disagree about the same kill.
-	 */
+	// Emit left-behind loot as LOOT_UNTAKEN, one event per SOURCE so the Uncollected
+	// ledger can say where things were left. Items swept up at a logout only go out on
+	// the next login's ticks, and that login can belong to a different player, so
+	// anything stamped with another account is discarded. It also waits for the
+	// journal to be mounted: otherwise LocalStore.record() drops the batch while the
+	// cloud push still takes it, and the two ledgers disagree about the same kill.
 	private void flushUntakenLoot()
 	{
 		if (untakenBatch.isEmpty())
@@ -418,7 +383,7 @@ public class ChronicleEventCapture
 		String owner = localName();
 		if (owner == null || !localStore.isReadyFor(owner))
 		{
-			return;   // nobody to attribute it to yet — the batch keeps
+			return;   // nobody to attribute it to yet, so the batch keeps
 		}
 		Map<String, JsonArray> bySource = new HashMap<>();
 		for (UntakenItem it : untakenBatch)
@@ -446,12 +411,10 @@ public class ChronicleEventCapture
 		}
 	}
 
-	/**
-	 * Promote buffered self-owned spawns to tracked kill loot once we can see they
-	 * landed within {@link #KILL_ARM_TICKS} of a kill — run at GameTick, after both
-	 * the ItemSpawned and the (later-firing) NpcLootReceived have been processed.
-	 * Spawns that never sit near a kill are manual drops and are dropped.
-	 */
+	// Promote buffered self-owned spawns to tracked kill loot when they landed within
+	// KILL_ARM_TICKS of a kill. Runs at GameTick, once both the ItemSpawned and the
+	// later-firing NpcLootReceived are in. A spawn that never sits near a kill is a
+	// manual drop and is discarded.
 	private void reconcileKillLoot()
 	{
 		if (pendingSelf.isEmpty())
@@ -471,7 +434,7 @@ public class ChronicleEventCapture
 			}
 			else if (now - g.spawnTick > KILL_ARM_TICKS)
 			{
-				done.add(e.getKey());   // no kill nearby — a manual drop, discard
+				done.add(e.getKey());   // no kill nearby, so it's a manual drop
 			}
 		}
 		for (TileItem t : done)
@@ -480,13 +443,10 @@ public class ChronicleEventCapture
 		}
 	}
 
-	/**
-	 * The kill a buffered spawn belongs to: the latest one it could have followed,
-	 * so a burst of kills files each pile under the monster that actually dropped
-	 * it. A GROUP-owned spawn has to match a kill on its OWN tick — on a group
-	 * ironman a team-mate's drops arrive group-owned too, and the wider window
-	 * books what they leave behind into our ledger when they fight beside us.
-	 */
+	// The kill a buffered spawn belongs to: the latest one it could have followed, so a
+	// burst of kills files each pile under the monster that dropped it. A GROUP-owned
+	// spawn has to match a kill on its OWN tick, because a team-mate's drops arrive
+	// group-owned too and the wider window would book theirs into our ledger.
 	private RecentKill killFor(GroundLoot g)
 	{
 		int window = g.group ? 0 : KILL_ARM_TICKS;
@@ -506,7 +466,7 @@ public class ChronicleEventCapture
 		return best;
 	}
 
-	/** Arm untaken tracking: ground items spawning around now are this kill's. */
+	// arm untaken tracking: ground items spawning around now are this kill's.
 	private void armKill(String source)
 	{
 		int now = client.getTickCount();
@@ -536,22 +496,18 @@ public class ChronicleEventCapture
 		}
 		data.add("items", itemsToJson(event.getItems()));
 		stampSlayer(data);
-		// Hold it: a ServerNpcLoot for this same kill (this tick) is authoritative
-		// and will supersede this ground-scan copy. flushPendingClientLoot() emits
-		// it a couple of ticks later only if no server event covered the kill.
+		// Hold it: a ServerNpcLoot for this same kill supersedes this ground-scan copy.
+		// flushPendingClientLoot() emits it a couple of ticks later only if no server
+		// event covered the kill.
 		pendingClientLoot.add(new PendingLoot(npc.getId(), client.getTickCount(), data));
 		armKill(npc.getName());
 	}
 
-	/**
-	 * Server-authoritative NPC loot from the game's {@code loottracker_add_loot}
-	 * script. This is the exact per-kill drop, so it is the preferred source: it
-	 * emits immediately and marks the kill's (npcId, tick) so the matching
-	 * {@link NpcLootReceived} ground-scan copy is dropped in
-	 * {@link #flushPendingClientLoot()}. For newer content (e.g. the Mad Angel) it
-	 * is the ONLY loot event; for traditional monsters both fire and this one wins.
-	 * Reads the NPC from the composition (the actor has usually despawned by now).
-	 */
+	// The exact per-kill drop from the game's loottracker_add_loot script. Emits
+	// straight away and marks the kill's (npcId, tick) so flushPendingClientLoot()
+	// drops the matching ground-scan copy. For newer content (the Mad Angel) this is
+	// the only loot event. The NPC comes from the composition because the actor has
+	// usually despawned by now.
 	@Subscribe
 	public void onServerNpcLoot(ServerNpcLoot event)
 	{
@@ -578,12 +534,9 @@ public class ChronicleEventCapture
 		armKill(comp.getName());
 	}
 
-	/**
-	 * Emit held ground-scan loot once its kill is old enough that the authoritative
-	 * server event (if any) has landed. A kill the loot script covered has its
-	 * ground-scan copy dropped here — that copy mis-attributes items across an AoE
-	 * stack, and dropping it is what stops one physical kill being recorded twice.
-	 */
+	// Emit held ground-scan loot once its kill is old enough that the server event, if
+	// there is one, has landed. A kill the loot script covered has its ground-scan copy
+	// dropped here, which keeps one physical kill from being recorded twice.
 	private void flushPendingClientLoot()
 	{
 		if (pendingClientLoot.isEmpty())
@@ -598,45 +551,38 @@ public class ChronicleEventCapture
 			// rather than holding forever.
 			if (now >= pl.tick && now - pl.tick < SERVER_LOOT_WINDOW_TICKS)
 			{
-				survivors.add(pl);   // window still open — give the server event time
+				survivors.add(pl);   // window still open; give the server event time
 				continue;
 			}
 			if (!serverCovered(pl.npcId, pl.tick))
 			{
-				// No loot-script event for this NPC — the ground-scan is all we have.
+				// no loot-script event for this NPC; the ground scan is all we have.
 				attachKillTime(pl.data);
 				emit("LOOT", pl.data);
 			}
-			// else: ServerNpcLoot already reported this kill exactly — drop the copy.
+			// else ServerNpcLoot already reported this kill exactly, so drop the copy.
 		}
 		pendingClientLoot.clear();
 		pendingClientLoot.addAll(survivors);
 	}
 
-	/**
-	 * Drop server-loot keys past the window in which a held client copy could still
-	 * need them. Runs every tick rather than alongside the flush above: for content
-	 * the ground scan never fires for (the Mad Angel case) nothing is ever held, so
-	 * a prune reached only through pending client loot would keep every kill of the
-	 * session and leave the covered-check probing an ever-growing set.
-	 */
+	// Drop server-loot keys past the window in which a held client copy could still
+	// need them. Runs every tick rather than off the flush above: content the ground
+	// scan never fires for holds nothing, so a prune reached only through pending
+	// client loot would keep every kill of the session.
 	private void expireServerLootKeys()
 	{
 		int now = client.getTickCount();
 		serverLootKeys.removeIf(k -> now - (int) (k & 0xFFFFFFFFL) > SERVER_LOOT_WINDOW_TICKS + 2);
 	}
 
-	/** Did a ServerNpcLoot report this NPC on the kill's tick (or a tick or two after)? */
 	private boolean serverCovered(int npcId, int killTick)
 	{
 		return serverCoveredIn(serverLootKeys, npcId, killTick, SERVER_LOOT_WINDOW_TICKS);
 	}
 
-	/**
-	 * Pure decision: was (npcId, killTick) covered by a server-loot key within the
-	 * forward window? Matches on the kill's OWN tick range, so a later kill of the
-	 * same NPC never retroactively covers an earlier, genuinely uncovered one.
-	 */
+	// Looks forward from the kill's own tick only, so a later kill of the same NPC
+	// can't retroactively cover an earlier uncovered one.
 	static boolean serverCoveredIn(Set<Long> keys, int npcId, int killTick, int window)
 	{
 		for (int t = killTick; t <= killTick + window; t++)
@@ -657,13 +603,12 @@ public class ChronicleEventCapture
 	@Subscribe
 	public void onItemSpawned(ItemSpawned event)
 	{
-		// Only the local player's own kill loot, dropped within a few ticks of a
-		// kill (so manual drops and other players' loot are ignored). GROUP
-		// ownership is accepted alongside SELF because a group ironman's OWN
-		// drops arrive GROUP-stamped — the exact reason the Left behind ledger
-		// sat empty on a GIM account (GroundItemsPlugin upstream does the same);
-		// a group-owned spawn is then held to the tick of a kill of ours, which is
-		// what keeps a team-mate's drops out of the ledger.
+		// Only the local player's own kill loot, dropped within a few ticks of a kill,
+		// so manual drops and other players' loot are ignored. GROUP ownership counts
+		// alongside SELF because a group ironman's own drops arrive GROUP-stamped
+		// (upstream GroundItemsPlugin accepts both as well); killFor() then holds a
+		// group-owned spawn to the tick of a kill of ours so a team-mate's drops stay
+		// out of the ledger.
 		TileItem it = event.getItem();
 		if (it == null)
 		{
@@ -675,27 +620,27 @@ public class ChronicleEventCapture
 			return;
 		}
 		int now = client.getTickCount();
-		// Buffer only — the kill's NpcLootReceived fires AFTER this, so we can't yet
-		// tell kill loot from a manual drop. reconcileKillLoot() decides at GameTick.
-		// The account is read here, while we are certainly logged in as it: left-behind
-		// items are sent after the next login, which may be somebody else's.
+		// Buffer only: the kill's NpcLootReceived fires AFTER this, so kill loot and a
+		// manual drop are still indistinguishable. reconcileKillLoot() decides at
+		// GameTick. The account is read here while we're certainly logged in as it,
+		// since left-behind items go out after the next login, which may be another's.
 		pendingSelf.put(it, new GroundLoot(it.getId(), it.getQuantity(),
-			it.getDespawnTime(), it.getVisibleTime(), now, group, localName()));
+			it.getDespawnTime(), now, group, localName()));
 	}
 
 	@Subscribe
 	public void onItemDespawned(ItemDespawned event)
 	{
-		pendingSelf.remove(event.getItem());   // may despawn before reconcile — tidy up
+		pendingSelf.remove(event.getItem());   // may despawn before reconcile runs
 		GroundLoot g = groundLoot.remove(event.getItem());
 		if (g == null)
 		{
 			return;
 		}
 		int now = client.getTickCount();
-		// Reaching the scheduled despawn tick means it timed out on the ground —
-		// left behind. An earlier despawn is a pickup (yours while still private,
-		// or someone else's after it went public); either way, not left behind.
+		// Reaching the scheduled despawn tick means it timed out on the ground, so it
+		// was left behind. An earlier despawn is a pickup: yours while it was still
+		// private, or someone else's once it went public.
 		boolean left = g.despawnTick > 0 && now >= g.despawnTick - 1;
 		if (left)
 		{
@@ -703,15 +648,7 @@ public class ChronicleEventCapture
 		}
 	}
 
-	/**
-	 * Stamp an NPC-loot event with the slayer task active at the moment of the
-	 * kill, so the server can tag on-task loot EXACTLY at ingest instead of
-	 * guessing from a post-completion time window. Reads RuneLite's core Slayer
-	 * plugin service; {@code getTask()} is empty when the plugin is off or there
-	 * is no task, in which case nothing is attached. The server decides on-task
-	 * from the task + npc id via its authoritative matcher.
-	 */
-	/** The live slayer task for the panel's Home card, or null when none/unavailable. */
+	// the live slayer task for the panel's Home card; null when there's none.
 	SlayerView slayerView()
 	{
 		if (slayerService == null)
@@ -734,7 +671,7 @@ public class ChronicleEventCapture
 		}
 	}
 
-	/** Immutable slayer-task snapshot for the panel. */
+	// immutable slayer-task snapshot for the panel.
 	static final class SlayerView
 	{
 		final String task;
@@ -749,11 +686,13 @@ public class ChronicleEventCapture
 		}
 	}
 
+	// Tag an NPC-loot event with the slayer task live at the moment of the kill, so
+	// on-task loot is settled at capture instead of guessed from a time window later.
 	private void stampSlayer(JsonObject data)
 	{
 		if (slayerService == null)
 		{
-			return;   // core Slayer plugin unavailable — no stamp
+			return;
 		}
 		try
 		{
@@ -763,8 +702,8 @@ public class ChronicleEventCapture
 				return;
 			}
 			data.addProperty("slayerTask", task);
-			lastSlayerTask = task;   // authoritative identity for the completion streak line
-			slayerSeenThisSession = true;   // an on-task kill happened — Home shows the card
+			lastSlayerTask = task;   // the identity the completion streak line falls back to
+			slayerSeenThisSession = true;
 			data.addProperty("slayerTaskRemaining", slayerService.getRemainingAmount());
 			data.addProperty("slayerTaskInitial", slayerService.getInitialAmount());
 			String loc = slayerService.getTaskLocation();
@@ -775,12 +714,12 @@ public class ChronicleEventCapture
 		}
 		catch (RuntimeException ignored)
 		{
-			// Slayer service unavailable — skip the stamp.
+			// no service, no stamp
 		}
 	}
 
-	// True once an on-task kill was stamped this session; Home's slayer card
-	// gates on it so non-slayers never see it. Reset at the account boundary.
+	// True once an on-task kill was stamped this session. Home's slayer card gates on
+	// it so non-slayers never see it. Cleared at the account boundary.
 	private volatile boolean slayerSeenThisSession;
 
 	boolean slayerSeenThisSession()
@@ -793,7 +732,7 @@ public class ChronicleEventCapture
 		slayerSeenThisSession = false;
 	}
 
-	/** The core Slayer plugin's current task name, or null if unavailable/none. */
+	// null when the core Slayer plugin is off or there's no task.
 	private String slayerTaskFromService()
 	{
 		if (slayerService == null)
@@ -814,10 +753,9 @@ public class ChronicleEventCapture
 	@Subscribe
 	public void onLootReceived(LootReceived event)
 	{
-		// NPC loot arrives via onNpcLootReceived, so it would double-count here.
-		// PLAYER loot is dropped outright: on a PK the record carries the victim's
-		// display name and the contents of their inventory, and forwarding another
-		// player's data to a third-party server is something this plugin does not do.
+		// NPC loot arrives via onNpcLootReceived and would double-count here. PLAYER
+		// loot is dropped outright: on a PK the record carries the victim's display
+		// name and their inventory, and this plugin only ever records its own account.
 		if (event.getType() == LootRecordType.NPC || event.getType() == LootRecordType.PLAYER)
 		{
 			return;
@@ -835,12 +773,9 @@ public class ChronicleEventCapture
 		emit("LOOT", data);
 	}
 
-	/**
-	 * Annotate a kill's loot with the boss-timer chat seen moments before. The
-	 * pairing is tick adjacency (the timer line never names the boss), and it is
-	 * one-shot: a raid whose chest is opened minutes after its timer printed
-	 * simply goes unannotated rather than mis-annotating a later kill.
-	 */
+	// Annotate a kill's loot with the boss-timer chat seen moments before. Pairing is
+	// tick adjacency, since the timer line never names the boss, and it's one-shot: a
+	// raid chest opened long after its timer printed goes unannotated.
 	private void attachKillTime(JsonObject data)
 	{
 		if (lastKillTimeTick < 0 || client.getTickCount() - lastKillTimeTick > KILL_TIME_PAIR_TICKS)
@@ -856,7 +791,7 @@ public class ChronicleEventCapture
 		lastKillTimeTick = -1;
 	}
 
-	/** "1:26.40" / "36:04" / "1:01:53.40" → seconds. Digits guaranteed by the regex. */
+	// "1:26.40" / "36:04" / "1:01:53.40" → seconds. The regex guarantees the digits.
 	static double parseDuration(String text)
 	{
 		double sec = 0;
@@ -874,9 +809,8 @@ public class ChronicleEventCapture
 	{
 		if (event.getGroupId() == InterfaceID.SHARED_BANK)
 		{
-			// GIM shared bank opening: the baseline is taken from the FIRST
-			// server sync of the temp container (below), not here — the
-			// container is not populated yet at widget load.
+			// The baseline comes from the first server sync of the temp container
+			// (onItemContainerChanged); it isn't populated yet at widget load.
 			groupStorageOpen = true;
 			groupStorageBaseline = null;
 			groupStorageCurrent = null;
@@ -889,7 +823,7 @@ public class ChronicleEventCapture
 		emitQuestFromScroll();
 	}
 
-	/** Session edits are committed on close — that is when the diff is real. */
+	// the game commits the session's edits on close, so that's when the diff is real.
 	@Subscribe
 	public void onWidgetClosed(WidgetClosed event)
 	{
@@ -914,7 +848,7 @@ public class ChronicleEventCapture
 		groupStorageCurrent = counts;
 	}
 
-	/** Diff baseline → final and report one event of deposits + withdrawals. */
+	// diff baseline → final, one event carrying deposits and withdrawals.
 	private void flushGroupStorage()
 	{
 		Map<Integer, Integer> base = groupStorageBaseline;
@@ -924,7 +858,7 @@ public class ChronicleEventCapture
 		groupStorageCurrent = null;
 		if (base == null || last == null)
 		{
-			return;   // the container never synced — nothing was observed
+			return;   // the container never synced, so nothing was observed
 		}
 		JsonArray deposits = new JsonArray();
 		JsonArray withdrawals = new JsonArray();
@@ -952,7 +886,7 @@ public class ChronicleEventCapture
 		emit("GROUP_STORAGE", data);
 	}
 
-	/** Aggregate a container to id → total quantity, skipping empty slots. */
+	// id → total quantity, stacks merged, empty slots skipped.
 	private static Map<Integer, Integer> containerCounts(ItemContainer container)
 	{
 		Map<Integer, Integer> counts = new HashMap<>();
@@ -972,7 +906,7 @@ public class ChronicleEventCapture
 
 	private void emitQuestFromScroll()
 	{
-		// Title text populates a tick later; read it on the client thread.
+		// the title text populates a tick later; read it on the client thread.
 		clientThread.invokeLater(() ->
 		{
 			Widget title = client.getWidget(InterfaceID.Questscroll.QUEST_TITLE);
@@ -1004,13 +938,11 @@ public class ChronicleEventCapture
 		}
 		int level = event.getLevel();
 		Integer prev = knownLevels.put(skill, level);
-		// Logging in replays every skill's level as a StatChanged, which against an
-		// empty map would read as 23 simultaneous level-ups. Rather than suppress
-		// everything for a fixed warm-up — which is a guess that both hides real
-		// early level-ups and breaks if login runs slow — require a previous reading
-		// that could only have come from live play: one we have actually seen, and
-		// one above zero, since the pre-population pass reports zero for a skill the
-		// client has not filled in yet.
+		// Logging in replays every skill as a StatChanged, which against an empty map
+		// reads as 23 simultaneous level-ups. So a level-up needs a previous reading
+		// that could only have come from live play: one we've actually seen, and one
+		// above zero, since the login pass reports zero for a skill the client hasn't
+		// filled in yet.
 		if (prev != null && prev > 0 && level > prev && level <= MAX_LEVEL)
 		{
 			pendingLevels.add(skill);
@@ -1019,7 +951,7 @@ public class ChronicleEventCapture
 
 	// ── DEATH ─────────────────────────────────────────────────────────────
 
-	/** An NPC "interacts" with its combat target — remember the last one on us. */
+	// an NPC "interacts" with its combat target, so remember the last one on us.
 	@Subscribe
 	public void onInteractingChanged(InteractingChanged event)
 	{
@@ -1051,27 +983,19 @@ public class ChronicleEventCapture
 		}
 		catch (RuntimeException ignored)
 		{
-			// no world location — omit
+			// no world location, leave it off
 		}
 		String killer = findKillerNpc(lp);
 		if (killer != null)
 		{
-			// "killerName" is the wire name the server's DEATH ingest already reads.
 			data.addProperty("killerName", killer);
 		}
-		// Value / items-kept valuation is deferred: it needs inventory +
-		// skull/prayer snapshots, which are not captured today. The death itself
-		// is recorded.
 		emit("DEATH", data);
 	}
 
-	/**
-	 * Best-effort name of the NPC that killed us: preferably one still locked
-	 * onto us at the death tick, else the last one seen turning on us within
-	 * ~30s — which covers a killing blow from poison or a lingering hit after
-	 * the attacker despawned or moved on. Null when neither applies (e.g. an
-	 * environmental death long after combat).
-	 */
+	// Best effort: an NPC still locked onto us at the death tick, else the last one
+	// seen turning on us within ~30s, which covers poison and a lingering hit after
+	// the attacker moved on. Null for an environmental death long after combat.
 	private String findKillerNpc(Player lp)
 	{
 		try
@@ -1087,7 +1011,7 @@ public class ChronicleEventCapture
 		}
 		catch (RuntimeException ignored)
 		{
-			// world view unavailable — fall through to the remembered attacker
+			// no world view; fall through to the remembered attacker
 		}
 		if (lastAttackerName != null && lastAttackerTick >= 0
 			&& client.getTickCount() - lastAttackerTick <= ATTACKER_MEMORY_TICKS)
@@ -1098,15 +1022,15 @@ public class ChronicleEventCapture
 	}
 
 	// ── CHAT: kc / collection / clue / combat-achievement / slayer / pet /
-	//         diary (all raw; server interprets) ────────────────────────────
+	//         diary ────────────────────────────────────────────────────────
 
 	@Subscribe
 	public void onChatMessage(ChatMessage message)
 	{
 		ChatMessageType t = message.getType();
-		// Every line the game prints reaches here, public and clan chat included, and
-		// a crowded world delivers hundreds a minute. None of them can carry anything
-		// read below, so the type is settled before paying for the tag strip.
+		// Every line the game prints reaches here, public and clan chat included, and a
+		// crowded world delivers hundreds a minute. Settle the type before paying for
+		// the tag strip.
 		if (t != ChatMessageType.MESBOX && t != ChatMessageType.GAMEMESSAGE
 			&& t != ChatMessageType.SPAM)
 		{
@@ -1114,9 +1038,8 @@ public class ChronicleEventCapture
 		}
 		String msg = Text.removeTags(message.getMessage());
 
-		// Diary completion is usually a MESBOX line, but the same congratulatory
-		// line can also arrive as a plain GAMEMESSAGE — check both so it isn't
-		// silently dropped when the game classifies it as a game message.
+		// Diary completion is usually a MESBOX line, but the same congratulatory line
+		// can arrive as a plain GAMEMESSAGE, so check both.
 		Matcher d = DIARY_COMPLETION.matcher(msg);
 		if (d.find())
 		{
@@ -1131,7 +1054,7 @@ public class ChronicleEventCapture
 			return;   // MESBOX only ever carries the diary line handled above
 		}
 
-		// Kill count — annotates the next loot event for this source.
+		// Kill count: annotates the next loot event for this source.
 		Matcher kc = KILL_COUNT.matcher(msg);
 		if (kc.find())
 		{
@@ -1142,19 +1065,19 @@ public class ChronicleEventCapture
 			}
 			catch (NumberFormatException ignored)
 			{
-				// non-numeric — skip
+				// non-numeric, skip it
 			}
 			return;
 		}
 
-		// Boss timer — annotates the next loot event, as the kill count does.
+		// Boss timer: annotates the next loot event, as the kill count does.
 		Matcher dur = KILL_DURATION.matcher(msg);
 		if (dur.find())
 		{
 			lastKillTimeSec = parseDuration(dur.group("time"));
 			lastKillPb = msg.contains(NEW_PB_MARK);
-			// "(new personal best)" means this kill IS the record; otherwise the
-			// game may restate the standing record after the time.
+			// "(new personal best)" means this kill is the record; otherwise the game
+			// may restate the standing record after the time.
 			Matcher pb = PERSONAL_BEST.matcher(msg);
 			lastPbTimeSec = lastKillPb ? lastKillTimeSec
 				: (pb.find() ? parseDuration(pb.group("pb")) : -1);
@@ -1177,7 +1100,7 @@ public class ChronicleEventCapture
 			return;
 		}
 
-		// Untradeable drop can also carry the pet name after a pet prime.
+		// an untradeable drop can also carry the pet name after a pet prime.
 		Matcher unt = UNTRADEABLE_DROP.matcher(msg);
 		if (unt.find() && petPendingTicks >= 0)
 		{
@@ -1185,7 +1108,6 @@ public class ChronicleEventCapture
 			return;
 		}
 
-		// Combat achievement.
 		Matcher ca = COMBAT_TASK.matcher(msg);
 		if (ca.find())
 		{
@@ -1196,8 +1118,7 @@ public class ChronicleEventCapture
 			return;
 		}
 
-		// Clue casket completion (tier + cumulative count; items come from the
-		// reward widget later — deferred).
+		// clue casket completion: tier + the running lifetime count.
 		Matcher clue = CLUE_COMPLETION.matcher(msg);
 		if (clue.find())
 		{
@@ -1236,11 +1157,10 @@ public class ChronicleEventCapture
 		Matcher sd = SLAYER_TOTAL.matcher(msg);
 		if (sd.find())
 		{
-			// The "You've completed N tasks" streak line always prints on completion,
-			// so it is the reliable trigger. Identify the task from the finished-line
-			// creature if we caught it, else the core Slayer plugin's active task —
-			// so a missing/reworded finished line, or a streak-line-first order, no
-			// longer drops the completion (the old code required the finished line).
+			// The streak line always prints on completion, so it's the trigger. Task
+			// identity comes from the finished line's creature if we caught it, else
+			// from the fallbacks below, so a missing or reworded finished line doesn't
+			// drop the completion.
 			String task = pendingSlayerMonster;
 			if (task == null || task.isEmpty())
 			{
@@ -1252,25 +1172,23 @@ public class ChronicleEventCapture
 			}
 			if (task == null || task.isEmpty())
 			{
-				task = pendingSlayerTask;   // last resort — the "N creature" blob
+				task = pendingSlayerTask;   // last resort: the "N creature" blob
 			}
 			if (task != null && !task.isEmpty())
 			{
 				JsonObject data = new JsonObject();
 				data.addProperty("task", task);
 				data.addProperty("monster", task);
-				// The finished line's "You killed N <creature>" is the EXACT size of
-				// the task just completed — the ground truth a finished task should
-				// report, above the loot spine's counter estimate (which undershoots
-				// when an opening kill went uncaptured at the task hand-off).
+				// "You killed N <creature>" is the true size of the task. The loot
+				// spine's own count undershoots when an opening kill went uncaptured
+				// at the task hand-off.
 				if (pendingSlayerKills != null)
 				{
 					data.addProperty("killCount", pendingSlayerKills);
 				}
-				// The streak count is the lifetime task number only for the plain
-				// "You've completed N tasks…" line. A qualifier ("N Mortimer task",
-				// "N Wilderness tasks") is NOT the lifetime count, so skip it there
-				// to avoid a misleading task-number badge.
+				// Only the plain "You've completed N tasks…" line carries the lifetime
+				// number. A qualified one ("N Mortimer task", "N Wilderness tasks")
+				// counts something narrower, so leave the badge off.
 				if (sd.group("qual") == null)
 				{
 					try
@@ -1291,12 +1209,12 @@ public class ChronicleEventCapture
 			pendingSlayerTask = null;
 			pendingSlayerMonster = null;
 			pendingSlayerKills = null;
-			slayerPendingTicks = -1;   // streak line handled it — disarm the flush
+			slayerPendingTicks = -1;   // the streak line handled it; disarm the flush
 			lastSlayerTask = null;
 			return;
 		}
 
-		// Pet drop prime — the name resolves on a following clog/untradeable line.
+		// Pet drop prime; the name resolves on a following clog/untradeable line.
 		if (PET_RECEIVED.matcher(msg).matches())
 		{
 			petPendingTicks = 0;
@@ -1315,13 +1233,10 @@ public class ChronicleEventCapture
 		emit("PET", data);
 	}
 
-	/**
-	 * The finished-task line ("You have completed your task! You killed N X.") was
-	 * captured, but the streak line never finalised the completion. That finished
-	 * line IS a real completion, so emit it from what we have — the same task-identity
-	 * fallbacks the streak-line path uses — then clear ALL pending state (including
-	 * lastSlayerTask) so a late streak line finds nothing and can't re-emit.
-	 */
+	// The finished-task line was captured but the streak line never finalised it. That
+	// line is a real completion, so emit it from the same identity fallbacks the
+	// streak path uses, then clear every pending field (lastSlayerTask included) so a
+	// late streak line finds nothing to re-emit.
 	private void flushPendingSlayer()
 	{
 		String task = pendingSlayerMonster;
@@ -1342,7 +1257,7 @@ public class ChronicleEventCapture
 			{
 				data.addProperty("killCount", pendingSlayerKills);
 			}
-			emit("SLAYER", data);   // no lifetime "count" — the finished line has none
+			emit("SLAYER", data);   // no lifetime "count": the finished line has none
 		}
 		pendingSlayerTask = null;
 		pendingSlayerMonster = null;
@@ -1360,15 +1275,14 @@ public class ChronicleEventCapture
 		expireServerLootKeys();
 		flushUntakenLoot();
 
-		// Expire a pet prime that never got a name (3-tick window).
+		// expire a pet prime that never got a name.
 		if (petPendingTicks >= 0 && ++petPendingTicks > 3)
 		{
 			petPendingTicks = -1;
 		}
 
-		// A finished-task line whose streak line never finalised it: flush it after a
-		// short window (the finished line is itself a real completion). Disarmed above
-		// if the streak line already handled it, so this can't double-emit.
+		// A finished-task line whose streak line never finalised it gets flushed after
+		// a short window. Disarmed above when the streak line handled it.
 		if (slayerPendingTicks >= 0 && ++slayerPendingTicks > 4)
 		{
 			flushPendingSlayer();
@@ -1396,9 +1310,9 @@ public class ChronicleEventCapture
 		if (state == GameState.LOADING || state == GameState.HOPPING || state == GameState.LOGIN_SCREEN)
 		{
 			// Leaving the scene with our kill loot still on the ground means it was
-			// left behind — bank it as untaken before the refs go stale. (These
-			// items despawn early on unload, so the tick-based classifier would
-			// otherwise misread them as pickups.)
+			// left behind, so bank it before the refs go stale. These items despawn
+			// early on unload, which the tick check in onItemDespawned would read as
+			// a pickup.
 			for (GroundLoot g : groundLoot.values())
 			{
 				untakenBatch.add(new UntakenItem(g.id, g.qty, g.source, g.owner));
@@ -1433,8 +1347,8 @@ public class ChronicleEventCapture
 		return arr;
 	}
 
-	/** Lowercased name with a trailing parenthetical stripped, for matching a
-	 *  kill-count line to an NPC name (server re-cleans authoritatively). */
+	// lowercased, trailing parenthetical stripped, so a kill-count line's subject
+	// lines up with the NPC name.
 	private static String cleanKey(String name)
 	{
 		if (name == null)
@@ -1444,7 +1358,7 @@ public class ChronicleEventCapture
 		return Text.removeTags(name).replaceAll("\\s*\\(.+\\)$", "").trim().toLowerCase();
 	}
 
-	/** The logged-in account's name, or null while it cannot be read. */
+	// null while the name can't be read yet.
 	private String localName()
 	{
 		Player lp = client.getLocalPlayer();
@@ -1463,9 +1377,9 @@ public class ChronicleEventCapture
 		{
 			return;
 		}
-		// The journal always gets the event; the cloud path below is additive.
-		// Gating the network on the OPT-IN (not just token presence) means a
-		// leftover token from a prior enrolment can't leak an event.
+		// The journal always gets the event; the cloud push below is extra. Gating the
+		// network on the opt-in as well as the token means a token left over from an
+		// earlier install can't leak anything.
 		localStore.record(type, data, name);
 		if (!config.cloudSync() || config.serverBaseUrl().trim().isEmpty())
 		{
@@ -1474,17 +1388,16 @@ public class ChronicleEventCapture
 		String tokenRaw = configManager.getRSProfileConfiguration(GROUP, KEY_TOKEN);
 		if (tokenRaw == null || tokenRaw.trim().isEmpty())
 		{
-			return;   // not enrolled yet — nothing to push under
+			return;   // no token, nothing to push under
 		}
 		final String base = config.serverBaseUrl();
 		final String token = tokenRaw.trim();
 		final JsonObject body = new JsonObject();
 		body.addProperty("playerName", name);
-		// Stable account hash → lets the server adopt an in-game rename as the
-		// same account automatically (sent as a string to avoid 64-bit JSON
-		// number precision worries). Omitted when unavailable (logged out).
+		// Stable account id, so an in-game rename still lands on the same account.
+		// Sent as a string to dodge 64-bit JSON number precision.
 		long accountHash = client.getAccountHash();
-		// -1 = "no account"; any other value (incl. negative, sign bit set) is real.
+		// -1 means "no account"; any other value, negative ones included, is real.
 		if (accountHash != -1L)
 		{
 			body.addProperty("accountHash", String.valueOf(accountHash));

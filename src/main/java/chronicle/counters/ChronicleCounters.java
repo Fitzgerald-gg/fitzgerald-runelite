@@ -1,14 +1,12 @@
 /*
  * Copyright (c) 2026, Chronicle — BSD 2-Clause (see LICENSE).
  *
- * Coordinator for the native lifetime-counter trackers. Registered on the RuneLite
- * EventBus by ChroniclePlugin; fans each subscribed event out to every tracker,
- * which tallies into the shared in-memory StatStore. The plugin's harvest/push loop
- * then feeds those counters to the journal (and, when cloud sync is on, the configured server).
+ * Coordinator for the lifetime-counter trackers. ChroniclePlugin registers this on the
+ * RuneLite EventBus; it hands each subscribed event to every tracker, and they tally
+ * into the shared in-memory StatStore that the plugin folds into the journal.
  */
 package chronicle.counters;
 
-import chronicle.ChronicleConfig;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -31,36 +29,28 @@ import net.runelite.client.game.ItemManager;
 public class ChronicleCounters
 {
 	private final Client client;
-	private final ChronicleConfig config;
 	private final StatStore store;
 	private final ItemManager itemManager;
 	private final SkillDeriver skillDeriver;
 
-	// Where per-consumable gp lands (the plugin wires this to the journal's
-	// lifetime consumable-value map). Volatile: set at startUp, read on the
-	// client thread when the tracker array is lazily built.
+	// Per-consumable gp lands here; the plugin points it at the journal's lifetime
+	// consumable map. Volatile: set at startUp, read on the client thread in trackers().
 	private volatile java.util.function.BiConsumer<String, Integer> consumableSink;
 
-	// The account's gathered-item ledger, wired to the journal at startUp for the
-	// same reason as the sink above. Volatile on the same grounds: it is read on
-	// the client thread when the tracker array is lazily built.
+	// The account's gathered-item ledger, wired at startUp and read on the client
+	// thread in trackers(). Volatile on the same grounds as the sink.
 	private volatile GatheredLedger gatheredLedger;
 
-	// Built lazily on the first event so the consumable sink above — wired at
-	// startUp, AFTER this constructor — is in hand when we build the tracker that
-	// needs it. reset() leans on the same laziness to rebuild after a blind window.
-	// Volatile because reset() arrives from whatever thread stopped or started the
-	// plugin (the EDT for a settings-panel toggle) while the client thread is fanning
-	// events out here: a plain field could leave that thread reading a stale array
-	// forever, or never seeing the rebuild the reset asked for.
+	// Built on the first event so the sink and ledger above (wired at startUp, after
+	// this constructor runs) are in hand by then. Volatile because reset() can arrive
+	// on the EDT from a settings toggle while the client thread is fanning out here.
 	private volatile StatTracker[] trackers;
 
 	@Inject
-	ChronicleCounters(Client client, ChronicleConfig config, StatStore store,
-		ItemManager itemManager, SkillDeriver skillDeriver)
+	ChronicleCounters(Client client, StatStore store, ItemManager itemManager,
+		SkillDeriver skillDeriver)
 	{
 		this.client = client;
-		this.config = config;
 		this.store = store;
 		this.itemManager = itemManager;
 		this.skillDeriver = skillDeriver;
@@ -71,12 +61,9 @@ public class ChronicleCounters
 		this.consumableSink = sink;
 	}
 
-	/**
-	 * Point both halves of the resource pair at one ledger: the resolver notes
-	 * every gather into it, the drop tracker asks it whether a binned item was
-	 * one of them. The deriver is a singleton built by Guice rather than one of
-	 * the trackers, so it is handed the ledger here rather than at the lazy build.
-	 */
+	// The resolver notes each gather into the ledger; the drop tracker reads it back
+	// when an item is binned. SkillDeriver is a Guice singleton rather than one of the
+	// trackers, so it is handed the ledger here instead of at the lazy build.
 	public void setGatheredLedger(GatheredLedger ledger)
 	{
 		this.gatheredLedger = ledger;
@@ -85,9 +72,8 @@ public class ChronicleCounters
 
 	private StatTracker[] trackers()
 	{
-		// Read the field once. A reset() landing between the null check and the return
-		// would otherwise hand the caller a null array to iterate, and every caller is
-		// an event handler on the client thread with no defence against that.
+		// Read the field once: a reset() landing between the null check and the return
+		// would hand the caller a null array to iterate.
 		StatTracker[] built = trackers;
 		if (built == null)
 		{
@@ -108,46 +94,22 @@ public class ChronicleCounters
 		return built;
 	}
 
-	private boolean active()
-	{
-		// The journal always counts while the plugin is on (local-first).
-		return true;
-	}
-
 	/**
-	 * Discard every tracker's inferred state.
-	 *
-	 * <p>Trackers infer from deltas — an inventory snapshot, the previous hitpoint
-	 * reading, clicks awaiting confirmation. All of that is only meaningful if we saw
-	 * every event in between. After a blind window (the plugin toggled off, or
-	 * disabled via config while the game carried on) it is not merely stale but
-	 * actively wrong: the next delta would be measured against a world that has since
-	 * moved. Dropping the array is the whole reset — they are lazily rebuilt on the
-	 * next event, so no tracker needs its own teardown path.
+	 * Drop every tracker's inferred state. Trackers work from deltas (an inventory
+	 * snapshot, the last hitpoint reading, a click awaiting confirmation), so after a
+	 * blind window the next delta would be measured against a world that has since
+	 * moved. Nulling the array is the whole reset; trackers() rebuilds on the next event.
 	 */
 	public void reset()
 	{
 		trackers = null;
 	}
 
-	/**
-	 * Hand one event to every tracker, each in isolation.
-	 *
-	 * <p>Trackers read live game text and half-built widget trees, so one of them
-	 * throwing on a line it did not expect is a question of when, not whether. The
-	 * bus would catch that and the client would carry on, but the throw unwinds this
-	 * loop on its way out: every tracker positioned after the one that failed never
-	 * sees the event, and nothing says so — the counters for those subsystems simply
-	 * stop moving. Catching per tracker keeps a bad parse to the one counter it
-	 * belongs to. Errors are left to propagate; only a tracker's own bad reasoning is
-	 * ours to absorb.
-	 */
+	// Catch per tracker: one throwing on a line it did not expect would otherwise rob
+	// every tracker after it of the event, with nothing to say why its counters stalled.
+	// Errors propagate; only a tracker's own bad reasoning is ours to swallow.
 	private void fanOut(java.util.function.Consumer<StatTracker> delivery)
 	{
-		if (!active())
-		{
-			return;
-		}
 		for (StatTracker t : trackers())
 		{
 			try

@@ -17,29 +17,18 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Pins the event chat patterns to the game's actual message wording.
+ * Pins the event chat patterns to the wording the game actually prints.
  *
- * <p>Each corpus is drawn from the messages Old School RuneScape itself prints
- * (established from the OSRS Wiki's message documentation, not from any other
- * plugin's implementation). The positives must match; the negatives — adjacent
- * lines, near-miss wording, and the same text arriving as someone else's public
- * chat — must not. A pattern that drifts breaks a test rather than silently
- * mis-reporting an event, and a new game wording shows up here as a failing
- * positive to add.
+ * <p>Corpus lines come from the OSRS Wiki's message documentation. Positives have
+ * to match; negatives are the adjacent lines, the near-miss wordings, and the same
+ * text arriving as another player's chat.
  *
- * <p>Strings are compared after {@code Text.removeTags}, exactly as the live
- * handler sees them, so the red colour wrapper around counts is already stripped.
- * The patterns under test are the LIVE ones, read straight off
- * {@link ChronicleEventCapture}. They used to be copied here and the copies
- * drifted — the live matcher was made case-insensitive and this file went on
- * proving a pattern the plugin no longer used.
+ * <p>Patterns are read live off {@link ChronicleEventCapture}. Corpus strings are
+ * written post-{@code Text.removeTags}, the way the handler sees them, so the
+ * colour wrapper around counts is already gone and counts are bare integers.
  */
 public class ChatPatternTest
 {
-	// Kept in sync with ChronicleEventCapture (2026-08-02 fix): FINISHED is not
-	// $-anchored so the modern " You gained N xp." suffix is ignored, and TOTAL
-	// absorbs any master-name qualifier ("N Mortimer task", "N Wilderness tasks").
-
 	private static void matches(Pattern p, String... lines)
 	{
 		for (String line : lines)
@@ -59,7 +48,6 @@ public class ChatPatternTest
 	@Test
 	public void killCount()
 	{
-		// Tags are stripped upstream, so counts arrive as bare integers.
 		matches(ChronicleEventCapture.KILL_COUNT,
 			"Your Zulrah kill count is: 1.",
 			"Your Zulrah kill count is: 500.",
@@ -201,9 +189,8 @@ public class ChatPatternTest
 			"You've completed 3 tasks; return to a Slayer master.",
 			"You've completed 15 Wilderness tasks and received 125 points, giving you a total of 1,875; return to a Slayer master.",
 			"You've completed 4 Wilderness tasks; return to a Slayer master.",
-			// A master-name qualifier can sit between the count and "task" (e.g.
-			// "1 Mortimer task") — the optional (?<qual>...) group absorbs it so
-			// the streak line still triggers (regression: broke the trigger).
+			// the game can slip a master name between the count and "task"; the
+			// optional qual group absorbs it.
 			"You've completed 1 Mortimer task; return to a Slayer master.");
 		rejects(ChronicleEventCapture.SLAYER_TOTAL,
 			"You're assigned to kill aberrant spectres; only 134 more to go.",
@@ -220,9 +207,8 @@ public class ChatPatternTest
 			"You have completed your task! You killed 30 aberrant spectres.",
 			"You have completed your task! You killed 145 greater demons.",
 			"You have completed your task! You killed 1,000 hellhounds.",
-			// Modern OSRS appends " You gained N xp." after the creature — the
-			// pattern is NOT $-anchored, so the suffix is ignored (regression:
-			// this exact wording was silently dropping every completion).
+			// modern OSRS appends " You gained N xp." after the creature; the
+			// pattern isn't $-anchored, so the suffix is ignored.
 			"You have completed your task! You killed 306 Dust Devils. You gained 39,715 xp.",
 			"You have completed your task! You killed 245 Cave kraken. You gained 62,475 xp.");
 		rejects(ChronicleEventCapture.SLAYER_FINISHED,

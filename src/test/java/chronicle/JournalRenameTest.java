@@ -13,10 +13,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Pins the rename-follow file semantics: the journal and its history spine
- * move to the new name's slugs together, a record already filed under the new
- * name is set aside intact rather than adopted, and a same-slug "rename" is a
- * no-op.
+ * Rename-follow file semantics: journal and history spine move to the new slug
+ * together, anything already under that slug is set aside, same slug does nothing.
  */
 public class JournalRenameTest
 {
@@ -38,7 +36,7 @@ public class JournalRenameTest
 		return new String(Files.readAllBytes(new File(dir, name).toPath()), StandardCharsets.UTF_8);
 	}
 
-	/** The one file set aside under {@code prefix} (the timestamp suffix varies). */
+	// match on prefix; the sidecar carries a timestamp suffix
 	private String onlySidecar(String prefix)
 	{
 		String[] hits = dir.list((d, name) -> name.startsWith(prefix));
@@ -62,13 +60,11 @@ public class JournalRenameTest
 	public void aRecordAlreadyFiledUnderTheNewNameIsSetAsideNotAdopted() throws Exception
 	{
 		write("oxli.json", "{\"mine\":true}");
-		// A freed name gets taken: what sits under it may be another account's
-		// record, and this account must never accumulate on top of it.
+		// a freed rsn gets taken, so this could be a stranger's record
 		write("counterfitz.json", "{\"stranger\":true}");
 		assertTrue(LocalStore.migrateJournalFiles(dir, "Oxli", "Counterfitz"));
 		assertEquals("{\"mine\":true}", read("counterfitz.json"));
 		assertFalse(new File(dir, "oxli.json").exists());
-		// Nothing is deleted — the displaced record keeps every byte.
 		assertEquals("{\"stranger\":true}", read(onlySidecar("counterfitz.json.conflict-")));
 	}
 
@@ -87,9 +83,8 @@ public class JournalRenameTest
 	@Test
 	public void aSpineWithoutItsRecordStaysPut() throws Exception
 	{
-		// No journal to carry, so the rename has no business touching the
-		// record filed under the new name — splicing this account's history
-		// onto it would join two baselines into one calendar.
+		// moving the spine alone would splice this account's days onto whatever
+		// record already sits under the new name
 		write("oxli.history.jsonl", "{\"day\":1}");
 		write("counterfitz.json", "{\"stranger\":true}");
 		assertFalse(LocalStore.migrateJournalFiles(dir, "Oxli", "Counterfitz"));

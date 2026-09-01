@@ -25,26 +25,23 @@ import static chronicle.counters.StatKeys.COINS_SPENT_AT_SHOPS;
 /**
  * Splits coin movement at a shop into money spent and money earned.
  *
- * <p>There is no "you traded at a shop" event to subscribe to, so this reads the
- * coin stack directly. The trick is to only look while a shop is actually open:
- * the shop-inventory widget opening arms a per-tick reading of the pack's coins,
- * and each tick's change is booked as a purchase (coins fell) or a sale (coins
- * rose). Closing the widget disarms it, so coins moving for any other reason —
- * a drop, a trade with a player, a bank withdrawal — are never counted.
+ * <p>There's no shop-trade event to subscribe to, so this samples the pack's coin
+ * stack each tick and only while the shop widget is open. Coins moving for any
+ * other reason (a drop, a player trade, a bank withdrawal) fall outside that window
+ * and aren't counted.
  *
- * <p>Watching only the pack means a shop paid for out of a rune pouch or looting
- * bag is missed, which is an acceptable blind spot: the alternative, watching
- * every container, would book unrelated movement as shop trade.
+ * <p>Only the pack is watched, so a shop paid for out of a rune pouch or looting
+ * bag is missed.
  */
 public class GoldStatTracker implements StatTracker
 {
-	/** No reading held between shop sessions; a live count is never negative. */
+	// no shop open. a real coin count is never negative, so -1 is safe as a sentinel
 	private static final int IDLE = -1;
 
 	private final StatStore statStore;
 	private final Client client;
 
-	/** The pack's coin count at the end of the previous tick, or {@link #IDLE}. */
+	// pack coins at the end of the previous tick, or IDLE
 	private int coinsLastTick = IDLE;
 
 	public GoldStatTracker(StatStore statStore, Client client)
@@ -58,8 +55,7 @@ public class GoldStatTracker implements StatTracker
 	{
 		if (event.getGroupId() == InterfaceID.SHOP_INVENTORY)
 		{
-			// Arm on the coins present as the shop opens, so the first trade is
-			// measured against the pre-shop total rather than against IDLE.
+			// prime with the pre-shop total so the first trade has something to measure against
 			coinsLastTick = packCoins();
 		}
 	}
@@ -78,13 +74,13 @@ public class GoldStatTracker implements StatTracker
 	{
 		if (coinsLastTick == IDLE)
 		{
-			return;   // no shop open; not sampling
+			return;
 		}
 
 		int coins = packCoins();
 		if (coins == IDLE)
 		{
-			return;   // pack briefly unreadable; hold the last figure and retry next tick
+			return;   // pack unreadable this tick; keep the last figure and retry
 		}
 
 		int change = coins - coinsLastTick;
@@ -104,15 +100,13 @@ public class GoldStatTracker implements StatTracker
 	{
 		if (event.getGameState() != GameState.LOGGED_IN)
 		{
-			// A dropped connection tears the shop down without a WidgetClosed, so the
-			// arm would otherwise outlive the session that set it. The pack changes
-			// unobserved while away — and the next login may be a different account
-			// entirely — so the reading must not survive to be measured against.
+			// a dropped connection tears down the shop with no WidgetClosed, and the pack
+			// moves unobserved while away, so the stale reading can't be allowed to survive
 			coinsLastTick = IDLE;
 		}
 	}
 
-	/** Coins in the backpack, or {@link #IDLE} if the container isn't available. */
+	// coins in the pack, or IDLE if the container isn't loaded
 	private int packCoins()
 	{
 		ItemContainer pack = client.getItemContainer(InventoryID.INVENTORY);

@@ -16,17 +16,14 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 
 /**
- * Pins teleport-destination attribution across the three ways to reach a place — a
- * portal-nexus row, a spellbook cast, and a teleport tablet — so they all land on the
- * SAME counter, and so the load-bearing ORDER of the destination table can't silently
- * regress. Inputs here are the real menu strings: a nexus row arrives keybind-prefixed
- * ("5 :  Camelot"); a spell/tab arrives as option + target joined ("cast varrock
- * teleport", "break varrock teleport"). Every string is what the client actually emits.
+ * Destination attribution for MovementStatTracker. A nexus row, a spell and a tablet to
+ * one place all have to land on the same counter, and the DESTINATIONS order has to keep
+ * every contained name above the shorter one inside it. Inputs are the real menu strings:
+ * a nexus row is keybind-prefixed ("5 :  Camelot"), a spell or tab arrives as option and
+ * target joined ("cast varrock teleport").
  */
 public class MovementDestinationTest
 {
-	// ── The three routes to one place agree ───────────────────────────────
-
 	@Test
 	public void nexusRowSpellAndTabAllAgree()
 	{
@@ -38,35 +35,29 @@ public class MovementDestinationTest
 		assertEquals(TELEPORTS_BOAT, matchDestinationKey("1 :  Boat"));
 	}
 
-	// ── Load-bearing order: contained substrings ──────────────────────────
-
 	@Test
 	public void longerContainedNameWinsOverShorter()
 	{
-		// "ape atoll dungeon" must be tested before "ape atoll"
+		// "ape atoll dungeon" sits above "ape atoll"
 		assertEquals(TELEPORTS_APE_ATOLL_DUNGEON, matchDestinationKey("v :  Ape Atoll Dungeon"));
 		assertEquals(TELEPORTS_APE_ATOLL, matchDestinationKey("g :  Ape Atoll"));
-		// "west ardougne" must be tested before "ardougne"
+		// "west ardougne" sits above "ardougne"
 		assertEquals(TELEPORTS_WEST_ARDOUGNE, matchDestinationKey("w :  West Ardougne"));
 		assertEquals(TELEPORTS_ARDOUGNE, matchDestinationKey("cast ardougne teleport"));
 	}
 
-	// ── Load-bearing order: diary secondary destinations ──────────────────
-
 	@Test
 	public void diarySwitchBeatsBaseTown()
 	{
-		// A switched cast carries BOTH names; the switch destination must win.
+		// a switched cast carries both names, so the switch destination has to win
 		assertEquals(TELEPORTS_GRAND_EXCHANGE, matchDestinationKey("grand exchange varrock teleport"));
 		assertEquals(TELEPORTS_SEERS_VILLAGE, matchDestinationKey("seers' village camelot teleport"));
 		assertEquals(TELEPORTS_YANILLE, matchDestinationKey("yanille watchtower teleport"));
-		// ...and the plain cast still falls through to the base town.
+		// plain casts still land on the base town
 		assertEquals(TELEPORTS_VARROCK, matchDestinationKey("cast varrock teleport"));
 		assertEquals(TELEPORTS_CAMELOT, matchDestinationKey("cast camelot teleport"));
 		assertEquals(TELEPORTS_WATCHTOWER, matchDestinationKey("cast watchtower teleport"));
 	}
-
-	// ── Aliases: nexus row name vs spell/item name ────────────────────────
 
 	@Test
 	public void aliasesReachTheSameKey()
@@ -79,16 +70,12 @@ public class MovementDestinationTest
 		assertEquals(TELEPORTS_WEISS, matchDestinationKey("break icy basalt"));
 	}
 
-	// ── Skillcape + spell both reach House ────────────────────────────────
-
 	@Test
 	public void houseFromCapeAndSpell()
 	{
 		assertEquals(TELEPORTS_HOUSE, matchDestinationKey("tele to poh construct. cape(t)"));
 		assertEquals(TELEPORTS_HOUSE, matchDestinationKey("cast teleport to house"));
 	}
-
-	// ── Coverage across the spellbooks ────────────────────────────────────
 
 	@Test
 	public void spellbookDestinationsResolve()
@@ -101,11 +88,10 @@ public class MovementDestinationTest
 		assertEquals(TELEPORTS_POLLNIVNEACH, matchDestinationKey("break pollnivneach teleport"));
 	}
 
-	// ── Skillcapes: matched by cape name (bare "Teleport" carries no place) ──
-
 	@Test
 	public void skillcapesMatchByCapeName()
 	{
+		// a cape's bare "Teleport" names no place, so the match comes off the cape name
 		assertEquals(TELEPORTS_WARRIORS_GUILD, matchDestinationKey("teleport strength cape(t)"));
 		assertEquals(TELEPORTS_CRAFTING_GUILD, matchDestinationKey("teleport crafting cape(t)"));
 		assertEquals(TELEPORTS_FARMING_GUILD, matchDestinationKey("teleport farming cape"));
@@ -114,7 +100,7 @@ public class MovementDestinationTest
 		assertEquals(TELEPORTS_DIARY_REGION, matchDestinationKey("teleport achievement diary cape(t)"));
 		assertEquals(TELEPORTS_FALO, matchDestinationKey("teleport music cape(t)"));
 		assertEquals(TELEPORTS_PANDEMONIUM, matchDestinationKey("teleport sailing cape(t)"));
-		// Fishing cape names its place in the option text
+		// the Fishing cape names its place in the option text
 		assertEquals(TELEPORTS_OTTOS_GROTTO, matchDestinationKey("otto's grotto fishing cape(t)"));
 		assertEquals(TELEPORTS_FISHING_GUILD, matchDestinationKey("fishing guild fishing cape(t)"));
 	}
@@ -122,23 +108,18 @@ public class MovementDestinationTest
 	@Test
 	public void sailingCapeBoatOptionResolvesToBoat()
 	{
-		// The cape's separate "Boat Teleport" moves the boat; 'boat' (ordered earlier)
-		// wins over 'sailing cape', and a boat-move produces no player jump so it
-		// self-excludes at runtime regardless.
+		// "boat" is ordered above "sailing cape", so the cape's boat option credits Boat
 		assertEquals(TELEPORTS_BOAT, matchDestinationKey("boat teleport sailing cape(t)"));
 	}
-
-	// ── Nothing tracked → null (falls to the Nexus catch-all when fromNexus) ──
 
 	@Test
 	public void untrackedAndNullAreSafe()
 	{
+		// a null key still credits Nexus when the click came from the nexus list
 		assertNull(matchDestinationKey(null));
 		assertNull(matchDestinationKey("break teleport to bounty target"));
-		assertNull(matchDestinationKey("rub games necklace")); // a rub names no place yet
+		assertNull(matchDestinationKey("rub games necklace")); // the rub names no place; the row click after does
 	}
-
-	// ── Jewellery places — substring order keeps compounds ahead of their words ──
 
 	@Test
 	public void jewelleryDestinationsResolve()
@@ -160,8 +141,7 @@ public class MovementDestinationTest
 	@Test
 	public void fossilIslandBeatsTheDigsitePendantsOwnName()
 	{
-		// The pendant's item name carries "digsite", so a fossil-island hop must
-		// resolve on the destination, not the jewellery's name.
+		// the pendant's item name carries "digsite", so "fossil island" has to match first
 		assertEquals(TELEPORTS_FOSSIL_ISLAND, matchDestinationKey("fossil island digsite pendant(5)"));
 		assertEquals(TELEPORTS_DIGSITE, matchDestinationKey("digsite digsite pendant(5)"));
 	}
@@ -169,10 +149,8 @@ public class MovementDestinationTest
 	@Test
 	public void houseOnTheHillBeatsThePoh()
 	{
-		// "house on the hill" contains "house" — the Fossil Island row must sit
-		// above the POH row or every hop there credits the player's house.
+		// "house on the hill" contains "house", so its row sits above the POH row
 		assertEquals(TELEPORTS_FOSSIL_ISLAND, matchDestinationKey("house on the hill digsite pendant(5)"));
-		// ...and the plain POH routes still resolve to House.
 		assertEquals(TELEPORTS_HOUSE, matchDestinationKey("cast teleport to house"));
 		assertEquals(TELEPORTS_HOUSE, matchDestinationKey("tele to poh construct. cape(t)"));
 	}
@@ -187,69 +165,46 @@ public class MovementDestinationTest
 	@Test
 	public void everyAllowlistedJewelleryOptionLandsOnAPlace()
 	{
-		// Each allowlisted item's LAST destination — the ones that fell to
-		// total-only before their rows existed.
 		assertEquals(TELEPORTS_SLEPE, matchDestinationKey("slepe drakan's medallion"));
 		assertEquals(TELEPORTS_EAGLES_EYRIE, matchDestinationKey("eagle's eyrie necklace of passage(5)"));
 		assertEquals(TELEPORTS_DONDAKANS_ROCK, matchDestinationKey("dondakan's rock ring of wealth(5)"));
-		// The ring of returning goes to the POH but its label never says "house".
+		// the ring of returning goes to the POH, but its label never says "house"
 		assertEquals(TELEPORTS_HOUSE, matchDestinationKey("teleport ring of returning(8)"));
 	}
 
 	@Test
 	public void lithkrenBeatsTheDigsitePendantsOwnName()
 	{
-		// Without its own row this label falls through to "digsite" (the pendant's
-		// name) and MIS-attributes the hop, so "lithkren" must sit above "digsite".
+		// without its own row this label falls through to "digsite", the pendant's name
 		assertEquals(TELEPORTS_LITHKREN, matchDestinationKey("lithkren digsite pendant(5)"));
 	}
 
 	@Test
-	public void chronicleResolvesToChampionsGuild()
-	{
-		// The Chronicle's bare "Teleport" arms via the tele branch but names no
-		// place; the book's own name is the destination label.
-		assertEquals(TELEPORTS_CHAMPIONS_GUILD, matchDestinationKey("teleport chronicle"));
-	}
-
-	// ── POH portal-chamber portals: option "Enter", target "<Place> Portal" ──
-
-	@Test
 	public void pohPortalTargetsResolveToTheirPlace()
 	{
+		// the portal chamber's option is "Enter" and its target "<Place> Portal"
 		assertEquals(TELEPORTS_VARROCK, matchDestinationKey("varrock portal"));
 		assertEquals(TELEPORTS_TROLL_STRONGHOLD, matchDestinationKey("troll stronghold portal"));
 		assertEquals(TELEPORTS_FORTIS, matchDestinationKey("civitas illa fortis portal"));
-		// Ape Atoll's portal is named for the town, not the spell.
-		assertEquals(TELEPORTS_APE_ATOLL, matchDestinationKey("marim portal"));
+		assertEquals(TELEPORTS_APE_ATOLL, matchDestinationKey("marim portal")); // Ape Atoll's portal carries the town name
 	}
 
 	@Test
 	public void unnamedPortalsStayExcluded()
 	{
-		// The match-guard on the "Enter … Portal" branch: the bare house exit and
-		// minigame portals name no tracked place, so they never arm a teleport.
+		// the bare house exit and the minigame portals name no tracked place, so the
+		// "Enter ... Portal" branch never arms on them
 		assertNull(matchDestinationKey("portal"));
 		assertNull(matchDestinationKey("free-for-all portal"));
 	}
 
-	// ── Named items: option carries no "tele", the item name is the place ──
-
-	@Test
-	public void namedItemsResolveByTheirOwnName()
-	{
-		assertEquals(TELEPORTS_ECTOFUNTUS, matchDestinationKey("empty ectophial"));
-		assertEquals(TELEPORTS_GRAND_TREE, matchDestinationKey("commune royal seed pod"));
-	}
-
-
-
 	@Test
 	public void everydayItemsResolve()
 	{
+		// "Empty" and "Commune" say tele nowhere, so the item name is the place
 		assertEquals(TELEPORTS_ECTOFUNTUS, matchDestinationKey("empty ectophial"));
 		assertEquals(TELEPORTS_GRAND_TREE, matchDestinationKey("commune royal seed pod"));
-		assertEquals(TELEPORTS_CHAMPIONS_GUILD, matchDestinationKey("teleport chronicle"));
+		assertEquals(TELEPORTS_CHAMPIONS_GUILD, matchDestinationKey("teleport chronicle")); // bare "Teleport"; the book's name is the place
 		assertEquals(TELEPORTS_KOUREND, matchDestinationKey("the fisher's flute kharedst's memoirs"));
 		assertEquals(TELEPORTS_HOSIDIUS, matchDestinationKey("lunch by the lancalliums (hosidius) kharedst's memoirs"));
 		assertEquals(TELEPORTS_OBELISK, matchDestinationKey("activate obelisk"));
@@ -275,8 +230,6 @@ public class MovementDestinationTest
 		assertEquals(TELEPORTS_DRAYNOR, matchDestinationKey("draynor village amulet of glory(6)"));
 	}
 
-	// ── Scroll-of-redirection house tabs: all eight redirects have a name ──
-
 	@Test
 	public void redirectedHouseTabsAllResolve()
 	{
@@ -286,10 +239,9 @@ public class MovementDestinationTest
 		assertEquals(TELEPORTS_BRIMHAVEN, matchDestinationKey("break brimhaven teleport"));
 		assertEquals(TELEPORTS_HOSIDIUS, matchDestinationKey("break hosidius teleport"));
 		assertEquals(TELEPORTS_PRIFDDINAS, matchDestinationKey("break prifddinas teleport"));
-		// ...and the two that already had keys keep them.
 		assertEquals(TELEPORTS_YANILLE, matchDestinationKey("break yanille teleport"));
 		assertEquals(TELEPORTS_POLLNIVNEACH, matchDestinationKey("break pollnivneach teleport"));
-		// The teleport crystal's "Activate" names no place; the item name is Prif.
+		// the teleport crystal's "Activate" names no place; the item name is Prif
 		assertEquals(TELEPORTS_PRIFDDINAS, matchDestinationKey("activate teleport crystal (4)"));
 		assertEquals(TELEPORTS_PRIFDDINAS, matchDestinationKey("activate eternal teleport crystal"));
 	}

@@ -30,13 +30,7 @@ public interface ChronicleConfig extends Config
 	)
 	String advancedSection = "advanced";
 
-	// ── Local journal ────────────────────────────────────────────────────
-	// There is deliberately no master switch: installing Chronicle IS the
-	// consent for a local, on-device journal (nothing leaves this computer),
-	// and the RuneLite plugin toggle turns the whole thing off. Only the
-	// network features below need explicit opt-in.
-
-	// ── Advanced: cloud sync ─────────────────────────────────────────────
+	// no on/off item for the journal itself; the RuneLite plugin toggle is that switch.
 
 	@ConfigItem(
 		keyName = "cloudSync",
@@ -86,12 +80,8 @@ public interface ChronicleConfig extends Config
 		return "";
 	}
 
-	// The scheduled cycle harvests once and feeds both sinks: it always folds the
-	// running session into the journal and writes it out, and mirrors that upward
-	// only when cloud sync is on. So this interval is a LOCAL durability setting
-	// first — the window a crash can cost you — and a network cadence second; it
-	// must never read as a cloud-only knob, or a local-only install lengthens it
-	// to quieten network traffic it does not have and widens its own write window.
+	// the scheduled cycle always folds the session into the on-disk journal and
+	// mirrors upward only when cloud sync is on, so this is a local durability knob first.
 	@ConfigItem(
 		keyName = "pushIntervalMinutes",
 		name = "Journal write interval",
@@ -111,7 +101,6 @@ public interface ChronicleConfig extends Config
 		return 5;
 	}
 
-	// Actions (import, opening the journal folder) live in the side panel,
-	// behind its "manage" control — RuneLite config items are values, not buttons.
-	// because the RuneLite config UI has no first-class button widget.
+	// import and the journal folder live in the panel's "manage" view; a RuneLite
+	// config item can't be a button.
 }

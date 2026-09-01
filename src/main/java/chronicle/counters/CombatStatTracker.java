@@ -38,22 +38,13 @@ import static chronicle.counters.StatKeys.POISON_DAMAGE_TAKEN;
 import static chronicle.counters.StatKeys.VENOM_DAMAGE_TAKEN;
 
 /**
- * Tallies combat-flavoured lifetime counters: how much damage flows through the
- * local player in either direction, the largest single hit ever landed, how
- * often attacks are shrugged off on both sides, and how many times the player
- * has died.
- *
- * <p>Damage and block totals are read straight off the hitsplat stream; deaths
- * are recognised from the game's own death notice in the chat log.
+ * Lifetime combat counters: damage dealt and taken, biggest hits, blocks and misses,
+ * deaths. Damage comes off the hitsplat stream, deaths off the chat death notice.
  */
 public class CombatStatTracker implements StatTracker
 {
-	/**
-	 * Every hitsplat colour that represents real HP loss on the player — the plain and
-	 * max-hit forms in each source colour — so a max hit shown in a source colour still
-	 * sets a record. Poison/venom/other DoTs and the "poise" splats are excluded: they are
-	 * counted apart or are not HP at all.
-	 */
+	// Every hitsplat colour that is real HP loss on the player, plain and max-hit forms of
+	// each. Poison and venom are counted separately; the rest aren't HP.
 	private static final Set<Integer> DAMAGE_TO_SELF = Set.of(
 		HitsplatID.DAMAGE_ME, HitsplatID.DAMAGE_ME_CYAN, HitsplatID.DAMAGE_ME_ORANGE,
 		HitsplatID.DAMAGE_ME_YELLOW, HitsplatID.DAMAGE_ME_WHITE,
@@ -63,9 +54,8 @@ public class CombatStatTracker implements StatTracker
 	private final StatStore store;
 	private final Client client;
 
-	// Special-attack energy last tick (0–1000). A DECREASE is a spec used —
-	// regeneration and death-charge restores only ever raise it. -1 = unprimed
-	// (fresh login), so the first observation never counts as a spec.
+	// Special attack energy last tick (0-1000). A drop means a spec was used; regen and
+	// death charge only ever raise it. -1 = unprimed, so the first read can't count.
 	private int prevSpecEnergy = -1;
 
 	public CombatStatTracker(StatStore store, Client client)
@@ -100,8 +90,7 @@ public class CombatStatTracker implements StatTracker
 		final Hitsplat splat = event.getHitsplat();
 		final int type = splat.getHitsplatType();
 		final int amount = splat.getAmount();
-		// A hitsplat on the local player is one we received; on anything else it
-		// is one we dealt. This split drives every branch below.
+		// splat on us is damage received, on anything else it's damage we dealt
 		final boolean landedOnSelf = isLocalPlayer(event.getActor());
 
 		if (landedOnSelf)
@@ -123,7 +112,7 @@ public class CombatStatTracker implements StatTracker
 				break;
 
 			case HitsplatID.BLOCK_ME:
-				// A block on us is a defence; a block on the target is our miss.
+				// a block on us is one we blocked, a block on the target is one we missed
 				store.incrementStat(landedOnSelf ? HITS_BLOCKED : HITS_MISSED);
 				break;
 
@@ -132,12 +121,8 @@ public class CombatStatTracker implements StatTracker
 		}
 	}
 
-	/**
-	 * Counters read off hitsplats that land on us and that {@code damageTaken} (kept
-	 * DAMAGE_ME-only for history) does not cover: the biggest single hit ever received —
-	 * across every damage colour and the max-hit variants — and the HP bled to poison and
-	 * venom, which are their own hitsplat types.
-	 */
+	// DAMAGE_TAKEN stays DAMAGE_ME-only so its running total still lines up with history.
+	// The hit-taken record and the poison/venom bleed are tallied here instead.
 	private void recordDamageToSelf(int type, int amount)
 	{
 		if (type == HitsplatID.POISON)
@@ -157,7 +142,7 @@ public class CombatStatTracker implements StatTracker
 	@Override
 	public void onChatMessage(ChatMessage event)
 	{
-		// The death notice only ever arrives on these three channels; ignore the rest.
+		// the death notice only ever arrives on these three channels
 		if (!isTrackedChannel(event.getType()))
 		{
 			return;
@@ -169,9 +154,8 @@ public class CombatStatTracker implements StatTracker
 		}
 	}
 
-	// The style behind the current damage: combat XP rides every hit on the same
-	// tick (or one either side), so the freshest combat-XP skill names the style.
-	// Defensive/shared drops don't overwrite a fresher primary read.
+	// Style behind the current damage. Combat XP lands on the same tick as the hit, give or
+	// take one, so the freshest attack/strength/ranged/magic drop names the style.
 	private String lastStyleKey;
 	private int lastStyleTick = -1;
 
@@ -199,20 +183,17 @@ public class CombatStatTracker implements StatTracker
 		}
 	}
 
-	/** Add outgoing damage to the running total and promote it if it is a new best hit. */
 	private void recordDamageDealt(Actor target, int amount)
 	{
 		store.incrementStatBy(DAMAGE_DEALT, amount);
-		// Attribute to the style whose XP drop is fresh (within 2 ticks) — a
-		// breakdown of the total, deliberately allowed to undercount rather than
-		// ever guess wrong (the first hit of a session may go unattributed).
+		// only attribute when the style's XP drop is within 2 ticks, so the per-style
+		// breakdown undercounts (first hit of a session) instead of guessing
 		if (lastStyleKey != null && client.getTickCount() - lastStyleTick <= 2)
 		{
 			store.incrementStatBy(lastStyleKey, amount);
 		}
-		// The heaviest blow only counts against something that fights back: raid
-		// puzzle props have no combat level but can credit the player with
-		// multi-thousand hitsplats (ToA's Het's Seal light beam).
+		// combat level 0 skips raid puzzle props: ToA's Het's Seal beam credits
+		// multi-thousand hitsplats that would otherwise take the record
 		if (amount > store.getStat(HIGHEST_HIT) && target != null && target.getCombatLevel() > 0)
 		{
 			store.setStat(HIGHEST_HIT, amount);

@@ -16,30 +16,22 @@ import net.runelite.api.Quest;
 import net.runelite.api.gameval.VarbitID;
 
 /**
- * Point-in-time snapshot of the account's achievement state — every quest's
- * progress, each achievement-diary tier's completion, and combat-achievement
- * points and per-tier status — pushed whole on the counter loop whenever it
- * differs from the last server-acknowledged copy. Nothing is diffed or
- * interpreted here: raw enum names and varbit values travel as-is and the
- * server derives what it wants (thin client, fat server), so a change in how
- * CA tiers are graded needs no plugin release.
+ * Snapshot of the account's achievement state: every quest's progress, each
+ * diary tier's completion, and combat-achievement points plus per-tier status.
+ * The journal's character sheet reads it, and the push loop sends it whole
+ * whenever it differs from the last copy the server acked. Raw enum names and
+ * varbit values go in as-is, nothing is graded here.
  *
- * <p>All reads happen on the client thread via {@link #snapshot()}; the
- * change gate compares canonical JSON, so an untouched account costs one
- * string comparison per push interval. A snapshot is built at most once per
- * game tick: the journal refresh and the cloud push harvest in the same
- * client-thread pass, and the quest sweep runs a clientscript per quest.
+ * <p>All reads are on the client thread, and the quest sweep runs a clientscript
+ * per quest, so one snapshot is built per game tick and shared by both callers.
  */
 @Singleton
 public class AchievementSync
 {
 	private static final String[] DIARY_TIERS = {"easy", "medium", "hard", "elite"};
 
-	// Every diary whose four tiers all have completion varbits, easy→elite per
-	// row. Karamja is the game's oldest diary: its easy/medium/hard have NO
-	// <TIER>_COMPLETE varbit (only elite does), so it's handled separately in
-	// snapshot() from its task-count varbits (a tier is done when its count hits
-	// the tier total, per the game's [proc,diary_completion_info] script).
+	// Diaries whose four tiers each have a completion varbit, easy to elite per row.
+	// Karamja is missing three of those varbits, so it's built in snapshot() instead.
 	private static final String[] DIARY_REGIONS = {
 		"ardougne", "desert", "falador", "fremennik", "kandarin",
 		"kourend", "lumbridge", "morytania", "varrock", "western", "wilderness",
@@ -80,15 +72,12 @@ public class AchievementSync
 
 	private final Client client;
 
-	// Canonical JSON of the last snapshot the server acknowledged; the fields
-	// are built in a fixed order, so string equality is a reliable change gate.
-	// The ack lands on an HTTP callback thread and the gate is read on the
-	// client thread, so the reference has to be published safely.
+	// JSON of the last snapshot the server acked. Fields are built in a fixed order,
+	// so string equality holds as the change gate. Written on an HTTP callback thread.
 	private volatile String lastSynced;
 
-	// The tick's snapshot, reused by every caller within that tick. Written on
-	// the client thread and cleared by reset(); the snapshot is stored before
-	// the tick that validates it, so seeing the tick means seeing its copy.
+	// The tick's snapshot, shared by every caller in that tick. cached is stored
+	// before cachedTick, so a matching tick means the object is visible.
 	private volatile JsonObject cached;
 	private volatile int cachedTick = -1;
 
@@ -98,9 +87,8 @@ public class AchievementSync
 		this.client = client;
 	}
 
-	/** The full state snapshot. Client thread only (scripts + varbits). The
-	 *  same copy is handed to every caller for the rest of the tick, so callers
-	 *  must treat it as read-only. */
+	// Client thread only. Every caller in a tick gets the same object, so treat it
+	// as read-only.
 	JsonObject snapshot()
 	{
 		int tick = client.getTickCount();
@@ -124,9 +112,9 @@ public class AchievementSync
 			}
 			diaries.add(DIARY_REGIONS[r], region);
 		}
-		// Karamja easy/medium/hard have no completion varbit — mark a tier done when
-		// its task-completed count reaches that tier's total (10 / 19 / 10, from the
-		// game's diary_completion_info script). Elite alone got a real complete varbit.
+		// Karamja easy/medium/hard have no completion varbit. A tier is done once its
+		// task count hits the tier total (10 / 19 / 10, per diary_completion_info).
+		// Only elite got a real complete varbit.
 		JsonObject karamja = new JsonObject();
 		karamja.addProperty("easy", client.getVarbitValue(VarbitID.KARAMJA_EASY_COUNT) >= 10);
 		karamja.addProperty("medium", client.getVarbitValue(VarbitID.KARAMJA_MED_COUNT) >= 19);
@@ -157,13 +145,13 @@ public class AchievementSync
 		return !snap.toString().equals(lastSynced);
 	}
 
-	/** Record the server's ack, so identical state is not re-sent. */
+	// Call on the server's ack only.
 	void markSynced(JsonObject snap)
 	{
 		lastSynced = snap.toString();
 	}
 
-	/** Account boundary: the next login must sync afresh under its own name. */
+	// Account boundary: the next login syncs afresh under its own name.
 	void reset()
 	{
 		lastSynced = null;

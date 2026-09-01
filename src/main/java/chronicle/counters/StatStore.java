@@ -17,20 +17,16 @@ import javax.inject.Singleton;
 /**
  * This session's counter increments, held in memory.
  *
- * <p>The store counts from ZERO at each account boundary; the on-disk journal
- * ({@code LocalStore}) owns the lifetime record and folds these increments in on
- * every refresh. Nothing seeds this store from anywhere — the trackers (and the
- * local {@link SkillDeriver}) are its only writers, so its contents are exactly
- * what this client witnessed this session. Nothing is written to RuneLite's
- * config, so a busy skilling tick costs no disk I/O.
+ * <p>Counts from zero at each account boundary; the on-disk journal ({@code LocalStore})
+ * holds the lifetime record and folds these increments in on every refresh. The trackers
+ * and {@link SkillDeriver} are the only writers. Nothing touches RuneLite's config, so a
+ * busy skilling tick costs no disk I/O.
  *
- * <p>Counters saturate at {@link Integer#MAX_VALUE} instead of wrapping. A counter
- * that silently went negative would read as a regression everywhere downstream,
- * which is a far worse outcome than one stuck total.
+ * <p>Counters saturate at {@link Integer#MAX_VALUE} rather than wrapping negative.
  *
- * <p>Trackers call in from the client thread while the journal's refresh reads from
- * a scheduler thread, so the map is concurrent and {@link #snapshotAll()} hands
- * back a detached copy.
+ * <p>Trackers write from the client thread while the journal's refresh reads from a
+ * scheduler thread, hence the concurrent map and the detached copy out of
+ * {@link #snapshotAll()}.
  */
 @Singleton
 public class StatStore
@@ -42,37 +38,32 @@ public class StatStore
 	{
 	}
 
-	/** Forget everything. Used at an account boundary, where the totals stop applying. */
 	public void clear()
 	{
 		totals.clear();
 	}
 
-	/** Current value, or zero for a counter nothing has touched yet. */
 	public int getStat(String key)
 	{
 		return totals.getOrDefault(key, 0);
 	}
 
-	/** Add one. */
 	public void incrementStat(String key)
 	{
 		incrementStatBy(key, 1);
 	}
 
-	/** Add {@code amount}, saturating rather than overflowing. */
 	public void incrementStatBy(String key, int amount)
 	{
 		totals.merge(key, amount, StatStore::saturatingSum);
 	}
 
-	/** Overwrite outright. For counters that are a high-water mark, not a tally. */
+	// overwrite, for the high-water-mark counters like highest hit
 	public void setStat(String key, int value)
 	{
 		totals.put(key, value);
 	}
 
-	/** Every total, detached — the journal and session views read this. */
 	public Map<String, Integer> snapshotAll()
 	{
 		return new HashMap<>(totals);

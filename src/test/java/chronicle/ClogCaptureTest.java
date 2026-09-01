@@ -31,25 +31,10 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-/**
- * Pins the collection-log capture at the two points where it is load-bearing.
- *
- * <p>First, the own-account rule. A collection log reached through a POH
- * adventure log belongs to whoever owns the house, not to the player running the
- * client, and the plugin must never harvest it — so the guard is asserted on the
- * whole realistic sequence (open, transmit burst, page draw, flush) rather than
- * one call at a time, and {@link #ownPageDrawIsScraped()} runs the identical
- * fixture with the varbit clear so the guard test cannot pass vacuously.
- *
- * <p>Second, the transmit burst. A full log streams over several ticks, so the
- * capture is published as one whole on a settling deadline; the deadline and the
- * re-entry guard are the difference between one open capturing the log and one
- * open capturing a fragment, and neither is visible at runtime when it breaks.
- */
+/** Collection-log capture: the own-account guard, and the full-log transmit burst. */
 public class ClogCaptureTest
 {
-	// The game's own script and varp numbers — the protocol this capture reacts
-	// to, not choices the plugin gets to make.
+	// game script and varp ids, mirrored from ClogCapture.
 	private static final int COLLECTION_LOG_SETUP = 7797;
 	private static final int COLLECTION_DELAYED_TRANSMIT = 4100;
 	private static final int COLLECTION_INIT_SCRIPT = 2240;
@@ -94,7 +79,7 @@ public class ClogCaptureTest
 			.thenReturn(open ? 1 : 0);
 	}
 
-	/** The player opening their own log: the client fires SETUP at us. */
+	// the player's own open: the client fires SETUP at us.
 	private void logOpened()
 	{
 		capture.onScriptPostFired(new ScriptPostFired(COLLECTION_LOG_SETUP));
@@ -147,15 +132,13 @@ public class ClogCaptureTest
 		return w;
 	}
 
-	/**
-	 * A drawn Vorkath page: a kill-count header carrying colour tags and a
-	 * thousands separator, one plain obtained item, one obtained item the widget
-	 * reports as quantity 0, and one greyed (unobtained) item.
-	 */
+	// A drawn Vorkath page: kc header with colour tags and a thousands separator,
+	// one plain obtained item, one obtained item the widget reports as quantity 0,
+	// one greyed.
 	private void stubVorkathPage()
 	{
-		// Built before the stubbing call: mocks created inside an unfinished
-		// when(...).thenReturn(...) corrupt Mockito's stubbing state.
+		// arrays built first; a mock created inside an unfinished
+		// when(...).thenReturn(...) corrupts Mockito's stubbing state.
 		Widget[] head = {
 			textWidget("Vorkath"),
 			textWidget("Obtained: 12/33"),
@@ -210,11 +193,8 @@ public class ClogCaptureTest
 
 	// ── own account only ───────────────────────────────────────────────────
 
-	/**
-	 * Another player's log, opened through their POH adventure log, must leave no
-	 * trace anywhere in the snapshot — and must not even ask the server to
-	 * transmit it. Everything a real session would fire is fired here.
-	 */
+	// A log opened through a POH adventure log belongs to the house owner. The whole
+	// real sequence is fired here: open, transmit, page draw, flush.
 	@Test
 	public void adventureLogOpenYieldsNothingAnywhere()
 	{
@@ -234,11 +214,8 @@ public class ClogCaptureTest
 		verifyNoTransmitRequested();
 	}
 
-	/**
-	 * The control for the test above: the identical page fixture, drawn by the
-	 * player on their own account, is read. Without this the guard could be
-	 * passing because nothing was ever wired up to be captured.
-	 */
+	// Control for the test above: same fixture with the varbit clear does get read,
+	// so the guard test can't pass on a fixture that captures nothing anyway.
 	@Test
 	public void ownPageDrawIsScraped()
 	{
@@ -249,25 +226,21 @@ public class ClogCaptureTest
 
 		Map<String, Integer> page = byCat().get("Vorkath");
 		assertEquals(Integer.valueOf(1), page.get("Draconic visage"));
-		// An obtained item whose widget reports no quantity still counts as one.
+		// an obtained item whose widget reports no quantity still counts as one.
 		assertEquals(Integer.valueOf(1), page.get("Vorkath's head"));
-		// Greyed items are the ones still to come; they are not holdings.
+		// greyed means unobtained.
 		assertNull(page.get("Jar of decay"));
 		assertEquals(2, page.size());
-		// The count comes off the kill-count line, not the "Obtained" line above
-		// it, and survives both its colour tags and its thousands separator.
+		// kc comes off the Killcount line rather than the Obtained line above it,
+		// with colour tags and the comma stripped.
 		assertEquals(Integer.valueOf(1234), kcs().get("Vorkath"));
 		assertTrue(capture.isDirty());
 	}
 
 	// ── the full-log transmit burst ────────────────────────────────────────
 
-	/**
-	 * One open captures the whole log. The entries stream in over several ticks,
-	 * so each arrival pushes the settling deadline out and the capture is only
-	 * published once it stops growing — a push taken mid-burst would send a
-	 * fragment of the log as though it were all of it.
-	 */
+	// Entries stream in over several ticks and each one pushes the flush deadline
+	// out, so a push taken mid-burst can't go out carrying a fragment of the log.
 	@Test
 	public void transmitBurstAccretesAndPublishesOnlyOnTheFlushTick()
 	{
@@ -283,13 +256,12 @@ public class ClogCaptureTest
 		tickTo(102);
 		transmit(VORKATHS_HEAD, 7);
 
-		// Both are already held, but the burst is not publishable yet.
+		// both held already, nothing publishable yet.
 		assertEquals(Integer.valueOf(1), clogItems().get("Draconic visage"));
 		assertEquals(Integer.valueOf(7), clogItems().get("Vorkath's head"));
 		assertFalse(capture.isDirty());
 
-		// The second entry moved the deadline; a log that keeps streaming is not
-		// cut off at the deadline the first entry set.
+		// the second entry moved the deadline out past the first one's 104.
 		tickTo(104);
 		assertFalse(capture.isDirty());
 
@@ -298,11 +270,8 @@ public class ClogCaptureTest
 		assertEquals(2, clogItems().size());
 	}
 
-	/**
-	 * Resetting the view re-fires SETUP at us. That is our own doing, and it must
-	 * not clear the entries already captured or ask the server for a second
-	 * transmit — the re-entry guard is what makes a single open idempotent.
-	 */
+	// The init script we run to reset the view re-fires SETUP; the re-entry guard
+	// keeps that from wiping the entries or asking for a second transmit.
 	@Test
 	public void ourOwnReTriggerDoesNotWipeTheCapture()
 	{
@@ -320,10 +289,8 @@ public class ClogCaptureTest
 			Mockito.anyInt(), Mockito.anyInt(), Mockito.any(), Mockito.any());
 	}
 
-	/**
-	 * A log that transmits nothing at all still has to release the guard, or the
-	 * account would be unable to capture for the rest of the session.
-	 */
+	// A log that transmits nothing still has to release the guard on the fallback
+	// deadline, or nothing captures for the rest of the session.
 	@Test
 	public void emptyLogStillClearsTheRetrieveGuard()
 	{
@@ -332,22 +299,17 @@ public class ClogCaptureTest
 		logOpened();
 		tickTo(105);
 
-		// Nothing was captured, so there is nothing to publish.
 		assertFalse(capture.isDirty());
 		assertTrue(clogItems().isEmpty());
 
-		// A genuine second open is served.
+		// a genuine second open still gets its Search op.
 		logOpened();
 		Mockito.verify(client, Mockito.times(2)).menuAction(
 			Mockito.anyInt(), Mockito.anyInt(), Mockito.any(MenuAction.class),
 			Mockito.anyInt(), Mockito.anyInt(), Mockito.any(), Mockito.any());
 	}
 
-	/**
-	 * The transmit arguments come straight from the game. A short or absent
-	 * argument list is skipped rather than thrown, because this runs on the
-	 * shared event fan-out where a throw costs every later subscriber its event.
-	 */
+	// the transmit args come straight from the game, so they can be short or missing.
 	@Test
 	public void malformedTransmitIsIgnored()
 	{
@@ -369,13 +331,10 @@ public class ClogCaptureTest
 		assertTrue(clogItems().isEmpty());
 	}
 
-	// ── the shape the server merges on ─────────────────────────────────────
+	// ── snapshot shape ─────────────────────────────────────────────────────
 
-	/**
-	 * The server merges pushes key by key, so the snapshot's key set is a wire
-	 * contract: a key renamed or added here is silently ignored upstream until
-	 * the server learns it.
-	 */
+	// LocalStore.mergeClog floor-merges these keys by name and the panel reads them
+	// back, so a rename here drops the data silently.
 	@Test
 	public void snapshotCarriesTheServersMergeKeys()
 	{
@@ -387,10 +346,8 @@ public class ClogCaptureTest
 
 	// ── account boundary ───────────────────────────────────────────────────
 
-	/**
-	 * Reaching the login screen ends the account. Nothing captured for one
-	 * player may still be present to be pushed under the next one's name.
-	 */
+	// The login screen ends the account: nothing captured for one player may still
+	// be sitting there to go out under the next one's name.
 	@Test
 	public void loginScreenClearsEverything()
 	{
@@ -414,7 +371,7 @@ public class ClogCaptureTest
 		assertFalse(capture.isDirty());
 	}
 
-	// ── the login-synced counts (no interface needed) ──────────────────────
+	// ── login-synced counts, no interface needed ───────────────────────────
 
 	@Test
 	public void loginVarpsFillTheAccountWideCounts()
@@ -433,11 +390,8 @@ public class ClogCaptureTest
 		assertTrue(capture.isDirty());
 	}
 
-	/**
-	 * The varps read as zero until the server has synced them. A login taken
-	 * before that must leave the counts alone rather than record the account as
-	 * having collected nothing.
-	 */
+	// The varps read 0 until the game syncs them, so a LOGGED_IN taken early has to
+	// leave the counts alone instead of recording an account that collected nothing.
 	@Test
 	public void loginBeforeTheVarpsSyncDoesNotZeroTheCounts()
 	{

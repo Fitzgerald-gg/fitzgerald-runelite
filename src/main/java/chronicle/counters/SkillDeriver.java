@@ -25,23 +25,12 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.game.ItemManager;
 
 /**
- * The LOCAL skilling resolver: turns each raw action tuple
+ * Turns a raw action tuple
  * {@code SKILL|xpDelta|objId|itemId|qty|targetName|consumedId} into typed
- * counters at the moment of capture — a faithful port of the server's
- * {@code _skill_derive_action}, reading the same bundled reference tables
- * ({@code osrs_skill_xp.json}, {@code osrs_skill_item_rules.json},
- * {@code osrs_object_species.json}).
- *
- * <p>This is what makes "local-first" true for skilling: a player with cloud
- * sync off gets every typed counter (shafts cut, gems cut, laps run) the
- * instant they act. This is the ONLY derivation: the journal folds these in
- * and, with cloud sync on, its lifetime absolutes mirror upward (the server
- * floor-merges, so an old server-derived copy can never regress the record).
- *
- * <p>One local advantage: item names resolve through {@link ItemManager}
- * (every id, untradeables included) rather than the server's tradeable-only
- * mapping. Tuples this port can't resolve simply count their generic floor —
- * the server's unmapped log remains the discovery funnel for cloud users.
+ * counters, off the bundled tables {@code osrs_skill_xp.json},
+ * {@code osrs_skill_item_rules.json} and {@code osrs_object_species.json}.
+ * Item names come from {@link ItemManager}, so untradeables resolve too.
+ * A tuple it can't type still counts the generic floor for its skill.
  */
 @Slf4j
 @Singleton
@@ -63,16 +52,8 @@ public class SkillDeriver
 		"FLETCHING", "CRAFTING", "HERBLORE", "HUNTER"));
 	// gathering: generic floor key + typed family suffix
 	private static final Map<String, String[]> GATHERING = new HashMap<>();
-	// The gathers whose produce is a RESOURCE the world gave up, so a gp figure
-	// means something. Cooking shares the table's shape but is deliberately out:
-	// it transforms a fish already valued when it was caught, and pricing the
-	// cooked one would count the same catch twice.
-	// Value it where the world hands something over for nothing but time.
-	// Cooking, runecraft, smithing and herblore all TRANSFORM something already
-	// valued when it was gathered (or already paid for), so counting their
-	// output would count one trip twice. Hunter and farming were considered and
-	// deliberately left out: hunter passes the test but was judged not worth the
-	// second code path, and a farm run's yield stands on a bought seed.
+	// gp is only counted where the world hands over new material. cooking,
+	// runecraft, smithing and herblore transform something already valued.
 	private static final Set<String> VALUED_GATHERING = new HashSet<>(Arrays.asList(
 		"WOODCUTTING", "MINING", "FISHING"));
 	// net-trap species by exact catch xp (merged multi-trap deltas match ×n)
@@ -84,7 +65,6 @@ public class SkillDeriver
 	private static final int NET_TRAP_MAX = 6;
 	private static final Map<Integer, String> ENSOULED_REANIM_XP = new HashMap<>();
 	private static final Map<String, Double> PRAYER_BASE_XP = new HashMap<>();
-	private static final double[] PRAYER_PASSIVE_BASES = {4.5, 10, 25, 65, 85, 110};
 	private static final Map<String, String> HUNTER_ITEM_SPECIES = new HashMap<>();
 	private static final Map<String, String> BUTTERFLY_TARGETS = new HashMap<>();
 
@@ -100,7 +80,6 @@ public class SkillDeriver
 		GATHERING.put("MINING", new String[]{"rocksMined", "Mined"});
 		GATHERING.put("FISHING", new String[]{"fishCaught", "Caught"});
 		GATHERING.put("COOKING", new String[]{"foodCooked", "Cooked"});
-		int[][] reanim = {{130, 0}};
 		String[][] reanimPairs = {
 			{"130", "goblin"}, {"182", "monkey"}, {"286", "imp"}, {"364", "minotaur"},
 			{"454", "scorpion"}, {"480", "bear"}, {"494", "unicorn"}, {"520", "dog"},
@@ -198,10 +177,8 @@ public class SkillDeriver
 	private final StatStore statStore;
 	private final Gson gson;
 
-	// Where a resolved gather reports the item it produced. Wired after
-	// construction (the journal it writes to is mounted per account, long after
-	// Guice builds this), so volatile: the client thread reads it on every
-	// gathering tick. Nullable — tests derive without a journal.
+	// wired after construction, once a journal is mounted for the account, so
+	// volatile for the client thread. null until then, and in tests.
 	private volatile GatheredLedger gatheredLedger;
 
 	private Map<String, Map<String, String>> xpTable;
@@ -231,7 +208,7 @@ public class SkillDeriver
 		this.gatheredLedger = ledger;
 	}
 
-	/** Derive a tuple's counters and fold them into the stat store. */
+	// derive a tuple and fold the counters into the stat store
 	void apply(String tuple)
 	{
 		try
@@ -254,15 +231,11 @@ public class SkillDeriver
 		}
 	}
 
-	// The residual CHAT channel: the handful of signals no xp tuple carries —
-	// 0-xp failures (burns, failed pickpockets), lap lines (not 1:1 with
-	// obstacle xp) and the seeds-planted milestone. Port of the server's
-	// osrs_skill_rules.json fixed rules; SkillingStatTracker pre-filters to
-	// these prefixes, so this stays cheap on the chat path.
 	private static final java.util.regex.Pattern FAILED_PICKPOCKET =
 		java.util.regex.Pattern.compile("You fail to pick (?:the )?([\\w'. -]+?)'s pocket.*");
 
-	/** Derive the residual chat-only counters and fold them into the stat store. */
+	// the signals no xp drop carries: burns, failed pickpockets, seeds planted
+	// and lap lines. SkillingStatTracker pre-filters, so this stays cheap.
 	void applyChat(String msg)
 	{
 		if (msg == null || msg.isEmpty())
@@ -355,7 +328,7 @@ public class SkillDeriver
 			return smithing(name(itemId), qty);
 		}
 
-		// HUNTER herbiboar: target when fresh, else the exact xp band bare.
+		// herbiboar: the target name when we get one, else the xp band on a bare drop.
 		if (skill.equals("HUNTER"))
 		{
 			String tl = target.toLowerCase(Locale.ROOT);
@@ -411,7 +384,7 @@ public class SkillDeriver
 			}
 			if (!itemId.isEmpty())
 			{
-				return null;   // veneration/tiara/rewards — not runecrafting
+				return null;   // tiaras, veneration and rewards make no runes
 			}
 			return pairs("runesCrafted", qty);
 		}
@@ -517,20 +490,15 @@ public class SkillDeriver
 		}
 		if (gained > 0 && VALUED_GATHERING.contains(skill))
 		{
-			// Priced HERE, at the gather, and banked as a running total. The
-			// alternative — multiplying the typed counters by a price when the
-			// panel is read — silently re-values every hour ever spent at a rock
-			// at whatever today's market says, so a crash would erase work that
-			// was worth something when it was done.
+			// priced at the gather and banked as a running total. pricing the
+			// typed counters at read time would re-value old work at today's market.
 			int gp = valueOf(gained, n);
 			if (gp > 0)
 			{
 				out.add(entry(StatKeys.RESOURCES_GATHERED_VALUE, gp));
 			}
-			// Only the token-resolved gathers reach here, so the ledger records
-			// exactly the ids this resolver recognised as resources — the same
-			// gate the typed counters pass, which is what keeps the set bounded
-			// to a career's worth of logs, ores, fish and gems.
+			// only token-resolved gathers reach here, so the ledger stays bounded
+			// to logs, ores, fish and gems.
 			GatheredLedger ledger = gatheredLedger;
 			if (ledger != null)
 			{
@@ -540,7 +508,7 @@ public class SkillDeriver
 		return out;
 	}
 
-	/** An item id's canonical form, or 0 when the tuple field is not one. */
+	// canonical form of an item id, or 0 when the tuple field isn't one
 	private int canonical(String itemId)
 	{
 		try
@@ -554,7 +522,7 @@ public class SkillDeriver
 		}
 	}
 
-	/** Live GE worth of {@code qty} of a canonical id; 0 for anything unpriced. */
+	// live GE worth of qty of a canonical id; 0 for anything unpriced
 	private int valueOf(int canonicalId, int qty)
 	{
 		int each;
@@ -568,10 +536,10 @@ public class SkillDeriver
 		}
 		if (each <= 0)
 		{
-			return 0;   // untradeables and unpriced ids simply add nothing
+			return 0;   // untradeables and unpriced ids add nothing
 		}
-		// Clamp the multiply so a huge harvest can't overflow int before
-		// StatStore (which then saturates the running total).
+		// clamp the multiply so a big harvest can't overflow int on the way to
+		// StatStore, which saturates the running total.
 		long value = (long) each * Math.max(1, qty);
 		return value > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) value;
 	}
@@ -737,7 +705,7 @@ public class SkillDeriver
 			{
 				return pairs("headsReanimated", 1, tok + "HeadsReanimated", 1);
 			}
-			return null;   // passive lattice / unknown — nothing countable
+			return null;   // passive lattice or unknown, nothing to count
 		}
 		if (low.endsWith(" rune") || low.endsWith(" runes") || low.equals("bird's egg"))
 		{
@@ -791,10 +759,10 @@ public class SkillDeriver
 			}
 			return null;
 		}
-		return null;   // TTL noise
+		return null;
 	}
 
-	/** {verbCode, n}: 1=ground, 2=spell ×n, 3=altar, 0=unknown. */
+	// {verbCode, n}: 1=ground, 2=spell ×n, 3=altar, 0=unknown
 	private static int[] prayerVerb(int xp, Double base)
 	{
 		if (base == null || xp <= 0)
@@ -834,7 +802,7 @@ public class SkillDeriver
 			{
 				return pairs("pyramidPlunderUrns", 1);
 			}
-			// the ghost-target stall fallback: classify by the stolen item
+			// no target came through: classify the stall by the stolen item
 			if (!itemId.isEmpty())
 			{
 				String nm = name(itemId).toLowerCase(Locale.ROOT);
@@ -881,8 +849,7 @@ public class SkillDeriver
 		String consumedId)
 	{
 		String gained = name(itemId).toLowerCase(Locale.ROOT);
-		// One hook roll, one salvage. 10 xp for small up to 200 for opulent, but
-		// crewmates on a hook earn a fraction of that, so count the item not the xp.
+		// one hook roll, one salvage.
 		if (gained.endsWith(" salvage"))
 		{
 			String tok = stripCamel(gained, new String[]{" salvage"}, "");
@@ -893,7 +860,7 @@ public class SkillDeriver
 			}
 			return out;
 		}
-		// Sorting hands back loot, so the salvage that LEFT the pack names the row.
+		// sorting hands back loot, so the salvage that LEFT the pack names the row
 		String used = name(consumedId).toLowerCase(Locale.ROOT);
 		if (used.endsWith(" salvage"))
 		{
@@ -905,15 +872,13 @@ public class SkillDeriver
 			}
 			return out;
 		}
-		// Every finished courier or bounty task pays out one bag, so the bag is
-		// the receipt. Bags only ever arrive on a Sailing xp drop when a task ends.
+		// courier and bounty tasks each pay out one bag, so the bag is the receipt
 		if (gained.contains("port coin bag") || gained.contains("port reward bag"))
 		{
 			return pairs("portTasksCompleted", 1);
 		}
-		// A Barracuda Trial pays a flat lump and hands over nothing. Port tasks,
-		// lost crates and lost caskets pay lumps too, and all of them hand over
-		// an item, so a bare drop is the trial.
+		// trials pay a flat lump and hand over nothing. the other lump payers
+		// (port tasks, lost crates, lost caskets) all hand over an item.
 		if (itemId.isEmpty() && consumedId.isEmpty())
 		{
 			String key = ladder("SAILING", xpStr);
@@ -1023,7 +988,7 @@ public class SkillDeriver
 			}
 			if (first.equals("crossbow") || low.contains("crossbow"))
 			{
-				return "";   // crossbows ride the item rules, not the wood family
+				return "";   // crossbows are typed by the item rules instead
 			}
 			return camel(first);
 		}
@@ -1223,7 +1188,7 @@ public class SkillDeriver
 						{
 							ladder.put(e.getKey(), e.getValue().getAsString());
 						}
-						// {"members":[...]} collision rows are documentary — inert
+						// {"members":[...]} rows are ambiguous xp values, skipped
 					}
 					xpTable.put(skill.getKey(), ladder);
 				}
@@ -1281,7 +1246,7 @@ public class SkillDeriver
 									}
 									catch (RuntimeException e)
 									{
-										r.match = "";   // bad pattern — inert rule
+										r.match = "";   // bad pattern, rule never matches
 									}
 								}
 							}
