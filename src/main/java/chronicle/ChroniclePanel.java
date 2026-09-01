@@ -232,7 +232,8 @@ class ChroniclePanel extends PluginPanel
 		tabGroup.setLayout(new GridLayout(1, 7, 2, 0));
 		// Each tab starts on a skill icon (bundled, always there) and upgrades to
 		// the game sprite that fits it better once the cache answers.
-		addTab("hitpoints", -1, "Home", View.HOME);
+		addTab("construction", net.runelite.api.gameval.SpriteID.OPTIONS_POH_ICON,
+			"Home", View.HOME);
 		addTab("thieving", net.runelite.api.gameval.SpriteID.ICON_COINS, "Drops", View.DROPS);
 		addTab("slayer", -1, "Slayer", View.SLAYER);
 		addTab("prayer", net.runelite.api.gameval.SpriteID.BOOKS, "Collection log", View.LOG);
