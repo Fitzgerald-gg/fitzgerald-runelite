@@ -109,6 +109,11 @@ class ChroniclePanel extends PluginPanel
 	// History reads either the skill grid or the kill counts; both answer the
 	// same period, so they share its stepper rather than each owning one.
 	private boolean histBosses;
+
+	// Sits opposite "manage" on one row. Says whether the journal is reaching
+	// disk, which everything else in the panel hides: the views are served from
+	// memory and look identical either way.
+	private final JLabel heartbeat = new JLabel();
 	private String histGranularity = "Week";
 	// The period's END date (inclusive); the stepper moves it by one granule.
 	private java.time.LocalDate histCursor = java.time.LocalDate.now();
@@ -288,11 +293,16 @@ class ChroniclePanel extends PluginPanel
 				manage.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker());
 			}
 		});
-		JPanel manageRow = new JPanel(new BorderLayout());
+		JPanel manageRow = new JPanel();
+		manageRow.setLayout(new BoxLayout(manageRow, BoxLayout.X_AXIS));
 		manageRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		manageRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		// Match the siblings' alignment or BoxLayout lines this row's left edge up
+		// with their centres and shunts it halfway across the panel.
+		manageRow.setAlignmentX(Component.CENTER_ALIGNMENT);
 		manageRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 16));
-		manageRow.add(manage, BorderLayout.EAST);
+		manageRow.add(manage);
+		manageRow.add(javax.swing.Box.createHorizontalGlue());
+		manageRow.add(heartbeat);
 		north.add(manageRow);
 
 		// The History tab's reads are primed now, off the EDT, rather than on
@@ -358,6 +368,13 @@ class ChroniclePanel extends PluginPanel
 
 	private void rebuild()
 	{
+		String stalled = plugin.journalWarning();
+		Color pulse = stalled == null ? ACCENT_SESSION : ColorScheme.PROGRESS_ERROR_COLOR;
+		heartbeat.setText(stalled == null ? "logging" : "not saving");
+		heartbeat.setIcon(dot(pulse));
+		heartbeat.setIconTextGap(4);
+		heartbeat.setForeground(pulse);
+		heartbeat.setFont(FontManager.getRunescapeSmallFont());
 		display.removeAll();
 		JPanel body;
 		if (!searchQuery().isEmpty())
@@ -486,26 +503,8 @@ class ChroniclePanel extends PluginPanel
 	private JPanel buildHome()
 	{
 		JPanel p = column();
-		// The heartbeat, alone: a lit dot and a plain word. This is an
-		// adventurer's log, not a diary — the word says what it does.
-		JPanel hdr = new JPanel(new BorderLayout());
-		hdr.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		// Everything below this line is served from memory, so a journal that has
-		// stopped reaching disk looks exactly as alive as one that hasn't. The
-		// heartbeat is the one place that can say otherwise.
+		// The pip says the journal has stopped reaching disk; Home says why.
 		String stalled = plugin.journalWarning();
-		Color pulse = stalled == null ? ACCENT_SESSION : ColorScheme.PROGRESS_ERROR_COLOR;
-		JLabel state = new JLabel(stalled == null ? "logging" : "not saving");
-		// The dot is PAINTED, not typed: the RuneScape font has no bullet glyph
-		// and renders one as a tofu box.
-		state.setIcon(dot(pulse));
-		state.setIconTextGap(4);
-		state.setForeground(pulse);
-		state.setFont(FontManager.getRunescapeSmallFont());
-		hdr.add(state, BorderLayout.EAST);
-		hdr.setMaximumSize(new Dimension(Integer.MAX_VALUE, 16));
-		p.add(hdr);
-		p.add(vgap(4));
 		if (stalled != null)
 		{
 			p.add(note(stalled));
