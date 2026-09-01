@@ -172,7 +172,7 @@ public class MovementStatTracker implements StatTracker
 		{"aldarin", TELEPORTS_ALDARIN},                // another redirected house tab
 		// everyday teleport items
 		{"ectophial", TELEPORTS_ECTOFUNTUS},
-		{"seed pod", TELEPORTS_GRAND_TREE},
+		{"seed pod", TELEPORTS_GRAND_TREE},             // the royal seed pod; its option is "Commune"
 		{"chronicle", TELEPORTS_CHAMPIONS_GUILD},      // lands at the guild's door
 		{"kharedst", TELEPORTS_KOUREND},               // district tokens above win when present
 		{"book of the dead", TELEPORTS_KOUREND},
@@ -183,7 +183,6 @@ public class MovementStatTracker implements StatTracker
 		{"foundry", TELEPORTS_GIANTS_FOUNDRY},
 		{"obelisk", TELEPORTS_OBELISK},
 		// capes and items whose own name carries the destination
-		{"royal seed pod", TELEPORTS_GRAND_TREE},      // option "Commune"
 		{"strength cape", TELEPORTS_WARRIORS_GUILD},
 		{"crafting cape", TELEPORTS_CRAFTING_GUILD},
 		{"farming cape", TELEPORTS_FARMING_GUILD},
@@ -208,10 +207,12 @@ public class MovementStatTracker implements StatTracker
 	private boolean pendingFromNexus;
 	// jewellery/tablet/scroll/spell/cape, or null when the click doesn't reveal it
 	private String pendingMethod;
+	// Far longer than TELEPORT_PENDING_WINDOW_TICKS: the rub menu can sit open as long as
+	// the player likes before a row is picked, and nothing moves until one is.
+	private static final int RUB_MENU_WINDOW_TICKS = 25;
 	// tick of the last "Rub" on teleport jewellery; the destination arrives as a
 	// chat-menu row click shortly after. -1 = idle
 	private int rubTick = -1;
-	private static final int RUB_MENU_WINDOW_TICKS = 25;
 
 	public MovementStatTracker(StatStore statStore, Client client)
 	{
@@ -288,9 +289,9 @@ public class MovementStatTracker implements StatTracker
 		}
 
 		// a left-click on the nexus with a primary destination set teleports straight
-		// away, no list interface, so the option text is the place itself ("Last Boat",
-		// "Great Kourend"). "Configuration" opens the destination editor, so it's the
-		// one nexus option to skip; the openers and Examine returned above.
+		// away, no list interface: the option text is the place itself ("Last Boat",
+		// "Great Kourend"). "Configuration" opens the destination editor — the one nexus
+		// option to skip. The openers and Examine returned above.
 		if (tgtLow.contains("portal nexus"))
 		{
 			if (!optLow.contains("configuration"))
@@ -303,7 +304,7 @@ public class MovementStatTracker implements StatTracker
 		// a POH portal-chamber portal: option "Enter", target "<Place> Portal", with no
 		// "tele" anywhere for the generic arming below to catch. Requiring the table to
 		// know the place excludes the bare house exit and Clan Wars' "Free-for-all
-		// portal". No method family fits a house portal, so it stays null.
+		// portal". No method family fits a house portal; it stays null.
 		if (optLow.equals("enter") && tgtLow.endsWith("portal") && matchDestinationKey(tgtLow) != null)
 		{
 			armTeleport(tgtLow, false);
@@ -331,9 +332,9 @@ public class MovementStatTracker implements StatTracker
 			return;
 		}
 
-		// any spell/tab/cape/item teleport. The destination can sit on either half (a
-		// spell's "Cast <place>", a tab's "<place> teleport"), so arm with both joined
-		// and let the table find it.
+		// any spell/tab/cape/item teleport. The destination can sit on either half: a
+		// spell's "Cast <place>", a tab's "<place> teleport". Arm with both joined and
+		// let the table find it.
 		if (optLow.contains("tele") || tgtLow.contains("tele"))
 		{
 			armTeleport(optLow + " " + tgtLow, false);
@@ -509,8 +510,8 @@ public class MovementStatTracker implements StatTracker
 
 		lastPlayerPos = current;
 
-		// a pending that never landed (a cancelled cast, a non-teleport nexus click)
-		// expires, so it can't attach itself to some later movement
+		// expire a pending that never landed: a cancelled cast, a non-teleport nexus
+		// click. Left standing it attaches itself to whatever movement comes next.
 		if (pendingTick >= 0 && client.getTickCount() - pendingTick > TELEPORT_PENDING_WINDOW_TICKS)
 		{
 			clearPending();
@@ -575,8 +576,7 @@ public class MovementStatTracker implements StatTracker
 	@Override
 	public void onAnimationChanged(AnimationChanged event)
 	{
-		// fires for every actor, so a stranger teleporting beside you would otherwise
-		// credit your counters
+		// fires for every actor, including the stranger teleporting beside you
 		if (event.getActor() != client.getLocalPlayer())
 		{
 			return;
@@ -585,8 +585,8 @@ public class MovementStatTracker implements StatTracker
 		{
 			statStore.incrementStat(TELEPORTS_TOTAL);
 			statStore.incrementStat(TELEPORTS_FAIRY_RING);
-			// the ring is the journey, so drop any stale pending rather than let it
-			// ride this landing too
+			// the ring is the journey. Drop any stale pending before it claims this
+			// landing as well
 			clearPending();
 		}
 	}

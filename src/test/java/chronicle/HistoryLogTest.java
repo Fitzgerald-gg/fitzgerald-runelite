@@ -23,7 +23,7 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * Read contract for the history spine. A date gets written several times over a
- * session, so the last line for it wins, and a line that won't parse costs only itself.
+ * session; the last line for it wins, and a line that won't parse costs only itself.
  */
 public class HistoryLogTest
 {
@@ -48,10 +48,11 @@ public class HistoryLogTest
 
 	private File spine(String rsn)
 	{
-		return new File(dir, LocalStore.slug(rsn) + ".history.jsonl");
+		return new File(dir, LocalStore.slug(rsn) + HistoryLog.SPINE_SUFFIX);
 	}
 
-	// write a line the real writer never would: hand-edited, or cut off mid-write
+	// Put a line on the stream directly: past days the plugin never played through,
+	// and lines the real writer never produces (hand-edited, or cut off mid-write).
 	private void rawLine(String rsn, String text, boolean terminated) throws Exception
 	{
 		try (Writer w = new OutputStreamWriter(
@@ -86,8 +87,8 @@ public class HistoryLogTest
 	@Test
 	public void aTornFinalLineCostsOnlyItself() throws Exception
 	{
-		log.appendImported(dir, RSN, "2026-01-01", map("attack", 50L));
-		log.appendImported(dir, RSN, "2026-01-02", map("attack", 60L));
+		rawLine(RSN, "{\"date\":\"2026-01-01\",\"skills\":{\"attack\":50},\"counters\":{}}", true);
+		rawLine(RSN, "{\"date\":\"2026-01-02\",\"skills\":{\"attack\":60},\"counters\":{}}", true);
 		rawLine(RSN, "", true);                                    // an empty line
 		rawLine(RSN, "{\"date\":\"2026-01-03\",\"skills\":{", false);   // torn mid-write
 
@@ -101,11 +102,11 @@ public class HistoryLogTest
 	@Test
 	public void aDamagedLineDoesNotTruncateTheDaysAfterIt() throws Exception
 	{
-		log.appendImported(dir, RSN, "2026-01-01", map("attack", 50L));
+		rawLine(RSN, "{\"date\":\"2026-01-01\",\"skills\":{\"attack\":50},\"counters\":{}}", true);
 		// one line cut short by a crash, one whose date won't parse
 		rawLine(RSN, "{\"date\":\"2026-01-02\",\"skills\":{\"attack\":60", true);
 		rawLine(RSN, "{\"date\":\"01/02/2026\",\"skills\":{}}", true);
-		log.appendImported(dir, RSN, "2026-01-03", map("attack", 70L));
+		rawLine(RSN, "{\"date\":\"2026-01-03\",\"skills\":{\"attack\":70},\"counters\":{}}", true);
 
 		TreeMap<LocalDate, HistoryLog.Baseline> got = log.read(dir, RSN);
 		assertEquals(2, got.size());
@@ -130,40 +131,21 @@ public class HistoryLogTest
 		assertTrue(got.get(LocalDate.parse("2026-02-03")).skills.isEmpty());
 	}
 
-	// imported past days share the file with played ones and carry skills but no counters
-	@Test
-	public void anImportedDayIsJustAnotherLineInTheSameStream()
-	{
-		log.appendImported(dir, RSN, "2024-03-01", map("overall", 12_345L));
-		log.append(dir, RSN, map("overall", 20_000L), map("tilesWalked", 5L), java.util.Collections.emptyMap());
-
-		TreeMap<LocalDate, HistoryLog.Baseline> got = log.read(dir, RSN);
-		assertEquals(2, got.size());
-		HistoryLog.Baseline imported = got.get(LocalDate.parse("2024-03-01"));
-		assertEquals(12_345L, (long) imported.skills.get("overall"));
-		assertTrue(imported.counters.isEmpty());
-		// append() dates itself today, so the played day is always the later entry
-		assertEquals(20_000L, (long) got.lastEntry().getValue().skills.get("overall"));
-		// re-running an import is safe; the later line for the date wins
-		log.appendImported(dir, RSN, "2024-03-01", map("overall", 12_400L));
-		assertEquals(12_400L, (long) log.read(dir, RSN)
-			.get(LocalDate.parse("2024-03-01")).skills.get("overall"));
-	}
-
-	// overall xp outgrew an int long ago; narrowing it here would read as a loss
+	// overall xp outgrew an int long ago; a narrowing read turns the total into a loss
 	@Test
 	public void figuresBeyondAnIntSurviveTheRoundTrip()
 	{
-		log.appendImported(dir, RSN, "2026-04-01", map("overall", 4_600_000_000L));
+		log.append(dir, RSN, map("overall", 4_600_000_000L),
+			java.util.Collections.emptyMap(), java.util.Collections.emptyMap());
 		assertEquals(4_600_000_000L, (long) log.read(dir, RSN)
-			.get(LocalDate.parse("2026-04-01")).skills.get("overall"));
+			.lastEntry().getValue().skills.get("overall"));
 	}
 
 	@Test
-	public void eachAccountKeepsItsOwnSpine()
+	public void eachAccountKeepsItsOwnSpine() throws Exception
 	{
-		log.appendImported(dir, "Alpha", "2026-05-01", map("overall", 1_000L));
-		log.appendImported(dir, "Beta", "2026-05-01", map("overall", 9_000L));
+		rawLine("Alpha", "{\"date\":\"2026-05-01\",\"skills\":{\"overall\":1000},\"counters\":{}}", true);
+		rawLine("Beta", "{\"date\":\"2026-05-01\",\"skills\":{\"overall\":9000},\"counters\":{}}", true);
 
 		assertEquals(1_000L, (long) log.read(dir, "Alpha")
 			.get(LocalDate.parse("2026-05-01")).skills.get("overall"));
@@ -175,10 +157,10 @@ public class HistoryLogTest
 
 	// the client reports "Alpha Two" where the login was alpha_two; slug() folds both to one file
 	@Test
-	public void oneAccountIsOneSpineHoweverItsNameIsSpelt()
+	public void oneAccountIsOneSpineHoweverItsNameIsSpelt() throws Exception
 	{
-		log.appendImported(dir, "Alpha Two", "2026-06-01", map("overall", 100L));
-		log.appendImported(dir, "alpha_two", "2026-06-02", map("overall", 200L));
+		rawLine("Alpha Two", "{\"date\":\"2026-06-01\",\"skills\":{\"overall\":100},\"counters\":{}}", true);
+		rawLine("alpha_two", "{\"date\":\"2026-06-02\",\"skills\":{\"overall\":200},\"counters\":{}}", true);
 
 		TreeMap<LocalDate, HistoryLog.Baseline> got = log.read(dir, "ALPHA TWO");
 		assertEquals(2, got.size());
@@ -192,8 +174,6 @@ public class HistoryLogTest
 	{
 		log.append(dir, null, map("attack", 1L), map("tilesWalked", 1L), java.util.Collections.emptyMap());
 		log.append(dir, "", map("attack", 1L), map("tilesWalked", 1L), java.util.Collections.emptyMap());
-		log.appendImported(dir, null, "2026-07-01", map("attack", 1L));
-		log.appendImported(dir, RSN, null, map("attack", 1L));
 
 		String[] written = dir.list();
 		assertEquals(0, written == null ? 0 : written.length);

@@ -30,19 +30,20 @@ import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
+import net.runelite.client.util.Text;
 
 /**
  * Collection-log capture.
  *
- * <p>Opening the log from code counts as automation, so this only ever reacts to
- * the player's own open. The completion fraction and the per-tab counts come from
- * login-synced varps and need no interface at all. When the player does open the
- * log we fire its own "Search" op, which makes the game server transmit every
- * entry, so one open captures the whole log rather than the page in view (the same
- * trick WikiSync and TempleOSRS use). Page-header scrapes on top of that pick up
- * kill counts.
+ * <p>Opening the log from code counts as automation; this only ever reacts to the
+ * player's own open. The completion fraction and the per-tab counts come from
+ * login-synced varps and need no interface at all. On a real open we fire the log's
+ * own "Search" op, which makes the game server transmit every entry: one open, the
+ * whole log. Page-header scrapes on top of that pick up kill counts.
  *
- * <p>The POH adventure-log varbit guards every capture path: own account only.
+ * <p>Every collection-log path checks the POH adventure-log varbit first: own account
+ * only. The slayer kill log carries no such check because it has no shared view. It
+ * opens from the Slayer rewards interface and shows nobody else's kills.
  */
 @Singleton
 @Slf4j
@@ -71,13 +72,13 @@ public class ClogCapture
 	// byCat: page -> {item name: quantity}. kcs: page -> kill count.
 	private final Map<String, Map<String, Integer>> byCat = new HashMap<>();
 	private final Map<String, Integer> kcs = new HashMap<>();
-	// Species -> lifetime kills. The kill log is one scrollable list, so a single
-	// open yields every monster.
+	// Species -> lifetime kills. The kill log is one scrollable list; one open
+	// yields every monster.
 	private final Map<String, Integer> slayerKcs = new HashMap<>();
 	private int finished;
 	private int available;
 
-	// Enabled mid-session: no LOGGED_IN transition is coming, so read the varps now.
+	// Enabled mid-session — no LOGGED_IN transition is coming. Read the varps now.
 	void primeFromVarps(net.runelite.api.Client c)
 	{
 		int total = c.getVarpValue(VARP_CLOG_TOTAL);
@@ -152,9 +153,9 @@ public class ClogCapture
 		}
 		else if (state == GameState.HOPPING)
 		{
-			// The same account comes back, so the accreted model and the dirty flag
-			// survive a hop. Scene state goes: drop the kill-log retry, and close out
-			// a live transmit rather than leave it on a deadline the hop can strand.
+			// Same account on the other side, so the accreted model and the dirty flag
+			// survive. Scene state doesn't: drop the kill-log retry, and close out a
+			// live transmit before the hop strands it on a deadline.
 			killLogTicks = -1;
 			if (clogFlushTick > 0)
 			{
@@ -173,8 +174,9 @@ public class ClogCapture
 		}
 		if (e.getScriptId() == COLLECTION_LOG_SETUP)
 		{
-			// The player opened their log. Bail out on a POH adventure-log view, which
-			// is someone else's log, and don't recurse on the reset script below.
+			// The player opened their log. An adventure-log view is someone else's log:
+			// bail, and bin anything half-captured. Then don't recurse on the reset
+			// script we run below.
 			if (client.getVarbitValue(VarbitID.COLLECTION_POH_HOST_BOOK_OPEN) == 1)
 			{
 				clogItems.clear();
@@ -204,7 +206,6 @@ public class ClogCapture
 		{
 			return;
 		}
-		// Belt and braces: never capture while an adventure log is open.
 		if (client.getVarbitValue(VarbitID.COLLECTION_POH_HOST_BOOK_OPEN) == 1)
 		{
 			return;
@@ -350,8 +351,6 @@ public class ClogCapture
 
 	private void scrapeOpenPage()
 	{
-		// Skip a page drawn while viewing another player's log through a POH
-		// adventure log; same guard as the transmit paths.
 		if (client.getVarbitValue(VarbitID.COLLECTION_POH_HOST_BOOK_OPEN) == 1)
 		{
 			return;
@@ -466,7 +465,7 @@ public class ClogCapture
 			return null;
 		}
 		String t = w.getText();
-		return t == null ? null : t.replaceAll("<[^>]*>", "").trim();
+		return t == null ? null : Text.removeTags(t).trim();
 	}
 
 	// ── read by the journal and the clog push ──────────────────────────────

@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
@@ -49,8 +50,8 @@ import static chronicle.counters.StatKeys.VIALS_SHATTERED;
 @Slf4j
 public class FoodStatTracker implements StatTracker
 {
-	// Consumables that heal exactly one hitpoint, so a +1 tick straight after one is
-	// that heal rather than regen. Matched as a substring of the menu target.
+	// Consumables that heal exactly one hitpoint. A +1 tick straight after one of these
+	// is that heal, not regen. Matched as a substring of the menu target.
 	private static final List<String> SINGLE_HP_HEALS = List.of(
 		"Anchovies",
 		"Cabbage",
@@ -116,8 +117,9 @@ public class FoodStatTracker implements StatTracker
 	// underneath a session.
 	private final Map<String, Integer> dosePrices = new HashMap<>();
 
-	// Journal sink for per-consumable gp (typed key -> price at use). Null until the
-	// plugin wires it at startUp.
+	// Journal sink for per-consumable gp (typed key -> price at use). Null in tests, and
+	// until ChronicleCounters builds this tracker, which it defers until the plugin has
+	// wired the sink.
 	private final java.util.function.BiConsumer<String, Integer> consumableSink;
 
 	public FoodStatTracker(StatStore statStore, Client client, ItemManager itemManager,
@@ -191,8 +193,8 @@ public class FoodStatTracker implements StatTracker
 	@Override
 	public void onGameStateChanged(GameStateChanged event)
 	{
-		// Away from LOGGED_IN the pack changes unobserved and ticks stop firing, so both
-		// the snapshot and the queue go stale. Rebuild from the first inventory event
+		// Away from LOGGED_IN the pack changes unobserved and ticks stop firing. The
+		// snapshot and the queue both go stale. Rebuild from the first inventory event
 		// after we're back in-game.
 		if (event.getGameState() != GameState.LOGGED_IN)
 		{
@@ -234,8 +236,8 @@ public class FoodStatTracker implements StatTracker
 		}
 
 		// Confirm a pending Eat: the clicked food's own stack must have shrunk. Multi
-		// portion foods (pizzas, cakes) shrink the whole-item stack, so they count once
-		// per bite.
+		// portion foods (pizzas, cakes) shrink the whole-item stack and count once per
+		// bite.
 		if (!pendingEats.isEmpty() && inventorySnapshot != null)
 		{
 			for (Map.Entry<Integer, Integer> before : inventorySnapshot.entrySet())
@@ -342,10 +344,23 @@ public class FoodStatTracker implements StatTracker
 	 */
 	static String perFoodKey(String foodName)
 	{
+		return consumableKey(baseFoodName(foodName), "Eaten");
+	}
+
+	/**
+	 * Camel-case a consumable's name and stamp the suffix on: "Prayer potion" + "Doses"
+	 * -&gt; prayerPotionDoses. Empty in, empty out.
+	 *
+	 * <p>Locale.ROOT because these keys are written into the journal and read back on
+	 * whatever machine opens it. A Turkish JVM lowercases I to a dotless i, which the
+	 * a-z split below then throws away, minting a key no other client would agree with.
+	 */
+	private static String consumableKey(String name, String suffix)
+	{
 		StringBuilder key = new StringBuilder();
 		// Apostrophes go before the split so a possessive collapses into its word:
 		// "Chef's delight" is chefsDelight, not chefSDelight.
-		String cleaned = baseFoodName(foodName).trim().toLowerCase().replace("'", "").replace("’", "");
+		String cleaned = name.trim().toLowerCase(Locale.ROOT).replace("'", "").replace("’", "");
 		for (String word : cleaned.split("[^a-z0-9]+"))
 		{
 			if (word.isEmpty())
@@ -361,13 +376,13 @@ public class FoodStatTracker implements StatTracker
 				key.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
 			}
 		}
-		return key.length() == 0 ? "" : key.append("Eaten").toString();
+		return key.length() == 0 ? "" : key.append(suffix).toString();
 	}
 
 	/**
-	 * Fold a part-eaten food back onto the whole item, so every bite of one cake lands
-	 * on cakeEaten. Digits survive the key builder, so leaving the portion prefix on
-	 * would mint 23CakeEaten and friends.
+	 * Fold a part-eaten food back onto the whole item: every bite of one cake lands on
+	 * cakeEaten. Digits survive the key builder: leave the portion prefix on and you
+	 * get 23CakeEaten and friends.
 	 */
 	static String baseFoodName(String foodName)
 	{
@@ -395,8 +410,8 @@ public class FoodStatTracker implements StatTracker
 
 		String message = event.getMessage();
 
-		// Eating isn't counted here: the "You eat the ..." line only fires for a handful
-		// of foods, so most meals went uncounted. See onItemContainerChanged.
+		// Eating isn't counted here. The "You eat the ..." line fires for only a handful
+		// of foods; most meals never produced one. See onItemContainerChanged.
 		if (message.contains("You drink"))
 		{
 			// Drinks read "You drink the <x>.", potions read "You drink some of
@@ -490,26 +505,9 @@ public class FoodStatTracker implements StatTracker
 		return to > from ? message.substring(from, to).trim() : "";
 	}
 
-	/** "Prayer potion" -&gt; "prayerPotionDoses", the same minting rule as {@link #perFoodKey}. */
+	/** "Prayer potion" -&gt; "prayerPotionDoses". No portion folding; a chat line names the whole potion. */
 	static String perPotionKey(String potionName)
 	{
-		StringBuilder key = new StringBuilder();
-		String cleaned = potionName.trim().toLowerCase().replace("'", "").replace("’", "");
-		for (String word : cleaned.split("[^a-z0-9]+"))
-		{
-			if (word.isEmpty())
-			{
-				continue;
-			}
-			if (key.length() == 0)
-			{
-				key.append(word);
-			}
-			else
-			{
-				key.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
-			}
-		}
-		return key.length() == 0 ? "" : key.append("Doses").toString();
+		return consumableKey(potionName, "Doses");
 	}
 }

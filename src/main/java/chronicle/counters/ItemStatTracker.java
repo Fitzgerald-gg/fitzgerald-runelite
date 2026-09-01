@@ -24,9 +24,8 @@ import static chronicle.counters.StatKeys.ITEMS_DROPPED_VALUE;
 import static chronicle.counters.StatKeys.RESOURCES_DROPPED_VALUE;
 
 /**
- * Item interactions with no attempt count of their own: examines, drops (and the
- * value binned), cabbage and flax picks. All of them arrive as a menu click or a
- * line of chat, so those are the only two hooks implemented here.
+ * Item interactions with no attempt count of their own: examines, drops (and the value
+ * binned), cabbage and flax picks. All of them arrive as a menu click or a line of chat.
  */
 public class ItemStatTracker implements StatTracker
 {
@@ -98,13 +97,13 @@ public class ItemStatTracker implements StatTracker
 		{
 			return;
 		}
-		// clamp the multiply so a big stack can't overflow the int StatStore takes.
+		// clamp: StatStore takes an int, and a full stack of anything valuable overflows one
 		final long value = (long) each * qty;
 		final int banked = value > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) value;
 		statStore.incrementStatBy(ITEMS_DROPPED_VALUE, banked);
-		// the total above counts every bin, bank clear-outs included. this second
-		// figure is read beside gathered value, so only items this account pulled
-		// out of the world count toward it.
+		// the total above counts every bin, bank clear-outs included. this second figure
+		// sits beside gathered value and only counts what this account pulled out of the
+		// world itself.
 		if (gatheredLedger != null && gatheredLedger.wasGathered(canonical))
 		{
 			statStore.incrementStatBy(RESOURCES_DROPPED_VALUE, banked);

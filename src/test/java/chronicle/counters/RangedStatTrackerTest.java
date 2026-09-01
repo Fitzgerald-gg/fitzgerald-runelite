@@ -24,9 +24,9 @@ import static chronicle.counters.StatKeys.AMMO_CONSUMED;
 import static org.junit.Assert.assertEquals;
 
 /**
- * Covers the ammo inference in RangedStatTracker. Nothing in the client says a shot was
- * fired, so a shrinking worn-ammo slot is judged at the tick boundary: minus whatever
- * turned up in the pack, and refused if it is bigger than MAX_PER_TICK.
+ * Nothing in the client says a shot was fired. RangedStatTracker infers it from a
+ * shrinking worn-ammo slot, judged at the tick boundary: minus whatever turned up in
+ * the pack, and refused if the drop is bigger than MAX_PER_TICK.
  */
 public class RangedStatTrackerTest
 {
@@ -113,7 +113,7 @@ public class RangedStatTrackerTest
 		tick();
 		assertEquals(3, consumed());
 
-		// pendingConsume was cleared, so a quiet tick books nothing
+		// pendingConsume was cleared; a quiet tick books nothing
 		tick();
 		assertEquals(3, consumed());
 	}
@@ -163,8 +163,8 @@ public class RangedStatTrackerTest
 		tick();
 		assertEquals(0, consumed());
 
-		// packAmmoAtTickStart rebaselines every tick, so the 28 now lying in the
-		// pack offsets nothing
+		// packAmmoAtTickStart rebaselines every tick — the 28 now lying in the pack
+		// offset nothing
 		quiver(ARROW_ID, 71);
 		tick();
 		assertEquals(1, consumed());
@@ -220,14 +220,14 @@ public class RangedStatTrackerTest
 
 	// changes that aren't shrinkage
 
-	// quantities stay under the ceiling so it's the id check that stops the count here
+	// quantities stay under the ceiling; it's the id check that stops the count here
 	@Test
 	public void emptyingTheQuiverIsNotAVolley()
 	{
 		quiver(ARROW_ID, 15);
 		tick();
 
-		// the slot empties and the id goes to -1, so there's no same-id shrink to read
+		// the slot empties and the id goes to -1: no same-id shrink to read
 		quiver(-1, 0);
 		tick();
 		assertEquals(0, consumed());

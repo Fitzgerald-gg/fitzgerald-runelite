@@ -1,5 +1,10 @@
 /*
- * Copyright (c) 2026, Chronicle — BSD 2-Clause (see LICENSE).
+ * Copyright (c) 2026, Chronicle
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the conditions of the BSD 2-Clause
+ * License (see LICENSE) are met.
  */
 package chronicle.counters;
 
@@ -18,6 +23,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -29,7 +35,7 @@ import net.runelite.client.game.ItemManager;
  * {@code SKILL|xpDelta|objId|itemId|qty|targetName|consumedId} into typed
  * counters, off the bundled tables {@code osrs_skill_xp.json},
  * {@code osrs_skill_item_rules.json} and {@code osrs_object_species.json}.
- * Item names come from {@link ItemManager}, so untradeables resolve too.
+ * Item names come from {@link ItemManager}; untradeables resolve too.
  * A tuple it can't type still counts the generic floor for its skill.
  */
 @Slf4j
@@ -62,6 +68,7 @@ public class SkillDeriver
 	private static final String[] NET_TRAP_KEYS = {
 		"swampLizardsTrapped", "orangeSalamandersTrapped", "redSalamandersTrapped",
 		"blackSalamandersTrapped", "tecuSalamandersTrapped"};
+	// six nets is the most a hunter can lay at once
 	private static final int NET_TRAP_MAX = 6;
 	private static final Map<Integer, String> ENSOULED_REANIM_XP = new HashMap<>();
 	private static final Map<String, Double> PRAYER_BASE_XP = new HashMap<>();
@@ -231,11 +238,11 @@ public class SkillDeriver
 		}
 	}
 
-	private static final java.util.regex.Pattern FAILED_PICKPOCKET =
-		java.util.regex.Pattern.compile("You fail to pick (?:the )?([\\w'. -]+?)'s pocket.*");
+	private static final Pattern FAILED_PICKPOCKET =
+		Pattern.compile("You fail to pick (?:the )?([\\w'. -]+?)'s pocket.*");
 
 	// the signals no xp drop carries: burns, failed pickpockets, seeds planted
-	// and lap lines. SkillingStatTracker pre-filters, so this stays cheap.
+	// and lap lines. SkillingStatTracker pre-filters before anything reaches here.
 	void applyChat(String msg)
 	{
 		if (msg == null || msg.isEmpty())
@@ -262,7 +269,7 @@ public class SkillDeriver
 			statStore.incrementStat("normalAgilityLaps");
 			return;
 		}
-		java.util.regex.Matcher m = FAILED_PICKPOCKET.matcher(msg);
+		Matcher m = FAILED_PICKPOCKET.matcher(msg);
 		if (m.matches())
 		{
 			statStore.incrementStat("failedPickPockets");
@@ -497,8 +504,8 @@ public class SkillDeriver
 			{
 				out.add(entry(StatKeys.RESOURCES_GATHERED_VALUE, gp));
 			}
-			// only token-resolved gathers reach here, so the ledger stays bounded
-			// to logs, ores, fish and gems.
+			// only token-resolved gathers reach here: the ledger stays bounded to
+			// logs, ores, fish and gems.
 			GatheredLedger ledger = gatheredLedger;
 			if (ledger != null)
 			{
@@ -844,7 +851,7 @@ public class SkillDeriver
 	}
 
 	// Sailing pays out for half a dozen activities and several of them share xp
-	// numbers, so the item decides. The xp is only read when nothing changed hands.
+	// numbers. The item decides; the xp is only read when nothing changed hands.
 	private List<Map.Entry<String, Integer>> sailing(String xpStr, String itemId,
 		String consumedId)
 	{

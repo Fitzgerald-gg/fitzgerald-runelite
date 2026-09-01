@@ -1,9 +1,10 @@
 /*
- * Copyright (c) 2026, Chronicle — BSD 2-Clause (see LICENSE).
+ * Copyright (c) 2026, Chronicle
+ * All rights reserved.
  *
- * Coordinator for the lifetime-counter trackers. ChroniclePlugin registers this on the
- * RuneLite EventBus; it hands each subscribed event to every tracker, and they tally
- * into the shared in-memory StatStore that the plugin folds into the journal.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the conditions of the BSD 2-Clause
+ * License (see LICENSE) are met.
  */
 package chronicle.counters;
 
@@ -24,6 +25,11 @@ import net.runelite.api.events.WidgetLoaded;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 
+/**
+ * Coordinator for the lifetime-counter trackers. ChroniclePlugin registers this on the
+ * RuneLite EventBus; it hands each subscribed event to every tracker, and they tally
+ * into the shared in-memory {@link StatStore} that the plugin folds into the journal.
+ */
 @Slf4j
 @Singleton
 public class ChronicleCounters
@@ -61,9 +67,9 @@ public class ChronicleCounters
 		this.consumableSink = sink;
 	}
 
-	// The resolver notes each gather into the ledger; the drop tracker reads it back
-	// when an item is binned. SkillDeriver is a Guice singleton rather than one of the
-	// trackers, so it is handed the ledger here instead of at the lazy build.
+	// SkillDeriver notes each gather into the ledger; the drop tracker reads it back
+	// when an item is binned. It is a Guice singleton, not one of the lazily built
+	// trackers, hence the second hand-off here.
 	public void setGatheredLedger(GatheredLedger ledger)
 	{
 		this.gatheredLedger = ledger;
@@ -72,8 +78,8 @@ public class ChronicleCounters
 
 	private StatTracker[] trackers()
 	{
-		// Read the field once: a reset() landing between the null check and the return
-		// would hand the caller a null array to iterate.
+		// Read the field once. A reset() landing between the null check and the return
+		// hands the caller a null array to iterate.
 		StatTracker[] built = trackers;
 		if (built == null)
 		{
@@ -95,18 +101,18 @@ public class ChronicleCounters
 	}
 
 	/**
-	 * Drop every tracker's inferred state. Trackers work from deltas (an inventory
-	 * snapshot, the last hitpoint reading, a click awaiting confirmation), so after a
-	 * blind window the next delta would be measured against a world that has since
-	 * moved. Nulling the array is the whole reset; trackers() rebuilds on the next event.
+	 * Drop every tracker's inferred state. Trackers work from deltas: an inventory
+	 * snapshot, the last hitpoint reading, a click awaiting confirmation. After a
+	 * blind window the next delta is measured against a world that has since moved.
+	 * Nulling the array is all there is to it; trackers() rebuilds on the next event.
 	 */
 	public void reset()
 	{
 		trackers = null;
 	}
 
-	// Catch per tracker: one throwing on a line it did not expect would otherwise rob
-	// every tracker after it of the event, with nothing to say why its counters stalled.
+	// Catch per tracker. One throwing on a line it did not expect otherwise robs every
+	// tracker after it of the event, with nothing to say why the counters stalled.
 	// Errors propagate; only a tracker's own bad reasoning is ours to swallow.
 	private void fanOut(java.util.function.Consumer<StatTracker> delivery)
 	{

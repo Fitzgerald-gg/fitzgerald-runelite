@@ -30,12 +30,10 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 
 /**
- * Thin async wrapper over the configured Chronicle server's HTTP API. Every call
- * here is UPWARD — the plugin sends, and never reads anything back; the journal on
- * disk is the record. Every call is fired on
- * OkHttp's own dispatcher threads (never the client thread) and reports back
- * through a {@link Consumer} callback. Callbacks may run on any thread; the
- * caller is responsible for hopping back to the client/EDT thread as needed.
+ * Async wrapper over the configured Chronicle server's HTTP API. Everything here
+ * is a send; nothing is read back, because the journal on disk is the record.
+ * Calls run on OkHttp's dispatcher threads and report through a
+ * {@link Consumer}, so callers hop back to the client or EDT thread themselves.
  */
 @Slf4j
 @Singleton
@@ -43,11 +41,10 @@ public class ChronicleApiClient
 {
 	private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
 
-	// The server base URL is the player's own setting, so a reply is never
-	// assumed to be well behaved. Anything past this ceiling is dropped unread
-	// rather than buffered, which stops a hostile or broken host from streaming
-	// the client out of heap; the largest reply the API has is a full slayer
-	// journey, a few hundred KB at the very worst.
+	// The base URL is the player's own setting, and a reply from it is not assumed
+	// to be well behaved. The only reply read here is a push receipt, a few dozen
+	// bytes of JSON, so a megabyte is a wide margin. Anything past it is dropped
+	// unread instead of buffered into heap.
 	private static final int MAX_BODY_CHARS = 1024 * 1024;
 
 	private final OkHttpClient http;
@@ -66,7 +63,6 @@ public class ChronicleApiClient
 		this.gson = gson;
 	}
 
-	/** Result of a stat push. */
 	public static final class PushResult
 	{
 		public final boolean ok;
@@ -86,17 +82,11 @@ public class ChronicleApiClient
 		}
 	}
 
-	/**
-	 * POST {base}/api/counters/{token} {"playerName": name, "stats": {..absolute ints..}}.
-	 * The token is the auth; the server rejects (204, silently) a playerName that
-	 * does not match the token's known RSNs, so {@code name} must be the exact
-	 * in-game display name.
-	 */
 	// The account's stable hash (RuneLite client.getAccountHash()), set by the
-	// plugin whenever the local player resolves. Sent on token-authed fires so
-	// the server can verify an in-game rename as the SAME account (not an alt
-	// sharing the token) and adopt the new display name automatically. Sent as
-	// a string to sidestep any 64-bit JSON-number precision worries.
+	// plugin whenever the local player resolves. It lets the server read an
+	// in-game rename as the same account rather than an alt sharing the token,
+	// and adopt the new display name on its own. String-encoded to sidestep
+	// 64-bit JSON number precision.
 	private volatile long accountHash = -1L;
 
 	public void setAccountHash(long h)
@@ -107,15 +97,20 @@ public class ChronicleApiClient
 	private void addAccountHash(JsonObject payload)
 	{
 		long h = accountHash;
-		// -1 is RuneLite's "no account" sentinel; every other value is a valid
-		// hash — including negatives, since the 64-bit hash often has its sign
-		// bit set. Guarding on `> 0` (wrongly) dropped real hashes.
+		// -1 is RuneLite's no-account sentinel. Every other value is valid,
+		// negatives included: the 64-bit hash often has its sign bit set.
 		if (h != -1L)
 		{
 			payload.addProperty("accountHash", String.valueOf(h));
 		}
 	}
 
+	/**
+	 * POST {base}/api/counters/{token} with {"playerName": name, "stats": {..absolute ints..}}.
+	 * The token is the auth. A playerName that does not match one of the token's
+	 * known RSNs is rejected silently with a 204, so {@code name} has to be the
+	 * exact in-game display name.
+	 */
 	public void pushStats(String baseUrl, String token, String name,
 		Map<String, Integer> stats, @Nullable String accountType,
 		@Nullable JsonObject skills, @Nullable Consumer<PushResult> onDone)
@@ -133,8 +128,8 @@ public class ChronicleApiClient
 		JsonObject payload = new JsonObject();
 		payload.addProperty("playerName", name);
 		addAccountHash(payload);
-		// The account variant (ironman/gim/…) read from the game, so the server can
-		// keep the profile's account_type in sync without anyone tagging by hand.
+		// Account variant (ironman/gim/…) as the game reports it. Keeps the
+		// profile's account_type in step without hand-tagging.
 		if (accountType != null && !accountType.isEmpty())
 		{
 			payload.addProperty("accountType", accountType);
@@ -148,9 +143,9 @@ public class ChronicleApiClient
 			}
 		}
 		payload.add("stats", statsObj);
-		// Per-skill level + XP snapshot, so the profile updates live rather than
-		// waiting for the daily hiscores pull. Live-push only (null on the logout
-		// flush, where the client can't be read).
+		// Per-skill level and XP, which spares the profile the wait for the daily
+		// hiscores pull. Null on the logout flush, where the client can no longer
+		// be read.
 		if (skills != null && skills.size() > 0)
 		{
 			payload.add("skills", skills);
@@ -209,11 +204,11 @@ public class ChronicleApiClient
 	}
 
 	/**
-	 * Fire a single RAW event at POST /api/events/{token}. Fire-and-forget: the
-	 * plugin sends only raw fields (item ids + quantity, raw context) and the
-	 * server enriches (name / GE value / rarity) + stores. {@code event} is the
-	 * full body ({@code playerName, type, data, eventId}). Never throws on the
-	 * caller thread; logs failures at debug.
+	 * Fire one event at POST /api/events/{token} and forget it. The plugin sends
+	 * raw fields only (item ids, quantities, context); naming, GE value and
+	 * rarity are the server's job. {@code event} is the full body:
+	 * {@code playerName, type, data, eventId}. Never throws on the caller thread,
+	 * and failures go to the debug log.
 	 */
 	public void postEvent(String baseUrl, String token, JsonObject event)
 	{
@@ -249,8 +244,10 @@ public class ChronicleApiClient
 		});
 	}
 
-	// Sends the collection log as {by_cat, kcs, finished, available}. The server
-	// merges partial snapshots, so sending whatever has been scraped is fine.
+	// Sends the collection log as {by_cat, kcs, slayer_kcs, cat_counts,
+	// clog_items, finished, available}. clog_items is every obtained item from a
+	// full-log read; slayer_kcs is per-monster lifetime kills. The server
+	// floor-merges partial snapshots; sending whatever has been scraped is fine.
 	public void pushClog(String baseUrl, String token, String name, Map<String, Object> snapshot)
 	{
 		HttpUrl url = resolve(baseUrl, "api/clog/" + token);
@@ -329,7 +326,7 @@ public class ChronicleApiClient
 		});
 	}
 
-	/** One dry chase from the cloud's grinds ledger. */
+	/** One dry chase: the journal's own kc weighed against the bundled wiki rate book. */
 	public static final class GrindRow
 	{
 		public final String boss;
@@ -348,7 +345,7 @@ public class ChronicleApiClient
 		}
 	}
 
-	/** The cloud's slayer journey, as the site's Slayer chapter reads it. */
+	/** The slayer journey the journal computes for the panel, from its on-disk task array. */
 	public static final class SlayerJourney
 	{
 		public final int completedTasks;
@@ -392,13 +389,6 @@ public class ChronicleApiClient
 		}
 	}
 
-	private static Number num(JsonObject o, String key)
-	{
-		return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsNumber() : 0;
-	}
-
-
-
 	@Nullable
 	private HttpUrl resolve(String baseUrl, String path)
 	{
@@ -422,12 +412,7 @@ public class ChronicleApiClient
 		return b.build();
 	}
 
-	/**
-	 * The whole reply as text, or null once it runs past {@link #MAX_BODY_CHARS}.
-	 * Reading through a fixed ceiling — rather than taking the body whole — means
-	 * a reply of any advertised (or unadvertised, chunked) length costs a fixed
-	 * amount of heap, and an over-long one abandons the connection mid-stream.
-	 */
+	/** The reply as text, or null once it runs past {@link #MAX_BODY_CHARS}. */
 	@Nullable
 	private static String readCapped(Response r) throws IOException
 	{

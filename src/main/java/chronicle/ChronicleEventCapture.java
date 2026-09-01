@@ -73,16 +73,12 @@ import net.runelite.http.api.loottracker.LootRecordType;
 @Singleton
 public class ChronicleEventCapture
 {
-	static final String GROUP = ChronicleConfig.GROUP;   // "chronicle"
-	static final String KEY_TOKEN = "token";
-
 	// ordinary skills stop here; a reported level above it isn't a real level-up.
 	private static final int MAX_LEVEL = 99;
 
-	// Chat taps. Everything below matches AFTER Text.removeTags, so the <col>
-	// wrapper is already gone. The lines only print with the usual chat settings:
-	// kill-count spam filter off, collection-log notification on, CA repeat
-	// completion off.
+	// Chat taps. Everything below matches AFTER Text.removeTags; no <col> wrappers.
+	// The lines only print with the usual chat settings: kill-count spam filter off,
+	// collection-log notification on, CA repeat completion off.
 
 	// "Your Zulrah kill count is: 501." and the raid shape "Your completed Theatre
 	// of Blood: Hard Mode count is: 40." One expression covers both: optional
@@ -100,24 +96,22 @@ public class ChronicleEventCapture
 		"^Congratulations, you've completed an? (?<grade>\\w+) combat task: (?<challenge>.+?)\\.?$");
 	private static final Pattern COMBAT_TASK_POINTS = Pattern.compile("\\s*\\(\\d+ points?\\)$");
 
-	// "You have completed 87 hard Treasure Trails." Tiers are an explicit set and the
-	// closing stop is required, so the singular reward-open line ("You have completed
-	// a hard Treasure Trail.") doesn't match.
+	// "You have completed 87 hard Treasure Trails." Explicit tier set, required closing
+	// stop. That keeps out the singular reward-open line, "You have completed a hard
+	// Treasure Trail."
 	static final Pattern CLUE_COMPLETION = Pattern.compile(
 		"^You have completed (?<tally>[\\d,]+) (?<rank>beginner|easy|medium|hard|elite|master)"
 			+ " Treasure Trails?\\.$");
 
-	// more text follows the area name, so this has to be a find(); the region span is
-	// lazy up to " area" so "Lumbridge & Draynor" stays whole.
+	// find(), not matches(): more text follows the area name. The region span is lazy
+	// up to " area", keeping "Lumbridge & Draynor" whole.
 	static final Pattern DIARY_COMPLETION = Pattern.compile(
 		"Congratulations! You have completed all of the (?<grade>\\w+) tasks in the (?<region>.+?) area");
 
-	// Slayer prints a finished-task line and, separately, a running total. The
-	// finished line is NOT $-anchored: modern OSRS appends " You gained N xp." after
-	// the creature, and creature's [^.]+ already stops at the first period. On the
-	// total line the qualifier before "task" is the game's ("N Wilderness tasks",
-	// "…1 Mortimer task;…"), and a numeric total is required so "…enough tasks to
-	// unlock…" is ignored.
+	// The finished line is NOT $-anchored: modern OSRS appends " You gained N xp."
+	// after the creature, and [^.]+ already stops at the first period. The total line
+	// requires a number, which keeps "…enough tasks to unlock…" out; the qualifier
+	// before "task" is the game's own ("N Wilderness tasks", "…1 Mortimer task;…").
 	static final Pattern SLAYER_FINISHED = Pattern.compile(
 		"^You have completed your task! You killed (?<slain>[\\d,]+) (?<creature>[^.]+)\\.");
 	static final Pattern SLAYER_TOTAL = Pattern.compile(
@@ -131,8 +125,8 @@ public class ChronicleEventCapture
 			+ "|You feel something weird sneaking into your backpack"
 			+ "|You have a funny feeling like you would have been followed\\.\\.\\.)\\.?$");
 
-	// no coin value and no trailing stop, so the sibling "Valuable drop: …(N coins)"
-	// line and the "<player> received a drop: …." clan broadcast stay out.
+	// No coin value, no trailing stop. That leaves out the sibling "Valuable drop:
+	// …(N coins)" and the "<player> received a drop: …." clan broadcast.
 	static final Pattern UNTRADEABLE_DROP = Pattern.compile("^Untradeable drop: (?<dropped>.+)$");
 
 	// Boss timers, phrased several ways: "Fight duration: 1:26.40 (new personal
@@ -166,7 +160,7 @@ public class ChronicleEventCapture
 	private final Set<Skill> pendingLevels = new HashSet<>();
 	private final Map<String, Integer> recentKc = new HashMap<>();
 	// the most recent boss-timer chat line, held a few ticks to annotate the kill's
-	// loot event. One-shot, so a later unrelated kill can't inherit it.
+	// loot event. One-shot: a later unrelated kill can't inherit it.
 	private static final int KILL_TIME_PAIR_TICKS = 4;
 	private double lastKillTimeSec = -1;
 	private double lastPbTimeSec = -1;
@@ -188,18 +182,13 @@ public class ChronicleEventCapture
 	private Map<Integer, Integer> groupStorageCurrent;
 
 	// ── Loot reconciliation ───────────────────────────────────────────────
-	// A kill's loot can arrive via BOTH NpcLootReceived and ServerNpcLoot; RuneLite
-	// suppresses neither. NpcLootReceived is a client-side ground-item scan that
-	// guesses which floor items belong to the corpse, so when several NPCs die on one
-	// tick (bursting/barrage) it mis-attributes the pile. ServerNpcLoot comes from the
-	// game's own loottracker_add_loot script and is exact per kill, so we prefer it:
-	// each NpcLootReceived is held briefly and dropped if a ServerNpcLoot covered the
-	// same NPC on the same kill's tick. The ground scan is emitted only as a fallback
-	// for NPCs the loot script doesn't fire for.
+	// Both NpcLootReceived and ServerNpcLoot can fire for one kill. The client-side
+	// ground scan mis-attributes the pile when several NPCs die on a tick; the game's
+	// own loot script is right every time. Hold each client copy briefly and drop it
+	// if a server event covered the same (npcId, tick).
 	private static final int SERVER_LOOT_WINDOW_TICKS = 2;
-	// (npcId, tick) pairs a ServerNpcLoot reported, so a held client copy can tell
-	// whether its own kill was covered. Keyed per-tick so repeated kills of the same
-	// NPC don't cross-cover a genuinely uncovered one.
+	// (npcId, tick) pairs a ServerNpcLoot reported. Keyed per tick: repeated kills of
+	// the same NPC mustn't cross-cover a genuinely uncovered one.
 	private final Set<Long> serverLootKeys = new HashSet<>();
 	private final List<PendingLoot> pendingClientLoot = new ArrayList<>();
 
@@ -233,8 +222,7 @@ public class ChronicleEventCapture
 	private final Map<TileItem, GroundLoot> pendingSelf = new IdentityHashMap<>();
 	private final List<UntakenItem> untakenBatch = new ArrayList<>();
 	// The kills of the last few ticks, each carrying the source name stamped onto the
-	// loot it produced so the Uncollected ledger can say where things were left. A
-	// single slot files every pile from a burst of kills under the last monster.
+	// loot it produced so the Uncollected ledger can say where things were left.
 	private final List<RecentKill> recentKills = new ArrayList<>();
 
 	// a kill of ours, remembered long enough for its ground items to find it.
@@ -314,7 +302,7 @@ public class ChronicleEventCapture
 	// Ticks since a finished-task line armed a pending completion; -1 = idle. If the
 	// streak line never finalises it within the window (reworded, missed, wrong chat
 	// type), the finished line is itself a real completion and gets flushed. Disarmed
-	// the moment the streak line processes, so this can't double-emit.
+	// the moment the streak line processes; no double-emit.
 	private int slayerPendingTicks = -1;
 	// The task name seen at KILL time, via the loot stamp. RuneLite clears getTask()
 	// on the completing tick, so by the streak line the live service is empty.
@@ -383,7 +371,7 @@ public class ChronicleEventCapture
 		String owner = localName();
 		if (owner == null || !localStore.isReadyFor(owner))
 		{
-			return;   // nobody to attribute it to yet, so the batch keeps
+			return;   // nobody to attribute it to yet; the batch keeps
 		}
 		Map<String, JsonArray> bySource = new HashMap<>();
 		for (UntakenItem it : untakenBatch)
@@ -434,7 +422,7 @@ public class ChronicleEventCapture
 			}
 			else if (now - g.spawnTick > KILL_ARM_TICKS)
 			{
-				done.add(e.getKey());   // no kill nearby, so it's a manual drop
+				done.add(e.getKey());   // no kill nearby: a manual drop
 			}
 		}
 		for (TileItem t : done)
@@ -560,16 +548,16 @@ public class ChronicleEventCapture
 				attachKillTime(pl.data);
 				emit("LOOT", pl.data);
 			}
-			// else ServerNpcLoot already reported this kill exactly, so drop the copy.
+			// else ServerNpcLoot already reported this kill; drop the copy.
 		}
 		pendingClientLoot.clear();
 		pendingClientLoot.addAll(survivors);
 	}
 
 	// Drop server-loot keys past the window in which a held client copy could still
-	// need them. Runs every tick rather than off the flush above: content the ground
-	// scan never fires for holds nothing, so a prune reached only through pending
-	// client loot would keep every kill of the session.
+	// need them. Runs every tick, not off the flush above: content the ground scan
+	// never fires for leaves pendingClientLoot empty, and a prune reached only through
+	// it would hoard every kill of the session.
 	private void expireServerLootKeys()
 	{
 		int now = client.getTickCount();
@@ -667,7 +655,7 @@ public class ChronicleEventCapture
 		}
 		catch (RuntimeException ignored)
 		{
-			return null;
+			return null;   // no service, no task
 		}
 	}
 
@@ -858,7 +846,7 @@ public class ChronicleEventCapture
 		groupStorageCurrent = null;
 		if (base == null || last == null)
 		{
-			return;   // the container never synced, so nothing was observed
+			return;   // the container never synced; nothing observed
 		}
 		JsonArray deposits = new JsonArray();
 		JsonArray withdrawals = new JsonArray();
@@ -1347,8 +1335,8 @@ public class ChronicleEventCapture
 		return arr;
 	}
 
-	// lowercased, trailing parenthetical stripped, so a kill-count line's subject
-	// lines up with the NPC name.
+	// lowercased, trailing parenthetical stripped, to line a kill-count line's subject
+	// up with the NPC name.
 	private static String cleanKey(String name)
 	{
 		if (name == null)
@@ -1385,7 +1373,8 @@ public class ChronicleEventCapture
 		{
 			return;
 		}
-		String tokenRaw = configManager.getRSProfileConfiguration(GROUP, KEY_TOKEN);
+		String tokenRaw = configManager.getRSProfileConfiguration(
+			ChroniclePlugin.GROUP, ChroniclePlugin.KEY_TOKEN);
 		if (tokenRaw == null || tokenRaw.trim().isEmpty())
 		{
 			return;   // no token, nothing to push under

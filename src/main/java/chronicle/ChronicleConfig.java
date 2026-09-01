@@ -35,12 +35,16 @@ public interface ChronicleConfig extends Config
 	@ConfigItem(
 		keyName = "cloudSync",
 		name = "Enable cloud sync",
-		description = "ALSO send a copy of your journal (loot, levels, kill counts, "
-			+ "collection log, clues, quests, diaries, combat achievements, slayer "
-			+ "tasks, pets, deaths, group-storage movements) UPWARD to the server "
-			+ "below. One-way: nothing is ever read back, and every feature works "
-			+ "identically with this off. Off by default: without this, Chronicle "
-			+ "never touches the network. Requires a server URL and a token.",
+		description = "ALSO send a copy of your journal UPWARD to the server below: "
+			+ "loot both taken and left on the ground, levels and a per-skill "
+			+ "level/xp snapshot, kill counts and the rest of your lifetime "
+			+ "counters, collection log, clues, quests, diaries, combat "
+			+ "achievements, slayer tasks, pets, deaths and group-storage "
+			+ "movements — each stamped with your display name, your account type "
+			+ "(ironman, GIM and so on) and your RuneLite account hash. One-way: "
+			+ "nothing is ever read back, and every feature works identically with "
+			+ "this off. Off by default: without this, Chronicle never touches the "
+			+ "network. Requires a server URL and a token.",
 		warning = "This feature submits your IP address, and your own account's activity, "
 			+ "to the 3rd-party server you configure below — a server not controlled or "
 			+ "verified by the RuneLite developers",
@@ -80,17 +84,15 @@ public interface ChronicleConfig extends Config
 		return "";
 	}
 
-	// the scheduled cycle always folds the session into the on-disk journal and
-	// mirrors upward only when cloud sync is on, so this is a local durability knob first.
 	@ConfigItem(
 		keyName = "pushIntervalMinutes",
 		name = "Journal write interval",
 		description = "How often the running session is folded into the on-disk "
 			+ "journal and written out (the day's history baseline lands on the same "
-			+ "beat). This is the most a crash or a power cut can cost you, so "
-			+ "shorter is safer; the journal is also written at logout and when the "
-			+ "plugin stops. With cloud sync on, the upward push rides this same "
-			+ "cadence — with it off, the setting is purely local.",
+			+ "beat). This is the most a crash or a power cut can cost you. The "
+			+ "journal is also written at logout and when the plugin stops. With "
+			+ "cloud sync on, the upward push rides this same cadence; with it off, "
+			+ "the setting is purely local.",
 		position = 14,
 		section = advancedSection
 	)

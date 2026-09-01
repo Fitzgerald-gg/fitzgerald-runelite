@@ -19,11 +19,11 @@ import net.runelite.api.gameval.VarbitID;
  * Snapshot of the account's achievement state: every quest's progress, each
  * diary tier's completion, and combat-achievement points plus per-tier status.
  * The journal's character sheet reads it, and the push loop sends it whole
- * whenever it differs from the last copy the server acked. Raw enum names and
- * varbit values go in as-is, nothing is graded here.
+ * whenever it differs from the last copy the server acked. Enum names and
+ * varbit values go in as-is; nothing is graded here.
  *
  * <p>All reads are on the client thread, and the quest sweep runs a clientscript
- * per quest, so one snapshot is built per game tick and shared by both callers.
+ * per quest. One snapshot is built per game tick and shared by both callers.
  */
 @Singleton
 public class AchievementSync
@@ -31,7 +31,7 @@ public class AchievementSync
 	private static final String[] DIARY_TIERS = {"easy", "medium", "hard", "elite"};
 
 	// Diaries whose four tiers each have a completion varbit, easy to elite per row.
-	// Karamja is missing three of those varbits, so it's built in snapshot() instead.
+	// Karamja is missing three of those varbits; it gets built by hand in snapshot().
 	private static final String[] DIARY_REGIONS = {
 		"ardougne", "desert", "falador", "fremennik", "kandarin",
 		"kourend", "lumbridge", "morytania", "varrock", "western", "wilderness",
@@ -73,7 +73,8 @@ public class AchievementSync
 	private final Client client;
 
 	// JSON of the last snapshot the server acked. Fields are built in a fixed order,
-	// so string equality holds as the change gate. Written on an HTTP callback thread.
+	// which is what makes plain string equality a sound change gate. Written on an
+	// HTTP callback thread.
 	private volatile String lastSynced;
 
 	// The tick's snapshot, shared by every caller in that tick. cached is stored
@@ -87,8 +88,7 @@ public class AchievementSync
 		this.client = client;
 	}
 
-	// Client thread only. Every caller in a tick gets the same object, so treat it
-	// as read-only.
+	// Client thread only. Every caller in a tick gets the same object — read-only.
 	JsonObject snapshot()
 	{
 		int tick = client.getTickCount();

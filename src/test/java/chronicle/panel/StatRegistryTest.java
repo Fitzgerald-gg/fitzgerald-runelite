@@ -8,6 +8,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
+/** Which family and section a counter key files under, and what it is called. */
 public class StatRegistryTest
 {
 	@Test
@@ -85,7 +86,7 @@ public class StatRegistryTest
 	@Test
 	public void typedRowsShedTheirVerb()
 	{
-		// the section header carries the craft, so the row keeps just the item
+		// the section header carries the craft. The row keeps just the item
 		assertEquals("Willow", StatRegistry.rowLabel("willowLogsChopped"));
 		assertEquals("Wyrm", StatRegistry.rowLabel("wyrmBonesBuried"));
 		assertEquals("Shark", StatRegistry.rowLabel("sharkEaten"));

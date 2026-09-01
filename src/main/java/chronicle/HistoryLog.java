@@ -18,7 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * The journal's calendar spine: one JSON line per day per account, appended to
  * {@code <slug>.history.jsonl} beside the journal and never rewritten. A line is
- * that day's closing baseline ({@code {"date","skills","counters","kcs"}}), so a
+ * that day's closing baseline ({@code {"date","skills","counters","kcs"}}). A
  * period's gain is one baseline minus another. Several lines for one date are
  * normal (login, rollover and logout all append); readers take the last line for
  * a date and skip a torn one. The History tab and PaceBook read it back.
@@ -26,6 +26,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 class HistoryLog
 {
+	// The spine sits beside the journal's own <slug>.json.
+	static final String SPINE_SUFFIX = ".history.jsonl";
+
 	private final Gson gson;
 
 	HistoryLog(Gson gson)
@@ -34,7 +37,7 @@ class HistoryLog
 	}
 
 	// Last date appended, per account, for this session; gates the rollover append.
-	// Keyed per account so two characters played on one day each still get a line.
+	// Keyed per account: two characters played on the same day each still get a line.
 	private final Map<String, String> lastAppendedDate = new java.util.concurrent.ConcurrentHashMap<>();
 
 	/** Append today's closing baseline. Called at login-load, day rollover and logout. */
@@ -60,7 +63,7 @@ class HistoryLog
 			counters.forEach(ct::addProperty);
 		}
 		line.add("counters", ct);
-		// kcs arrived after the rest, so older lines on the stream carry none.
+		// kcs arrived after the rest. Older lines on the stream carry none.
 		JsonObject kc = new JsonObject();
 		if (kcs != null)
 		{
@@ -74,7 +77,7 @@ class HistoryLog
 				log.debug("could not create history dir {}", dir);
 				return;
 			}
-			File f = new File(dir, LocalStore.slug(rsn) + ".history.jsonl");
+			File f = new File(dir, LocalStore.slug(rsn) + SPINE_SUFFIX);
 			try (Writer w = new OutputStreamWriter(new FileOutputStream(f, true), StandardCharsets.UTF_8))
 			{
 				w.write(gson.toJson(line));
@@ -98,7 +101,7 @@ class HistoryLog
 	java.util.TreeMap<LocalDate, Baseline> read(File dir, String rsn)
 	{
 		java.util.TreeMap<LocalDate, Baseline> out = new java.util.TreeMap<>();
-		File f = new File(dir, LocalStore.slug(rsn) + ".history.jsonl");
+		File f = new File(dir, LocalStore.slug(rsn) + SPINE_SUFFIX);
 		if (!f.isFile())
 		{
 			return out;
@@ -155,45 +158,10 @@ class HistoryLog
 		}
 	}
 
-	/** Append a skills-only baseline for a past date, same one line per day as append(). */
-	synchronized void appendImported(File dir, String rsn, String date, Map<String, Long> skills)
-	{
-		if (rsn == null || rsn.isEmpty() || date == null)
-		{
-			return;
-		}
-		JsonObject line = new JsonObject();
-		line.addProperty("date", date);
-		JsonObject sk = new JsonObject();
-		if (skills != null)
-		{
-			skills.forEach(sk::addProperty);
-		}
-		line.add("skills", sk);
-		line.add("counters", new JsonObject());
-		try
-		{
-			if (!dir.isDirectory() && !dir.mkdirs())
-			{
-				return;
-			}
-			File f = new File(dir, LocalStore.slug(rsn) + ".history.jsonl");
-			try (Writer w = new OutputStreamWriter(new FileOutputStream(f, true), StandardCharsets.UTF_8))
-			{
-				w.write(gson.toJson(line));
-				w.write('\n');
-			}
-		}
-		catch (Exception e)
-		{
-			log.debug("history import append failed", e);
-		}
-	}
-
 	/**
 	 * Fold another spine file into this account's, keeping only dates not already
-	 * on record: readers take the last line for a date, so an imported duplicate
-	 * would override the local measurement.
+	 * on record. Readers take the last line for a date, and an import must never
+	 * sit on top of a day this client measured itself.
 	 *
 	 * @return how many days came across.
 	 */
@@ -210,7 +178,7 @@ class HistoryLog
 		try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(
 			new java.io.FileInputStream(source), StandardCharsets.UTF_8)))
 		{
-			File out = new File(dir, LocalStore.slug(rsn) + ".history.jsonl");
+			File out = new File(dir, LocalStore.slug(rsn) + SPINE_SUFFIX);
 			if (!dir.isDirectory() && !dir.mkdirs())
 			{
 				return 0;
@@ -255,12 +223,16 @@ class HistoryLog
 		return added;
 	}
 
-	/** True once per calendar day for this account: time to append a fresh baseline. */
+	/**
+	 * True while no baseline has been appended for this account today. A predicate,
+	 * not a latch: it keeps saying true until append() records today's date. Two
+	 * callers ahead of an append both see it.
+	 */
 	boolean dayRolledOver(String rsn)
 	{
 		if (rsn == null || rsn.isEmpty())
 		{
-			return false;   // nothing to key on, and append() would refuse it too
+			return false;   // nothing to key on; append() refuses a nameless account too
 		}
 		String today = LocalDate.now(ZoneId.systemDefault()).toString();
 		return !today.equals(lastAppendedDate.get(LocalStore.slug(rsn)));

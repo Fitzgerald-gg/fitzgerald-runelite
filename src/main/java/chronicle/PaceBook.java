@@ -15,13 +15,11 @@ import java.util.TreeMap;
  *
  * <p>Pace is xp per ACTIVE day, meaning days the skill actually gained. Idle
  * days never reach the divisor, so a skill touched once in a year still reports
- * what a day at it is worth.
+ * what a day at it is worth. The horizon that follows is counted in days of
+ * play and never named as a date. The record can't say which calendar days
+ * will be played.
  *
- * <p>The horizon is counted in days of play. The record can't say which
- * calendar days will be played, so it doesn't name a date.
- *
- * <p>Pure function of its arguments. The spine is handed in, so it computes the
- * same off the client thread or in a test.
+ * <p>Pure function of its arguments.
  */
 class PaceBook
 {
@@ -92,7 +90,7 @@ class PaceBook
 		}
 	}
 
-	// the spine supplies the rate, currentXp supplies what is still owed, so the
+	// the spine supplies the rate; currentXp supplies what is still owed. the
 	// horizon shortens as the day is played
 	static Pace forSkill(TreeMap<LocalDate, HistoryLog.Baseline> spine, String skill,
 		long currentXp)
@@ -128,9 +126,9 @@ class PaceBook
 				Long value = e.getValue() != null ? e.getValue().skills.get(skill) : null;
 				if (value == null)
 				{
-					// a missing key means no data rather than 0. imported baselines
-					// predate newer skills, and 0 would read a lifetime of xp as one
-					// day's gain, so break the pair instead of spanning the hole
+					// a missing key means no data, not 0. imported baselines predate
+					// newer skills, and reading the hole as 0 turns a lifetime of xp
+					// into one day's gain. break the pair instead of spanning it
 					later = null;
 					laterDate = null;
 					continue;
@@ -157,8 +155,8 @@ class PaceBook
 				}
 				later = value;
 				laterDate = e.getKey();
-				// quota full or past the window, and lastActive is known, so the
-				// walk has nothing left to find
+				// quota full or past the window, with lastActive already known:
+				// nothing left for the walk to find
 				if (lastActive != null
 					&& (gains.size() >= MAX_ACTIVE_DAYS || laterDate.isBefore(cutoff)))
 				{
@@ -203,8 +201,7 @@ class PaceBook
 		return xpForLevel(levelAt(xp) + 1);
 	}
 
-	// the xp curve from the game's formula, built once rather than typed out as
-	// 99 hand-transcribed rows
+	// the game's own xp formula, evaluated once at class load
 	private static final long[] XP_FOR_LEVEL = curve();
 
 	private static long[] curve()

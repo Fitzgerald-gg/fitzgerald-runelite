@@ -17,15 +17,15 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Pins the event chat patterns to the wording the game actually prints.
+ * The event chat patterns, checked against the wording the game actually prints.
  *
  * <p>Corpus lines come from the OSRS Wiki's message documentation. Positives have
  * to match; negatives are the adjacent lines, the near-miss wordings, and the same
  * text arriving as another player's chat.
  *
  * <p>Patterns are read live off {@link ChronicleEventCapture}. Corpus strings are
- * written post-{@code Text.removeTags}, the way the handler sees them, so the
- * colour wrapper around counts is already gone and counts are bare integers.
+ * written post-{@code Text.removeTags}, the way the handler sees them: the colour
+ * wrapper around counts is already gone and counts are bare integers.
  */
 public class ChatPatternTest
 {
@@ -189,7 +189,7 @@ public class ChatPatternTest
 			"You've completed 3 tasks; return to a Slayer master.",
 			"You've completed 15 Wilderness tasks and received 125 points, giving you a total of 1,875; return to a Slayer master.",
 			"You've completed 4 Wilderness tasks; return to a Slayer master.",
-			// the game can slip a master name between the count and "task"; the
+			// the game can slip a master name between the count and "task". The
 			// optional qual group absorbs it.
 			"You've completed 1 Mortimer task; return to a Slayer master.");
 		rejects(ChronicleEventCapture.SLAYER_TOTAL,
@@ -207,8 +207,8 @@ public class ChatPatternTest
 			"You have completed your task! You killed 30 aberrant spectres.",
 			"You have completed your task! You killed 145 greater demons.",
 			"You have completed your task! You killed 1,000 hellhounds.",
-			// modern OSRS appends " You gained N xp." after the creature; the
-			// pattern isn't $-anchored, so the suffix is ignored.
+			// modern OSRS appends " You gained N xp." after the creature. The
+			// pattern isn't $-anchored and ignores that tail.
 			"You have completed your task! You killed 306 Dust Devils. You gained 39,715 xp.",
 			"You have completed your task! You killed 245 Cave kraken. You gained 62,475 xp.");
 		rejects(ChronicleEventCapture.SLAYER_FINISHED,

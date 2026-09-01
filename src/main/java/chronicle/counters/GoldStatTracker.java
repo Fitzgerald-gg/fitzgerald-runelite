@@ -25,17 +25,14 @@ import static chronicle.counters.StatKeys.COINS_SPENT_AT_SHOPS;
 /**
  * Splits coin movement at a shop into money spent and money earned.
  *
- * <p>There's no shop-trade event to subscribe to, so this samples the pack's coin
- * stack each tick and only while the shop widget is open. Coins moving for any
- * other reason (a drop, a player trade, a bank withdrawal) fall outside that window
- * and aren't counted.
- *
- * <p>Only the pack is watched, so a shop paid for out of a rune pouch or looting
- * bag is missed.
+ * <p>There's no shop-trade event to subscribe to. This samples the pack's coin stack
+ * each tick and only while the shop widget is open; coins moving for any other reason
+ * (a drop, a player trade, a bank withdrawal) fall outside that window and aren't
+ * counted.
  */
 public class GoldStatTracker implements StatTracker
 {
-	// no shop open. a real coin count is never negative, so -1 is safe as a sentinel
+	// no shop open. -1 is safe as a sentinel: a real coin count is never negative
 	private static final int IDLE = -1;
 
 	private final StatStore statStore;
@@ -101,12 +98,13 @@ public class GoldStatTracker implements StatTracker
 		if (event.getGameState() != GameState.LOGGED_IN)
 		{
 			// a dropped connection tears down the shop with no WidgetClosed, and the pack
-			// moves unobserved while away, so the stale reading can't be allowed to survive
+			// moves unobserved while we're away. drop the stale reading.
 			coinsLastTick = IDLE;
 		}
 	}
 
-	// coins in the pack, or IDLE if the container isn't loaded
+	// coins in the pack, or IDLE if the container isn't loaded. only the pack: a purchase
+	// paid for out of a rune pouch or looting bag is invisible here
 	private int packCoins()
 	{
 		ItemContainer pack = client.getItemContainer(InventoryID.INVENTORY);

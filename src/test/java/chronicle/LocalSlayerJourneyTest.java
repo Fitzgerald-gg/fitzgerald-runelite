@@ -113,26 +113,4 @@ public class LocalSlayerJourneyTest
 		completion("Kalphite", 80, null);
 		assertEquals(2, store.slayerJourney().completedTasks);
 	}
-
-	@Test
-	public void adoptionOnlyFillsAnEmptySpine()
-	{
-		java.util.List<ChronicleApiClient.SlayerTask> cloud = new java.util.ArrayList<>();
-		cloud.add(new ChronicleApiClient.SlayerTask("Abyssal demons", 180, 180, 4,
-			1_700_000_000, 900_000, false));
-		ChronicleApiClient.SlayerJourney inherited =
-			new ChronicleApiClient.SlayerJourney(200, 48_000, 61_000_000L, 8_000_000L, cloud);
-		store.adoptSlayerJourney(inherited, "Tester");
-		ChronicleApiClient.SlayerJourney j = store.slayerJourney();
-		assertEquals(1, j.tasks.size());
-		assertEquals(200, j.completedTasks);
-		assertEquals(8_000_000L, j.totalXpEst);
-		// a second pass must not double the spine
-		store.adoptSlayerJourney(inherited, "Tester");
-		assertEquals(1, store.slayerJourney().tasks.size());
-		// totals still floor upward
-		store.adoptSlayerJourney(new ChronicleApiClient.SlayerJourney(
-			205, 0, 0, 8_500_000L, new java.util.ArrayList<>()), "Tester");
-		assertEquals(205, store.slayerJourney().completedTasks);
-	}
 }

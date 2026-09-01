@@ -33,19 +33,18 @@ public final class StatRegistry
 		"specialAttacksUsed", "damageDealtMelee", "damageDealtRanged", "damageDealtMagic"));
 	private static final Set<String> LIVING_FLAT = new HashSet<>(Arrays.asList(
 		"foodEaten", "potionDoses", "beersDrunk", "vialsShattered",
-		"hitpointsRegenerated", "divinePotionDamage", "potionsConsumedValue",
-		"foodConsumedValue", "consumedValue"));
+		"hitpointsRegenerated", "divinePotionDamage", "consumedValue"));
 	private static final Set<String> LEDGER = new HashSet<>(Arrays.asList(
 		"resourcesGatheredValue", "coinsFromAlchemy", "itemsDroppedValue",
 		"itemsDiscarded", "examines", "coinsSpentAtShops", "coinsEarnedAtShops",
 		"untakenLootValue", "untakenLootCount", "distanceWalked", "distanceRan",
 		"ammoConsumed", "offensiveSpellsCast", "cabbagesPicked", "flaxGathered",
-		"animalsPetted", "patchesRaked", "highAlchemyCasts", "lowAlchemyCasts"));
+		"animalsPetted", "patchesRaked"));
 	// kept out of the rows. History owns xp, the offering-xp keys double-count
 	// real Prayer xp, and resourcesDroppedValue is drawn as the margin on the
 	// resourcesGatheredValue row instead of standing on its own.
 	private static final Set<String> HIDE = new HashSet<>(Arrays.asList(
-		"totalXpGained", "bowsFletched", "demonicOfferingXp", "sinisterOfferingXp",
+		"totalXpGained", "demonicOfferingXp", "sinisterOfferingXp",
 		"resourcesDroppedValue"));
 
 	// one craft's claim on the key space: named keys, floor totals, typed suffixes
@@ -66,8 +65,8 @@ public final class StatRegistry
 	}
 
 	private static final String[] NONE = {};
-	// first match wins in skillOf, so order matters here and inside each craft's
-	// suffix list (FailedPickpockets before Pickpockets)
+	// matchedSuffix takes the first hit: this order, and the order inside each
+	// craft's suffix list, is load-bearing (FailedPickpockets before Pickpockets)
 	private static final List<SkillSpec> SKILLS = Arrays.asList(
 		new SkillSpec("Woodcutting", new String[]{"LogsChopped"}, new String[]{"logsChopped"}, NONE),
 		new SkillSpec("Fishing", new String[]{"Caught"}, new String[]{"fishCaught"}, NONE),
@@ -229,17 +228,25 @@ public final class StatRegistry
 		{
 			return claimed;
 		}
-		if (key.endsWith("Value") || COMBAT.contains(key))
+		if (isGp(key) || COMBAT.contains(key))
 		{
 			return null;   // gp totals and damage aren't skilling actions
 		}
+		String[] hit = matchedSuffix(key);
+		return hit != null ? hit[0] : null;
+	}
+
+	// the first craft and suffix a key matches, as {craft, suffix}, or null.
+	// skillOf, rowLabel and suffixOf all read it.
+	private static String[] matchedSuffix(String key)
+	{
 		for (SkillSpec s : SKILLS)
 		{
 			for (String suf : s.suffixes)
 			{
 				if (key.endsWith(suf) && !key.equals(suf))
 				{
-					return s.name;
+					return new String[]{s.name, suf};
 				}
 			}
 		}
@@ -261,7 +268,7 @@ public final class StatRegistry
 		{
 			return "Ledger & Roads";
 		}
-		if (key.endsWith("Value") || key.startsWith("coins"))
+		if (isGp(key))
 		{
 			return "Ledger & Roads";
 		}
@@ -309,8 +316,7 @@ public final class StatRegistry
 		}
 		if (fam.equals("Ledger & Roads"))
 		{
-			// fairy rings and spirit trees are a means of travel, so they group
-			// with the other means rather than under a destination
+			// fairy rings and spirit trees are means of travel, not places
 			if (key.startsWith("teleportsVia") || key.equals("teleportsTotal")
 				|| key.equals("teleports") || key.equals("teleportsFairyRing")
 				|| key.equals("teleportsSpiritTree"))
@@ -380,27 +386,18 @@ public final class StatRegistry
 		return prettify(key);
 	}
 
-	// label for a key shown as a row under its section heading: typed keys drop
-	// the verb, so willowLogsChopped reads "Willow logs" under Woodcutting
+	// label for a key shown as a row under its section heading. the whole suffix
+	// goes, since the heading already names the craft: willowLogsChopped reads
+	// "Willow" under Woodcutting.
 	public static String rowLabel(String key)
 	{
 		String skill = skillOf(key);
 		if (skill != null && !KEY_SKILL.containsKey(key))
 		{
-			// matched by suffix, so find which suffix it was
-			for (SkillSpec s : SKILLS)
+			String[] hit = matchedSuffix(key);
+			if (hit != null)
 			{
-				if (!s.name.equals(skill))
-				{
-					continue;
-				}
-				for (String suf : s.suffixes)
-				{
-					if (key.endsWith(suf) && !key.equals(suf))
-					{
-						return typedName(key, suf);
-					}
-				}
+				return typedName(key, hit[1]);
 			}
 		}
 		if (family(key).equals("Living") && !LIVING_FLAT.contains(key))
@@ -436,8 +433,8 @@ public final class StatRegistry
 		return out.toString();
 	}
 
-	// strip a typed key's verb: "willowLogsChopped" -> "Willow logs". the regex
-	// takes the level off NPC-name keys as well.
+	// strip the matched suffix: "willowLogsChopped" -> "Willow". the regex takes
+	// the level off NPC-name keys as well.
 	private static String typedName(String key, String suffix)
 	{
 		String base = key.substring(0, key.length() - suffix.length());
@@ -450,30 +447,12 @@ public final class StatRegistry
 	// panel groups on it to drill Prayer into buried, scattered, ensouled.
 	public static String suffixOf(String key)
 	{
-		if (KEY_SKILL.containsKey(key))
+		if (KEY_SKILL.containsKey(key) || skillOf(key) == null)
 		{
 			return null;
 		}
-		String skill = skillOf(key);
-		if (skill == null)
-		{
-			return null;
-		}
-		for (SkillSpec s : SKILLS)
-		{
-			if (!s.name.equals(skill))
-			{
-				continue;
-			}
-			for (String suf : s.suffixes)
-			{
-				if (key.endsWith(suf) && !key.equals(suf))
-				{
-					return suf;
-				}
-			}
-		}
-		return null;
+		String[] hit = matchedSuffix(key);
+		return hit != null ? hit[1] : null;
 	}
 
 	// heading for a suffix group: "BonesBuried" -> "Bones buried"

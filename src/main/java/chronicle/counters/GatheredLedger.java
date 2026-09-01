@@ -9,13 +9,9 @@
 package chronicle.counters;
 
 /**
- * Item ids this account has gathered itself.
- *
- * <p>Tells the drop tracker whether a binned item is a resource that came out of
- * the world or bank junk. Membership survives logout, so the implementation lives
- * in the journal a package up; this is how the trackers reach it.
- *
- * <p>Both methods run on the client thread, so keep the membership test cheap.
+ * Item ids this account gathered itself. The drop tracker reads it to tell a
+ * resource that came out of the world from bank junk. Membership survives logout,
+ * which is why the journal a package up implements it. Client thread.
  */
 public interface GatheredLedger
 {

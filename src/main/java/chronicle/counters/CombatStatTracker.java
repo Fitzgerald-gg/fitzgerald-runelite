@@ -38,8 +38,8 @@ import static chronicle.counters.StatKeys.POISON_DAMAGE_TAKEN;
 import static chronicle.counters.StatKeys.VENOM_DAMAGE_TAKEN;
 
 /**
- * Lifetime combat counters: damage dealt and taken, biggest hits, blocks and misses,
- * deaths. Damage comes off the hitsplat stream, deaths off the chat death notice.
+ * Lifetime combat counters: damage dealt and taken, biggest hits, blocks, misses, deaths.
+ * Damage comes off the hitsplat stream; deaths off the chat death notice.
  */
 public class CombatStatTracker implements StatTracker
 {
@@ -55,7 +55,7 @@ public class CombatStatTracker implements StatTracker
 	private final Client client;
 
 	// Special attack energy last tick (0-1000). A drop means a spec was used; regen and
-	// death charge only ever raise it. -1 = unprimed, so the first read can't count.
+	// death charge only ever raise it. -1 = unprimed.
 	private int prevSpecEnergy = -1;
 
 	public CombatStatTracker(StatStore store, Client client)
@@ -186,14 +186,14 @@ public class CombatStatTracker implements StatTracker
 	private void recordDamageDealt(Actor target, int amount)
 	{
 		store.incrementStatBy(DAMAGE_DEALT, amount);
-		// only attribute when the style's XP drop is within 2 ticks, so the per-style
-		// breakdown undercounts (first hit of a session) instead of guessing
+		// only attribute when the style's XP drop is within 2 ticks. better to undercount
+		// the per-style breakdown (the first hit of a session) than to guess at it
 		if (lastStyleKey != null && client.getTickCount() - lastStyleTick <= 2)
 		{
 			store.incrementStatBy(lastStyleKey, amount);
 		}
-		// combat level 0 skips raid puzzle props: ToA's Het's Seal beam credits
-		// multi-thousand hitsplats that would otherwise take the record
+		// combat level 0 skips raid puzzle props. Het's Seal in ToA credits multi-thousand
+		// hitsplats and they are not hits.
 		if (amount > store.getStat(HIGHEST_HIT) && target != null && target.getCombatLevel() > 0)
 		{
 			store.setStat(HIGHEST_HIT, amount);

@@ -18,10 +18,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-/**
- * Pins the tuple to the counter keys it derives.
- * Tuple fields are skill|xp|objId|itemId|qty|target|consumedId.
- */
+/** Tuple fields: skill|xp|objId|itemId|qty|target|consumedId. */
 public class SkillDeriverTest
 {
 	private final Map<Integer, String> names = new HashMap<>();
@@ -183,7 +180,7 @@ public class SkillDeriverTest
 		// opulent salvage is 200 xp flat, 205 under a keg of horizons lure
 		names.put(32861, "Opulent salvage");
 		assertEquals((Integer) 1, derive("SAILING|205||32861|1||").get("opulentSalvagePulled"));
-		// sorting consumes the salvage, so the consumed id names the row
+		// sorting consumes the salvage; the consumed id names the row
 		names.put(1625, "Uncut opal");
 		Map<String, Integer> sorted = derive("SAILING|95||1625|1||32861");
 		assertEquals((Integer) 1, sorted.get("salvageSorted"));
@@ -200,7 +197,7 @@ public class SkillDeriverTest
 		assertEquals((Integer) 1, derive("SAILING|6200|||||").get("jubblyJiveTrialsCompleted"));
 		assertEquals((Integer) 1, derive("SAILING|16050|||||").get("gwenithGlideTrialsCompleted"));
 		// 150 is a lost teak crate or a medium casket as often as a Tempor
-		// Tantrum, so it's off the ladder
+		// Tantrum. Off the ladder.
 		assertNull(derive("SAILING|150|||||"));
 		// courier deliveries pay 385 too; only the coin bag separates them
 		names.put(32950, "Medium port coin bag");
@@ -290,8 +287,8 @@ public class SkillDeriverTest
 		Map<String, Integer> got = derive("COOKING|210||385|1||");
 		assertEquals((Integer) 1, got.get("foodCooked"));
 		assertEquals((Integer) 1, got.get("sharkCooked"));
-		// the shark was valued when it was caught; valuing it on the range too
-		// would count the one catch twice
+		// the shark was valued when it was caught; valuing it again on the range
+		// counts the one catch twice
 		assertNull(got.get("resourcesGatheredValue"));
 		assertFalse(gathered.contains(385));
 	}

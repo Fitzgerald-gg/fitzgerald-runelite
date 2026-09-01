@@ -12,8 +12,8 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Pins the pace divisor: days the skill gained xp. Idle days in between stay out
- * of it. Also covers the horizon rules and the xp curve.
+ * The pace divisor is days the skill gained xp; idle days in between stay out of it.
+ * Horizon rules and the xp curve are here too.
  */
 public class PaceBookTest
 {
@@ -80,7 +80,7 @@ public class PaceBookTest
 
 		PaceBook.Pace p = PaceBook.forSkill(spine, SKILL, 650_000L, TODAY);
 
-		// by calendar days it would be 150,000 over 302, or 497 a day
+		// by calendar days: 150,000 over 302, or 497 a day
 		assertEquals(2, p.activeDays);
 		assertEquals(75_000.0, p.xpPerActiveDay, 0.001);
 		assertEquals(2, p.spanDays);
@@ -120,7 +120,7 @@ public class PaceBookTest
 		PaceBook.Pace p = PaceBook.forSkill(spine, SKILL, 100_000L, TODAY);
 
 		assertEquals(2, p.activeDays);
-		// two active days spread over three weeks, and spanDays says so
+		// two active days spread over three weeks
 		assertEquals(21, p.spanDays);
 		assertTrue(p.hasHorizon());
 	}
@@ -231,7 +231,7 @@ public class PaceBookTest
 		assertEquals(0L, done.targetXp);
 		assertEquals(0L, done.xpRemaining);
 		assertFalse(done.hasHorizon());
-		// nothing left ahead, so not dormant
+		// nothing left to chase is not dormancy
 		assertFalse(done.dormant());
 	}
 

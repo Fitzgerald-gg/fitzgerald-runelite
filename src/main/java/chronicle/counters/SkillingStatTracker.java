@@ -2,17 +2,6 @@
  * Copyright (c) 2026, Chronicle
  * All rights reserved.
  *
- * Chat-free skilling detection for every non-combat skill. Each positive XP drop
- * (StatChanged) becomes one raw tuple that SkillDeriver turns into typed counters:
- *
- *     SKILL | xpDelta | objectId | gainedItemId | gainedQty | targetName | consumedItemId
- *
- * Which field names the action varies by skill: gathering and production go by the
- * gained item, thieving and agility by the interaction target, firemaking and prayer
- * by the item consumed. XP gates success and breaks ties, and none of those signals
- * shift with an XP boost (Lumberjack, Kandarin, Raiments). Chat is read only for the
- * 0-XP outcomes no XP drop can see: failed pickpockets, burnt food, planting.
- *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the conditions of the BSD 2-Clause
  * License (see LICENSE) are met.
@@ -47,13 +36,25 @@ import java.util.Set;
 
 import static chronicle.counters.StatKeys.*;
 
+/**
+ * Chat-free skilling detection for every non-combat skill. Each positive XP drop
+ * (StatChanged) becomes one raw tuple that SkillDeriver turns into typed counters:
+ *
+ * <pre>SKILL | xpDelta | objectId | gainedItemId | gainedQty | targetName | consumedItemId</pre>
+ *
+ * <p>Which field names the action varies by skill: gathering and production go by the
+ * gained item, thieving and agility by the interaction target, firemaking and prayer by
+ * the item consumed. XP gates success and breaks ties, and none of those signals shift
+ * with an XP boost (Lumberjack, Kandarin, Raiments). Chat is read only for the 0-XP
+ * outcomes no XP drop can see: failed pickpockets, burnt food, planting.
+ */
 public class SkillingStatTracker implements StatTracker
 {
 	private final StatStore statStore;
 	private final Client client;
 	private final SkillDeriver deriver;
 
-	// Combat skills and Slayer are counted from kills and loot, so they stay out.
+	// Combat skills and Slayer are counted from kills and loot; they stay out of here.
 	private static final Set<Skill> DERIVABLE = EnumSet.of(
 		Skill.WOODCUTTING, Skill.MINING, Skill.FISHING, Skill.COOKING,
 		Skill.SMITHING, Skill.FLETCHING, Skill.CRAFTING, Skill.HERBLORE,
@@ -71,7 +72,7 @@ public class SkillingStatTracker implements StatTracker
 	private int tickGainedItem = -1;
 	private int tickGainedQty = 0;
 	// the firemaking/prayer xp drop can land a tick or two after the item leaves the
-	// pack, so this one carries a TTL while the gained item stays same-tick.
+	// pack. This one carries a TTL; the gained item stays same-tick.
 	private int lastConsumedItem = -1;
 	private int consumedTtl = 0;
 	private Map<Integer, Integer> invSnapshot = null;
@@ -295,8 +296,8 @@ public class SkillingStatTracker implements StatTracker
 			xpCache.clear();
 			invSnapshot = null;
 		}
-		// clicked target and per-tick scratch are tick-local, so drop them and a stale
-		// tree or NPC can't mis-tag the next action
+		// clicked target and per-tick scratch are tick-local. Drop them, or a stale tree
+		// or NPC mis-tags the next action
 		if (state != GameState.LOGGED_IN)
 		{
 			tickDrops.clear();

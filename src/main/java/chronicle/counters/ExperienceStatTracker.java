@@ -18,12 +18,8 @@ import net.runelite.api.events.StatChanged;
 import static chronicle.counters.StatKeys.TOTAL_XP_GAINED;
 
 /**
- * One running total of XP gained, across every skill including combat.
- *
- * <p>{@link StatChanged} carries a skill's career total, so a gain is the rise from
- * the previous reading. A skill's first reading of the session sets the baseline and
- * is never counted; without that, logging in would bank a whole account's XP as a
- * gain. The journal holds the lifetime figure between sessions.
+ * One running total of XP gained, across every skill including combat. The journal holds
+ * the lifetime figure between sessions.
  */
 public class ExperienceStatTracker implements StatTracker
 {
@@ -48,7 +44,9 @@ public class ExperienceStatTracker implements StatTracker
 		Integer prev = xpSeen.put(skill, xp);
 		if (prev == null)
 		{
-			return;   // first reading this session, nothing to count yet
+			// StatChanged carries a career total, not a gain. the first reading of a skill
+			// this session is the baseline; count it and login banks the whole account.
+			return;
 		}
 		int gained = xp - prev;
 		if (gained > 0)
@@ -60,8 +58,8 @@ public class ExperienceStatTracker implements StatTracker
 	@Override
 	public void onGameStateChanged(GameStateChanged event)
 	{
-		// LOADING and HOPPING keep the same character and the same career totals, so the
-		// baseline still stands; clearing on those would eat the next XP drop.
+		// LOGIN_SCREEN only. LOADING and HOPPING keep the same character and the same
+		// career totals; clearing the baseline on those eats the next XP drop.
 		if (event.getGameState() == GameState.LOGIN_SCREEN)
 		{
 			xpSeen.clear();

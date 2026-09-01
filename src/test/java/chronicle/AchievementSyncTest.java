@@ -18,8 +18,8 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Covers the change gate that decides whether a snapshot is worth pushing, the
- * per-tick cache both callers share, and what reset() clears at the account
+ * Three things: the change gate that decides whether a snapshot is worth pushing,
+ * the per-tick cache both callers share, and what reset() clears at an account
  * boundary.
  */
 public class AchievementSyncTest
@@ -44,7 +44,7 @@ public class AchievementSyncTest
 		sync = new AchievementSync(client);
 	}
 
-	// a new tick is what drops the cache, so this is how a test gets a fresh snapshot
+	// a new tick drops the cache; this is how a test gets a fresh snapshot
 	private JsonObject nextTick()
 	{
 		tick++;
@@ -65,7 +65,7 @@ public class AchievementSyncTest
 		assertNotSame(first, nextTick());
 	}
 
-	// the cache is keyed on the tick, so a varbit set mid-tick isn't seen until it turns
+	// the cache is keyed on the tick. A varbit set mid-tick isn't seen until it turns
 	@Test
 	public void aChangeWithinTheTickIsSeenOnTheNextOne()
 	{
@@ -82,7 +82,7 @@ public class AchievementSyncTest
 
 	// ── The gate ─────────────────────────────────────────────────────────
 
-	// nothing acked yet, so a fresh install's whole state goes up on the first push
+	// nothing acked yet: a fresh install's whole state goes up on the first push
 	@Test
 	public void anUnacknowledgedSnapshotAlwaysGoesUp()
 	{
@@ -122,8 +122,8 @@ public class AchievementSyncTest
 		assertTrue(sync.changedSince(nextTick()));
 	}
 
-	// quests come off a clientscript rather than a varbit, so a gate built from
-	// varbits alone would compare equal across a completion and never send it.
+	// quests come off a clientscript, not a varbit. A gate built from varbits alone
+	// compares equal across a completion and never sends it.
 	@Test
 	public void aQuestCompletionReopensTheGate()
 	{
@@ -154,8 +154,8 @@ public class AchievementSyncTest
 		assertTrue(done.get("elite").getAsBoolean());
 	}
 
-	// the derivation is a threshold, so a Jagex task addition can't un-finish a
-	// diary the player has already done.
+	// the derivation is a threshold: a Jagex task addition can't un-finish a diary
+	// the player has already done.
 	@Test
 	public void aDerivedTierStaysCompletePastItsTotal()
 	{

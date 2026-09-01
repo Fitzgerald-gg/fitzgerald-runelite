@@ -19,10 +19,10 @@ import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Dryness ledger. Measures the bundled wiki rate book (per-kill 1/N denominators
+ * Dryness ledger. Weighs the bundled wiki rate book (per-kill 1/N denominators
  * for collection-log uniques) against the journal's own kill counts and stored
- * collection log. Dry percentile is (1 - (1 - 1/rate)^kc) * 100, same maths the
- * site uses.
+ * collection log. Dry percentile is (1 - (1 - 1/rate)^kc) * 100: the share of
+ * players who have the drop by this kill count.
  */
 @Slf4j
 class GrindBook
@@ -87,7 +87,9 @@ class GrindBook
 		return out;
 	}
 
-	// "Abyssal Sire" and "abyssal_sire" both normalise to "abyssalsire".
+	// "Abyssal Sire" and "abyssal_sire" both normalise to "abyssalsire". Plurals
+	// survive, so a ledger source "Tormented Demon" will not join the clog page
+	// "Tormented Demons". Other joins in the plugin strip the trailing s and do.
 	private static String norm(String s)
 	{
 		StringBuilder sb = new StringBuilder(s.length());
@@ -101,8 +103,8 @@ class GrindBook
 		return sb.toString();
 	}
 
-	// Reads the stored clog (kcs, clog_items, by_cat) and the drop sources for a second
-	// kc signal. Called off the client thread, so keep it a pure function of its args.
+	// Reads the stored clog (kcs, clog_items, by_cat) plus the drop sources for a second
+	// kc signal. Called off the client thread; nothing in here may touch the client.
 	List<ChronicleApiClient.GrindRow> grinds(JsonObject clog,
 		List<LocalStore.SourceRow> dropSources)
 	{

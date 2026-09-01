@@ -24,11 +24,9 @@ import static chronicle.counters.StatKeys.AMMO_CONSUMED;
  * Counts ranged ammo spent out of the worn-ammo slot: arrows, bolts, javelins.
  *
  * <p>A shot shrinks the slot by one, or a few at fast attack speeds. Unequipping and
- * banking shrink it too, so a drop is only booked at the end of the tick, minus
+ * banking shrink it the same way, so a drop is only booked at the end of the tick, minus
  * whatever landed in the pack, and only if it is small enough to be a volley. Ava's
- * recoveries never reach the slot, so the tally is ammo gone for good.
- *
- * <p>Blowpipe darts live in a var rather than the ammo slot, so they never show up here.
+ * recoveries never reach the slot: the tally is ammo gone for good.
  */
 public class RangedStatTracker implements StatTracker
 {
@@ -38,6 +36,8 @@ public class RangedStatTracker implements StatTracker
 	private final StatStore store;
 	private final Client client;
 
+	// the worn ammo slot as of the last container change. blowpipe darts live in a var,
+	// not this slot, and never reach any of these counters
 	private int wornAmmoId = -1;
 	private int wornAmmoQty;
 	// slot shrinkage so far this tick, settled at the tick boundary
@@ -66,7 +66,7 @@ public class RangedStatTracker implements StatTracker
 		{
 			pendingConsume += wornAmmoQty - qty;   // slot shrank: a shot, an unequip, or a deposit
 		}
-		// an id change or a rise is an equip or swap, so just rebaseline
+		// an id change or a rise is an equip or a swap. rebaseline, count nothing
 		wornAmmoId = id;
 		wornAmmoQty = qty;
 	}
@@ -77,7 +77,7 @@ public class RangedStatTracker implements StatTracker
 		int packAmmoNow = wornAmmoId != -1 ? packCount(wornAmmoId) : 0;
 		if (pendingConsume > 0)
 		{
-			// ammo that landed in the pack this tick was unequipped, so it wasn't fired
+			// ammo that landed in the pack this tick was unequipped, not fired
 			int movedToPack = Math.max(0, packAmmoNow - packAmmoAtTickStart);
 			int consumed = pendingConsume - movedToPack;
 			if (consumed > 0 && consumed <= MAX_PER_TICK)
@@ -94,7 +94,7 @@ public class RangedStatTracker implements StatTracker
 	{
 		if (event.getGameState() != GameState.LOGGED_IN)
 		{
-			// the quiver can change while logged out, so rebaseline instead of counting
+			// the quiver can change while we're logged out. rebaseline on the way back in
 			wornAmmoId = -1;
 			wornAmmoQty = 0;
 			pendingConsume = 0;

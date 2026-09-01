@@ -59,11 +59,21 @@ import net.runelite.client.util.ImageUtil;
  */
 class ChroniclePanel extends PluginPanel
 {
+	// Every date the panel prints, in one locale: the numbers next to them are
+	// already forced to Locale.UK, and a JVM-default month name beside them reads
+	// as two different clocks.
 	private static final DateTimeFormatter DAY =
-		DateTimeFormatter.ofPattern("d MMM").withZone(ZoneId.systemDefault());
+		DateTimeFormatter.ofPattern("d MMM", Locale.UK).withZone(ZoneId.systemDefault());
+	private static final DateTimeFormatter TASK_DAY =
+		DateTimeFormatter.ofPattern("d MMM yy", Locale.UK).withZone(ZoneId.systemDefault());
+	private static final DateTimeFormatter FULL_DAY =
+		DateTimeFormatter.ofPattern("d MMM yyyy", Locale.UK).withZone(ZoneId.systemDefault());
+	private static final DateTimeFormatter MONTH_YEAR =
+		DateTimeFormatter.ofPattern("MMMM yyyy", Locale.UK).withZone(ZoneId.systemDefault());
 	private static final Color ACCENT_LIFETIME = ColorScheme.BRAND_ORANGE;
 	private static final Color ACCENT_SESSION = new Color(85, 163, 90);
 	private static final Color ACCENT_RED = new Color(196, 84, 74);
+	// Rows mounted per list before a "Show more" button.
 	private static final int ROW_CAP = 30;
 
 	private enum View
@@ -74,8 +84,8 @@ class ChroniclePanel extends PluginPanel
 	private final ChroniclePlugin plugin;
 
 	private final JPanel display = new JPanel(new BorderLayout());
-	// The group gets no display panel: it would swap in each tab's own content
-	// component, and ours are empty. rebuild() does the swapping instead.
+	// The group gets no display panel: it swaps in each tab's own content
+	// component, and ours are empty. rebuild() does the swapping.
 	private final MaterialTabGroup tabGroup = new MaterialTabGroup();
 	private final Map<View, MaterialTab> tabByView = new java.util.EnumMap<>(View.class);
 	private final IconTextField searchField = new IconTextField();
@@ -107,8 +117,8 @@ class ChroniclePanel extends PluginPanel
 	// period label, cleared by any pill.
 	private java.time.LocalDate histFrom;
 	private java.time.LocalDate histTo;
-	// The bundled 1,921-slot taxonomy: tab -> page -> ordered slot names,
-	// parsed once on the first Log open.
+	// The bundled taxonomy: tab -> page -> ordered slot names. Parsed on the
+	// first Log open.
 	private static Map<String, Map<String, List<String>>> taxonomy;
 
 	ChroniclePanel(ChroniclePlugin plugin)
@@ -274,8 +284,8 @@ class ChroniclePanel extends PluginPanel
 		JPanel manageRow = new JPanel();
 		manageRow.setLayout(new BoxLayout(manageRow, BoxLayout.X_AXIS));
 		manageRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		// Match the siblings' alignment or BoxLayout lines this row's left edge up
-		// with their centres and shunts it halfway across the panel.
+		// Match the siblings, or BoxLayout centres this row and shunts it half a
+		// panel right.
 		manageRow.setAlignmentX(Component.CENTER_ALIGNMENT);
 		manageRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 16));
 		manageRow.add(manage);
@@ -410,9 +420,7 @@ class ChroniclePanel extends PluginPanel
 					break;
 			}
 		}
-		// AS_NEEDED is safe because row heights don't depend on width (labels
-		// ellipsise, notes wrap at a fixed width), so the scrollbar appearing
-		// can't change content height and oscillate.
+		// Row heights are width-independent. The bar can't oscillate.
 		JScrollPane scroll = new JScrollPane(wrapTop(body),
 			ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
 			ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
@@ -572,8 +580,7 @@ class ChroniclePanel extends PluginPanel
 			JPanel card = card("Recent drops");
 			JPanel grid = new JPanel(new GridLayout(0, 5, 3, 3));
 			grid.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-			// BoxLayout drifts mixed alignments: a CENTER-aligned grid beside
-			// the LEFT-aligned caption pushed the caption to the right.
+			// LEFT, to match the caption beside it.
 			grid.setAlignmentX(Component.LEFT_ALIGNMENT);
 			int shown = 0;
 			for (LocalStore.RecentDrop d : recent)
@@ -752,11 +759,7 @@ class ChroniclePanel extends PluginPanel
 	private String leftBehindSource;
 	private String leftBehindItem;
 
-	/**
-	 * Drop everything built from one account's journal. Called when a different
-	 * account mounts, or the next player is shown the previous one's task
-	 * journey and dry streaks. EDT only.
-	 */
+	/** Drop every view built from the last account's journal. EDT only. */
 	void resetAccountCaches()
 	{
 		journeyCache = null;
@@ -789,8 +792,6 @@ class ChroniclePanel extends PluginPanel
 		searchDebounce.stop();
 	}
 	private int slayerShown = ROW_CAP;
-	private static final DateTimeFormatter TASK_DAY =
-		DateTimeFormatter.ofPattern("d MMM yy").withZone(ZoneId.systemDefault());
 
 	// Current task, the journal's task-by-task journey, and the kill log
 	// scraped from the in-game widget.
@@ -824,9 +825,8 @@ class ChroniclePanel extends PluginPanel
 			plugin.fetchSlayerJourney(j -> SwingUtilities.invokeLater(() ->
 			{
 				journeyFetching = false;
-				// null = store not mounted yet. Caching it froze the tab on its
-				// empty state, and rebuilding here spins fetch→null→rebuild.
-				// The next natural rebuild retries.
+				// null = store not mounted. Don't cache it and don't rebuild
+				// here; the next rebuild retries.
 				if (j == null)
 				{
 					return;
@@ -924,7 +924,7 @@ class ChroniclePanel extends PluginPanel
 		p.add(head);
 		p.add(vgap(6));
 
-		// What the assignment was made of — brutals, superiors and a boss detour
+		// What the assignment was made of: brutals, superiors and a boss detour
 		// all count toward one task.
 		List<LocalStore.UntakenRow> monsters = plugin.slayerTaskMonsters(index);
 		if (!monsters.isEmpty())
@@ -995,9 +995,8 @@ class ChroniclePanel extends PluginPanel
 		if (leftBehindSource != null)
 		{
 			List<LocalStore.BagItem> bag = plugin.untakenItemsOf(leftBehindSource);
-			// The headline is the source's own lifetime tally. Itemisation started
-			// later than the counting, so summing the rows below would report a
-			// long-standing total as zero.
+			// The headline is the source's own tally. The rows below start later,
+			// so they don't sum to it.
 			long qty = 0;
 			long val = 0;
 			for (LocalStore.UntakenRow r : plugin.untakenSources())
@@ -1100,7 +1099,7 @@ class ChroniclePanel extends PluginPanel
 				break;
 			}
 			JPanel card = cardPlain();
-			// In-progress shows as a lit name; a text suffix ate the card width.
+			// Lit name, no suffix: the card has no room for one.
 			card.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
 			final int at = mounted - 1;
 			card.addMouseListener(clicker(() ->
@@ -1361,7 +1360,7 @@ class ChroniclePanel extends PluginPanel
 					grindsFetching = false;
 					if (rows2 == null)
 					{
-						return;   // store not mounted — retry on the next rebuild
+						return;   // store not mounted; retry on the next rebuild
 					}
 					grindsCache = rows2;
 					if (src.equals(detailSource))
@@ -1476,8 +1475,7 @@ class ChroniclePanel extends PluginPanel
 		p.add(vgap(6));
 
 		Map<String, Map<String, List<String>>> tax = taxonomy(plugin.gson());
-		// Three per row: five across clipped the names and pushed the column's
-		// preferred width past the viewport.
+		// Three per row; five clips the names.
 		JPanel pills = new JPanel(new GridLayout(0, 3, 3, 3));
 		pills.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		for (String tab : tax.keySet())
@@ -1499,36 +1497,8 @@ class ChroniclePanel extends PluginPanel
 		p.add(pills);
 		p.add(vgap(6));
 
-		// The journal's stored log, lower-cased once for the overlay.
 		JsonObject cl = plugin.clogSnapshot();
-		Map<String, Long> owned = new LinkedHashMap<>();
-		if (cl.has("clog_items") && cl.get("clog_items").isJsonObject())
-		{
-			for (Map.Entry<String, com.google.gson.JsonElement> e
-				: cl.getAsJsonObject("clog_items").entrySet())
-			{
-				owned.merge(e.getKey().toLowerCase(Locale.ROOT), safeLong(e.getValue()), Math::max);
-			}
-		}
-		Map<String, Map<String, Long>> byCat = new LinkedHashMap<>();
-		if (cl.has("by_cat") && cl.get("by_cat").isJsonObject())
-		{
-			for (Map.Entry<String, com.google.gson.JsonElement> pg
-				: cl.getAsJsonObject("by_cat").entrySet())
-			{
-				if (!pg.getValue().isJsonObject())
-				{
-					continue;
-				}
-				Map<String, Long> items = new LinkedHashMap<>();
-				for (Map.Entry<String, com.google.gson.JsonElement> it
-					: pg.getValue().getAsJsonObject().entrySet())
-				{
-					items.merge(it.getKey().toLowerCase(Locale.ROOT), safeLong(it.getValue()), Math::max);
-				}
-				byCat.put(pg.getKey().toLowerCase(Locale.ROOT), items);
-			}
-		}
+		Obtained ob = obtained(cl);
 		Map<String, Long> kcs = new LinkedHashMap<>();
 		if (cl.has("kcs") && cl.get("kcs").isJsonObject())
 		{
@@ -1544,7 +1514,7 @@ class ChroniclePanel extends PluginPanel
 		{
 			String page = pg.getKey();
 			List<String> slots = pg.getValue();
-			boolean[] lit = lightSlots(slots, byCat.get(page.toLowerCase(Locale.ROOT)), owned);
+			boolean[] lit = lightSlots(slots, ob.byPage.get(page.toLowerCase(Locale.ROOT)), ob.all);
 			int got = 0;
 			for (boolean b : lit)
 			{
@@ -1566,8 +1536,9 @@ class ChroniclePanel extends PluginPanel
 			if (open)
 			{
 				JPanel drill = cardPlain();
-				// Pets pages get a dated line under each slot: the journal knows
-				// where the pet came from and at what count.
+				// Pets pages get a dated line under each slot. Source and count
+				// only appear on rows an older record supplied; the plugin's own
+				// pet emit carries the name alone.
 				Map<String, LocalStore.PetRow> known = page.toLowerCase(Locale.ROOT).contains("pet")
 					? petsByName() : java.util.Collections.emptyMap();
 				for (int i = 0; i < slots.size(); i++)
@@ -1603,7 +1574,7 @@ class ChroniclePanel extends PluginPanel
 		return p;
 	}
 
-	// True when a pet's source names a skill rather than something killed.
+	// True when a pet's source names a skill, not a monster.
 	private static boolean isSkill(String source)
 	{
 		for (net.runelite.api.Skill sk : net.runelite.api.Skill.values())
@@ -1625,6 +1596,46 @@ class ChroniclePanel extends PluginPanel
 			out.putIfAbsent(r.name.toLowerCase(Locale.ROOT), r);
 		}
 		return out;
+	}
+
+	// The two halves of the journal's stored log: the whole-log obtained set, and
+	// each page's own capture. Names lower-cased for slot lookup.
+	private static final class Obtained
+	{
+		final Map<String, Long> all = new LinkedHashMap<>();
+		final Map<String, Map<String, Long>> byPage = new LinkedHashMap<>();
+	}
+
+	private static Obtained obtained(JsonObject cl)
+	{
+		Obtained o = new Obtained();
+		if (cl.has("clog_items") && cl.get("clog_items").isJsonObject())
+		{
+			for (Map.Entry<String, com.google.gson.JsonElement> e
+				: cl.getAsJsonObject("clog_items").entrySet())
+			{
+				o.all.merge(e.getKey().toLowerCase(Locale.ROOT), safeLong(e.getValue()), Math::max);
+			}
+		}
+		if (cl.has("by_cat") && cl.get("by_cat").isJsonObject())
+		{
+			for (Map.Entry<String, com.google.gson.JsonElement> pg
+				: cl.getAsJsonObject("by_cat").entrySet())
+			{
+				if (!pg.getValue().isJsonObject())
+				{
+					continue;
+				}
+				Map<String, Long> items = new LinkedHashMap<>();
+				for (Map.Entry<String, com.google.gson.JsonElement> it
+					: pg.getValue().getAsJsonObject().entrySet())
+				{
+					items.merge(it.getKey().toLowerCase(Locale.ROOT), safeLong(it.getValue()), Math::max);
+				}
+				o.byPage.put(pg.getKey().toLowerCase(Locale.ROOT), items);
+			}
+		}
+		return o;
 	}
 
 	/**
@@ -1663,6 +1674,21 @@ class ChroniclePanel extends PluginPanel
 		return lit;
 	}
 
+	// One named slot on one page, by the same rule the Log tab lights it with. A
+	// duplicate-named slot counts as held when any of its copies is lit.
+	private static boolean slotHeld(String slot, String page, List<String> pageSlots, Obtained ob)
+	{
+		boolean[] lit = lightSlots(pageSlots, ob.byPage.get(page.toLowerCase(Locale.ROOT)), ob.all);
+		for (int i = 0; i < pageSlots.size(); i++)
+		{
+			if (lit[i] && pageSlots.get(i).equalsIgnoreCase(slot))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	private static long safeLong(com.google.gson.JsonElement e)
 	{
 		try
@@ -1688,8 +1714,6 @@ class ChroniclePanel extends PluginPanel
 		{
 			if (in != null)
 			{
-				// The client's Gson, handed down from the plugin. The Hub's review
-				// rejects a plugin that constructs its own.
 				JsonObject rootTax = gson.fromJson(
 					new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8),
 					JsonObject.class);
@@ -1718,8 +1742,8 @@ class ChroniclePanel extends PluginPanel
 		return out;
 	}
 
-	// One line of pace for a skill, or the date it last moved. Measured in days
-	// of PLAY rather than calendar days, so an idle stretch doesn't dilute it.
+	// One line of pace for a skill, or the date it last moved. Days of PLAY, not
+	// calendar days: an idle stretch doesn't dilute it.
 	private void addPaceLine(JPanel p, String section)
 	{
 		PaceBook.Pace pace;
@@ -1729,7 +1753,9 @@ class ChroniclePanel extends PluginPanel
 		}
 		catch (RuntimeException e)
 		{
-			return;   // not a skill section
+			// pace() throws on an unknown skill name; a real fault in there hides
+			// here too, as a section that simply prints no pace line.
+			return;
 		}
 		if (pace == null)
 		{
@@ -1750,8 +1776,7 @@ class ChroniclePanel extends PluginPanel
 		}
 		else if (pace.dormant() && pace.lastActive != null)
 		{
-			p.add(ghostRow("last moved " + pace.lastActive.format(
-				java.time.format.DateTimeFormatter.ofPattern("d MMM yy", Locale.UK)), ""));
+			p.add(ghostRow("last moved " + pace.lastActive.format(TASK_DAY), ""));
 		}
 	}
 
@@ -1759,12 +1784,12 @@ class ChroniclePanel extends PluginPanel
 	// foldable starts folded.
 	private final java.util.Set<String> statsExpanded = new java.util.HashSet<>();
 
-	// gp per consumable key, refreshed per rebuild, so the Food and Potions
-	// rows can say what the habit cost.
+	// gp per consumable key, refreshed per rebuild. What the Food and Potions
+	// rows put beside the count.
 	private Map<String, Long> consumVals = new LinkedHashMap<>();
 
-	// Resource-scoped drops, refreshed per rebuild. Rides the gathered row as
-	// a margin; subtracting one from the other would zero a miner's career.
+	// Resource-scoped drops, refreshed per rebuild. Rides the gathered row as a
+	// margin. Subtract one from the other and a miner's career reads as zero.
 	private long resourcesDropped;
 
 	private String rowValue(Map.Entry<String, Long> e)
@@ -1837,7 +1862,7 @@ class ChroniclePanel extends PluginPanel
 		if (destRows != null && !rowsBySection.containsKey("Teleports")
 			&& !floorTotals.containsKey("Teleports"))
 		{
-			rowsBySection.put("Destinations", destRows);   // no host fold — stand alone
+			rowsBySection.put("Destinations", destRows);   // no host fold, stand alone
 			destRows = null;
 		}
 
@@ -2150,10 +2175,10 @@ class ChroniclePanel extends PluginPanel
 	// has to find its own entries.
 	private static final int HISTORY_FEED_SCAN = 2000;
 
-	// The two reads the History tab lives on, held between rebuilds. The spine
-	// is a whole parse of an append-only file and the feed slice is deep-copied
-	// under the store's lock, so both are gathered on a worker thread; on the
-	// EDT that cost lands as a stall on every pill click.
+	// The two reads the History tab lives on, held between rebuilds. The spine is
+	// a whole parse of an append-only file and the feed slice is deep-copied under
+	// the store's lock. Both are gathered on a worker thread; on the EDT that cost
+	// lands as a stall on every pill click.
 	private java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> historySpine;
 	private List<JsonObject> historyFeed = new ArrayList<>();
 	// What that pair was true of: the day it was read and the newest feed entry
@@ -2182,9 +2207,9 @@ class ChroniclePanel extends PluginPanel
 	}
 
 	/**
-	 * Read the spine and the feed slice off the EDT, then mount them. Primed
-	 * when the panel is built and whenever a journal mounts, so the tab is
-	 * usually warm before it is opened. EDT only.
+	 * Read the spine and the feed slice off the EDT, then mount them. Primed when
+	 * the panel is built and whenever a journal mounts; the tab is usually warm
+	 * before it is opened. EDT only.
 	 */
 	private void gatherHistory()
 	{
@@ -2248,12 +2273,11 @@ class ChroniclePanel extends PluginPanel
 
 	/**
 	 * What died, and what the period added. The collection log's tally is the
-	 * spine, floored by the drop ledger, so the list reads as bosses and
-	 * activities rather than every creature ever killed.
+	 * spine, floored by the drop ledger: the list reads as bosses and activities,
+	 * not every creature ever killed.
 	 *
 	 * <p>Kill counts only entered the daily baseline later, so a period bounded
-	 * by an older line reports the standing count and no gain. A gain measured
-	 * against a baseline that held no kill counts would be the whole career.
+	 * by an older line reports the standing count and no gain.
 	 */
 	private void addKillCounts(JPanel p, Map<String, Long> beforeKc, Map<String, Long> nowKc)
 	{
@@ -2295,17 +2319,16 @@ class ChroniclePanel extends PluginPanel
 			p.add(vgap(4));
 		}
 
-		List<Map.Entry<String, Long>> rows = new ArrayList<>(standing.entrySet());
-		rows.sort((a, b) ->
+		// What moved this period first, then what stands highest.
+		Comparator<Map.Entry<String, Long>> byGainThenTotal = (a, b) ->
 		{
 			long ga = gained.getOrDefault(a.getKey(), 0L);
 			long gb = gained.getOrDefault(b.getKey(), 0L);
-			if (ga != gb)
-			{
-				return Long.compare(gb, ga);
-			}
-			return Long.compare(b.getValue(), a.getValue());
-		});
+			return ga != gb ? Long.compare(gb, ga) : Long.compare(b.getValue(), a.getValue());
+		};
+
+		List<Map.Entry<String, Long>> rows = new ArrayList<>(standing.entrySet());
+		rows.sort(byGainThenTotal);
 		JPanel card = card("Bosses and activities");
 		for (Map.Entry<String, Long> e : rows)
 		{
@@ -2317,12 +2340,7 @@ class ChroniclePanel extends PluginPanel
 		// Everything else the drop ledger counted. The collection log knows what
 		// counts as a boss; the ledger doesn't.
 		List<Map.Entry<String, Long>> rest = new ArrayList<>(plugin.ledgerKills().entrySet());
-		rest.sort((a, b) ->
-		{
-			long ga = gained.getOrDefault(a.getKey(), 0L);
-			long gb = gained.getOrDefault(b.getKey(), 0L);
-			return ga != gb ? Long.compare(gb, ga) : Long.compare(b.getValue(), a.getValue());
-		});
+		rest.sort(byGainThenTotal);
 		if (!rest.isEmpty())
 		{
 			JPanel other = card("Everything else counted");
@@ -2364,9 +2382,9 @@ class ChroniclePanel extends PluginPanel
 		return r;
 	}
 
-	// Hiscores order. This names an ORDER only: the grid is built from the
-	// client's own skill list, so a skill Jagex adds shows up without an edit
-	// here. Overall is drawn separately, as its own headline.
+	// Hiscores order. An ORDER only. The grid is built from the client's own
+	// skill list, so a skill Jagex adds shows up without an edit here. Overall is
+	// drawn separately, as its own headline.
 	private static final String[] SKILL_ORDER_NAMES = {
 		"ATTACK", "HITPOINTS", "MINING", "STRENGTH", "AGILITY", "SMITHING",
 		"DEFENCE", "HERBLORE", "FISHING", "RANGED", "THIEVING", "COOKING",
@@ -2386,7 +2404,7 @@ class ChroniclePanel extends PluginPanel
 			}
 			catch (IllegalArgumentException dropped)
 			{
-				// a skill this client no longer has — simply not drawn
+				// a skill this client no longer has, simply not drawn
 			}
 		}
 		for (net.runelite.api.Skill sk : net.runelite.api.Skill.values())
@@ -2435,8 +2453,7 @@ class ChroniclePanel extends PluginPanel
 			String key = sk.name().toLowerCase(Locale.ROOT);
 			long[] cur = sheet.get(key);
 			long level = cur != null ? cur[0] : 0;
-			// No sheet yet: read the level off the spine's xp rather than show a
-			// blank.
+			// No sheet yet: read the level off the spine's xp.
 			if (level <= 0)
 			{
 				level = PaceBook.levelAt(closingXp.getOrDefault(key, 0L));
@@ -2464,8 +2481,8 @@ class ChroniclePanel extends PluginPanel
 		}
 		else
 		{
-			// No sprite cache: fall back to the skill's first letters, or the grid
-			// is nameless numbers.
+			// No sprite cache: the skill's first letters, or the grid is nameless
+			// numbers.
 			icon.setText(sk.name().substring(0, Math.min(3, sk.name().length())));
 			icon.setFont(FontManager.getRunescapeSmallFont());
 			icon.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker());
@@ -2567,8 +2584,7 @@ class ChroniclePanel extends PluginPanel
 		{
 			start = histFrom;
 			end = histTo.isAfter(java.time.LocalDate.now()) ? java.time.LocalDate.now() : histTo;
-			label = start.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yy"))
-				+ " - " + end.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yy"));
+			label = start.format(TASK_DAY) + " - " + end.format(TASK_DAY);
 		}
 		else
 		{
@@ -2576,12 +2592,12 @@ class ChroniclePanel extends PluginPanel
 			{
 				case "Day":
 					start = end;
-					label = end.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"));
+					label = end.format(FULL_DAY);
 					break;
 				case "Month":
 					start = end.withDayOfMonth(1);
 					end = start.plusMonths(1).minusDays(1);
-					label = start.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"));
+					label = start.format(MONTH_YEAR);
 					break;
 				case "Year":
 					start = end.withDayOfYear(1);
@@ -2591,8 +2607,7 @@ class ChroniclePanel extends PluginPanel
 				case "Week":
 				default:
 					start = end.minusDays(6);
-					label = start.format(java.time.format.DateTimeFormatter.ofPattern("d MMM"))
-						+ " - " + end.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"));
+					label = start.format(DAY) + " - " + end.format(FULL_DAY);
 					break;
 			}
 		}
@@ -2683,8 +2698,8 @@ class ChroniclePanel extends PluginPanel
 			else if (!hist.isEmpty() && hist.firstKey().isBefore(pStart)
 				&& ("Day".equals(histGranularity) || "Week".equals(histGranularity)))
 			{
-				// The imported past resolves by month, so day and week windows
-				// inside it hold no interior baseline.
+				// The imported past resolves by month; day and week windows inside
+				// it hold no interior baseline.
 				empty = "The imported past resolves by month — switch to Month "
 					+ "or Year to read this era. Daily detail begins with the plugin.";
 			}
@@ -2700,8 +2715,7 @@ class ChroniclePanel extends PluginPanel
 			// window, or a month of xp reads as one week's gain.
 			if (before != null && before.getKey().isBefore(pStart.minusDays(1)))
 			{
-				p.add(note("Measured since " + before.getKey().format(
-					java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))
+				p.add(note("Measured since " + before.getKey().format(FULL_DAY)
 					+ " — the nearest earlier baseline."));
 				p.add(vgap(4));
 			}
@@ -2741,8 +2755,8 @@ class ChroniclePanel extends PluginPanel
 			Map<String, Long> beforeCt = before != null ? before.getValue().counters
 				: new LinkedHashMap<>();
 			List<Map.Entry<String, Long>> movers = new ArrayList<>();
-			// Imported baselines carry no counters, so a key absent from the
-			// before-side is no data. Same rule as the xp above.
+			// Imported baselines carry no counters: a key absent from the
+			// before-side is no data, not a zero. Same rule as the xp above.
 			if (before != null && !beforeCt.isEmpty())
 			{
 				for (Map.Entry<String, Long> e : at.getValue().counters.entrySet())
@@ -2900,8 +2914,8 @@ class ChroniclePanel extends PluginPanel
 		}
 	}
 
-	// The kinds a reader looks for, and the feed types behind each. Kept few:
-	// a row per type would read as a database query.
+	// The kinds a reader looks for, and the feed types behind each. Kept few. A
+	// row per type reads as a database query.
 	private static final String[][] JOURNAL_LENSES = {
 		{"All"},
 		{"Log", "COLLECTION"},
@@ -2948,8 +2962,7 @@ class ChroniclePanel extends PluginPanel
 				wanted.addAll(java.util.Arrays.asList(lens).subList(1, lens.length));
 			}
 		}
-		// Read deep: a lens over the newest fifty would be empty for anything
-		// rare.
+		// Read deep: a lens over the newest fifty finds nothing rare.
 		List<JsonObject> all = plugin.feedNewest(4000);
 		List<JsonObject> feed = new ArrayList<>();
 		for (JsonObject e : all)
@@ -3113,7 +3126,7 @@ class ChroniclePanel extends PluginPanel
 		return p;
 	}
 
-	// Cloud sync is an upward mirror, so status and a push button is all there is.
+	// Cloud sync is an upward mirror: status and a push button is all there is.
 	private JPanel buildCloudSection()
 	{
 		JPanel s = column();
@@ -3161,7 +3174,7 @@ class ChroniclePanel extends PluginPanel
 		int total = 0;
 		searchJump = null;
 
-		// Trackers — via the registry, so every counter is findable by label or key.
+		// Trackers, via the registry: every counter is findable by label or key.
 		List<Map.Entry<String, Long>> statHits = new ArrayList<>();
 		for (Map.Entry<String, Long> e : counters().entrySet())
 		{
@@ -3186,7 +3199,7 @@ class ChroniclePanel extends PluginPanel
 			}
 		}
 
-		// Drops — the item aggregates across every source, with its own sources
+		// Drops: the item aggregates across every source, with its own sources
 		// listed underneath it.
 		Map<String, long[]> itemAgg = new LinkedHashMap<>();       // name -> {qty, value}
 		Map<String, List<String>> itemSrcs = new LinkedHashMap<>();
@@ -3255,20 +3268,12 @@ class ChroniclePanel extends PluginPanel
 			}
 		}
 
-		// Collection log — the whole taxonomy, with your obtained state.
-		JsonObject cl = plugin.clogSnapshot();
-		Map<String, Long> owned = new LinkedHashMap<>();
-		if (cl.has("clog_items") && cl.get("clog_items").isJsonObject())
-		{
-			for (Map.Entry<String, com.google.gson.JsonElement> e
-				: cl.getAsJsonObject("clog_items").entrySet())
-			{
-				owned.merge(e.getKey().toLowerCase(Locale.ROOT), safeLong(e.getValue()), Math::max);
-			}
-		}
+		// Collection log: the whole taxonomy, with your obtained state.
+		Obtained ob = obtained(plugin.clogSnapshot());
 		// One hit per item: obtaining one whip lights every slot that holds it,
 		// so the first page carrying it stands in as its address.
 		Map<String, String> slotFirstPage = new LinkedHashMap<>();
+		Map<String, Boolean> slotGot = new LinkedHashMap<>();
 		clogSearch:
 		for (Map.Entry<String, Map<String, List<String>>> tab : taxonomy(plugin.gson()).entrySet())
 		{
@@ -3278,7 +3283,12 @@ class ChroniclePanel extends PluginPanel
 				{
 					if (slot.toLowerCase(Locale.ROOT).contains(ql))
 					{
-						slotFirstPage.putIfAbsent(slot, pg.getKey());
+						if (slotFirstPage.putIfAbsent(slot, pg.getKey()) == null)
+						{
+							// Same rule as the Log tab, or a slot known only from a
+							// page scrape reads as obtained there and missing here.
+							slotGot.put(slot, slotHeld(slot, pg.getKey(), pg.getValue(), ob));
+						}
 						if (slotFirstPage.size() >= 4)
 						{
 							break clogSearch;
@@ -3293,14 +3303,14 @@ class ChroniclePanel extends PluginPanel
 			jump(View.LOG);
 			for (Map.Entry<String, String> hit : slotFirstPage.entrySet())
 			{
-				boolean got = owned.containsKey(hit.getKey().toLowerCase(Locale.ROOT));
+				boolean got = Boolean.TRUE.equals(slotGot.get(hit.getKey()));
 				p.add(row(hit.getKey(), got ? "obtained" : hit.getValue(),
 					got ? ACCENT_SESSION : null));
 				total++;
 			}
 		}
 
-		// Journal — milestone lines.
+		// Journal milestone lines.
 		List<JsonObject> feedHits = new ArrayList<>();
 		for (JsonObject e : plugin.feedNewest(500))
 		{
@@ -3400,10 +3410,11 @@ class ChroniclePanel extends PluginPanel
 			}
 			case "SLAYER":
 			{
-				// Older entries on disk carry the long field names; the plugin's
-				// own chat-driven emits use the short ones.
+				// killCount is this task's kills; older entries name the task in
+				// slayerTask. Don't fall back to "count": that is the lifetime
+				// tasks-completed streak, and it prints here as a kill count.
 				String t = str(d, "slayerTask", str(d, "task", ""));
-				String kc = str(d, "killCount", str(d, "count", ""));
+				String kc = str(d, "killCount", "");
 				return "Task complete" + (t.isEmpty() ? "" : " — " + t)
 					+ (kc.isEmpty() ? "" : ", " + kc + " killed");
 			}
@@ -3423,10 +3434,8 @@ class ChroniclePanel extends PluginPanel
 
 	private static JPanel column()
 	{
-		// A vertical stack whose children always span the full column width.
-		// BoxLayout widens children to the widest sibling and drifts mixed
-		// alignments, so this is a single-column GridBag that applies the
-		// constraint to every child as it is added.
+		// Single-column GridBag: BoxLayout drifts mixed alignments. The constraint
+		// is applied to every child as it is added.
 		JPanel p = new JPanel(new java.awt.GridBagLayout())
 		{
 			private final java.awt.GridBagConstraints gbc = new java.awt.GridBagConstraints();
@@ -3450,8 +3459,8 @@ class ChroniclePanel extends PluginPanel
 
 	private static JPanel wrapTop(JPanel body)
 	{
-		// Scrollable that tracks the viewport width, so a long label can't widen
-		// the view past the panel. Height stays free for vertical scrolling.
+		// Scrollable that tracks the viewport width. A long label can't widen the
+		// view past the panel. Height stays free for vertical scrolling.
 		JPanel wrap = new ScrollColumn();
 		wrap.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		wrap.add(body, BorderLayout.NORTH);
@@ -3510,9 +3519,7 @@ class ChroniclePanel extends PluginPanel
 
 	private static JPanel cardPlain()
 	{
-		// Max width unbounded so BoxLayout stretches the card to the column
-		// instead of centring it at preferred width; height stays preferred
-		// because the column sits in a NORTH slot.
+		// Unbounded width so the card fills the column.
 		JPanel c = new JPanel()
 		{
 			@Override

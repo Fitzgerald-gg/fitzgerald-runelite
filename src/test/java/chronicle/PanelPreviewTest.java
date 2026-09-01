@@ -268,12 +268,12 @@ public class PanelPreviewTest
 		s.sessionLootValue = 1_204_113L;
 		s.sessionUntaken = new long[]{9, 44_120L};
 
-		s.sources.add(new LocalStore.SourceRow("Abyssal demons", 4_112, 3_890, 61_204_113L, null, 34));
-		s.sources.add(new LocalStore.SourceRow("Nechryael", 2_204, 2_090, 24_113_005L, null, 21));
-		s.sources.add(new LocalStore.SourceRow("Commander Zilyana", 214, 214, 88_204_113L, 74.2, 40));
-		s.sources.add(new LocalStore.SourceRow("Crazy archaeologist", 88, 88, 1_204_113L, 31.8, 12));
-		s.sources.add(new LocalStore.SourceRow("Thermonuclear smoke devil", 1_402, 1_390, 19_113_205L, 22.2, 28));
-		s.sources.add(new LocalStore.SourceRow("Brutal black dragon", 950, 921, 15_204_113L, null, 25));
+		s.sources.add(new LocalStore.SourceRow("Abyssal demons", 4_112, 3_890, 61_204_113L, null, 0, 0));
+		s.sources.add(new LocalStore.SourceRow("Nechryael", 2_204, 2_090, 24_113_005L, null, 0, 0));
+		s.sources.add(new LocalStore.SourceRow("Commander Zilyana", 214, 214, 88_204_113L, 74.2, 0, 0));
+		s.sources.add(new LocalStore.SourceRow("Crazy archaeologist", 88, 88, 1_204_113L, 31.8, 0, 0));
+		s.sources.add(new LocalStore.SourceRow("Thermonuclear smoke devil", 1_402, 1_390, 19_113_205L, 22.2, 0, 0));
+		s.sources.add(new LocalStore.SourceRow("Brutal black dragon", 950, 921, 15_204_113L, null, 0, 0));
 
 		List<LocalStore.BagItem> bag = new ArrayList<>();
 		bag.add(new LocalStore.BagItem(4151, "Abyssal whip", 3, 5_406_000L));

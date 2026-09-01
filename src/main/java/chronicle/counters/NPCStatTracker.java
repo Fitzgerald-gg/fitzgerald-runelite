@@ -14,8 +14,7 @@ import net.runelite.api.events.MenuOptionClicked;
 import static chronicle.counters.StatKeys.ANIMALS_PETTED;
 
 /**
- * Counters that hang off nearby NPCs rather than the local player's own actions.
- * Petting is the only one so far.
+ * Pet-petting, counted off nearby NPCs.
  */
 public class NPCStatTracker implements StatTracker
 {

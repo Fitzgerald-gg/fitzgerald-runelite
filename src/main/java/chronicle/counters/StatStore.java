@@ -19,14 +19,15 @@ import javax.inject.Singleton;
  *
  * <p>Counts from zero at each account boundary; the on-disk journal ({@code LocalStore})
  * holds the lifetime record and folds these increments in on every refresh. The trackers
- * and {@link SkillDeriver} are the only writers. Nothing touches RuneLite's config, so a
- * busy skilling tick costs no disk I/O.
+ * and {@link SkillDeriver} are the only writers of counts; on top of that the plugin
+ * clears the whole store at an account boundary or a settings toggle. Nothing touches
+ * RuneLite's config — a busy skilling tick costs no disk I/O.
  *
- * <p>Counters saturate at {@link Integer#MAX_VALUE} rather than wrapping negative.
+ * <p>Counters saturate at {@link Integer#MAX_VALUE}; they never wrap negative.
  *
- * <p>Trackers write from the client thread while the journal's refresh reads from a
- * scheduler thread, hence the concurrent map and the detached copy out of
- * {@link #snapshotAll()}.
+ * <p>Hence the concurrent map and the detached copy out of {@link #snapshotAll()}.
+ * Trackers write from the client thread, the journal's refresh reads from a scheduler
+ * thread, and a clear arrives on either of those or on the EDT at shutdown.
  */
 @Singleton
 public class StatStore

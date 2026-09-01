@@ -47,22 +47,22 @@ public class MagicStatTracker implements StatTracker
 	private static final int OFFERING_CAST_ANIM = 8975;
 	private static final int GFX_DEMONIC = 1871;   // ashes (soul + wrath runes)
 	private static final int GFX_SINISTER = 1872;  // bones (blood + wrath runes)
-	// Colour to spell name (Cameron's call). Change only this map if the names ever swap.
+	// Colour to spell name. If the names ever swap, this map is the only edit.
 	private static final Map<Integer, String> OFFERING_GFX = Map.of(
 		GFX_DEMONIC, DEMONIC_OFFERINGS_CAST,
 		GFX_SINISTER, SINISTER_OFFERINGS_CAST);
-	// What each colour actually eats, probed in game. Independent of the naming above.
+	// What each colour actually eats, probed in game.
 	private static final Map<Integer, String> OFFERING_SAC = Map.of(
 		GFX_DEMONIC, ASHES_SACRIFICED,
 		GFX_SINISTER, BONES_SACRIFICED);
-	// An offering costs runes plus 1-3 bones/ashes, so excluding the runes leaves the
-	// sacrifice and no bone/ash item list is needed.
+	// An offering costs runes plus 1-3 bones/ashes. Exclude the runes and what's left is
+	// the sacrifice, which saves keeping a list of every bone and ash.
 	private static final Set<Integer> OFFERING_RUNES = Set.of(565, 566, 21880);   // blood, soul, wrath
 
-	// Cast poses that count as an offensive spell. A whole tier shares one pose (the projectile
-	// differs, the pose doesn't), and standard casts have separate with-staff and without-staff
-	// poses. Alch, enchant, charge-orb, teleport and powered-staff poses are out. 811 covers the
-	// god spells and the Charge self-buff, so a god-spell user's occasional Charge is counted.
+	// Cast poses that count as an offensive spell. A whole tier shares one pose; standard casts
+	// have separate with-staff and without-staff poses. Alch, enchant, charge-orb, teleport and
+	// powered-staff poses are out. 811 covers the god spells and the Charge self-buff, so a god
+	// spell user's occasional Charge is counted.
 	private static final Set<Integer> OFFENSIVE_CAST_ANIMS = Set.of(
 		711,    // strike / bolt / blast, no staff
 		1162,   // strike / bolt / blast, with a staff
@@ -80,11 +80,12 @@ public class MagicStatTracker implements StatTracker
 	private final StatStore store;
 	private final Client client;
 
-	// Coins at the last inventory event. -1 until primed, so the opening stack isn't counted.
+	// Coins at the last inventory event. -1 until primed — the stack already in the pack
+	// at login is not income.
 	private int lastCoins = -1;
 	// A coin gain this tick still waiting to see if an alch pose explains it.
 	private int bufferedCoinGain;
-	// Tick an alch pose was seen, so a coin gain arriving after it still matches.
+	// Tick an alch pose was seen. A coin gain arriving after it still matches.
 	private int alchSeenTick = -1;
 	// Last counted cast, to swallow a same-tick re-fire.
 	private int lastCastAnim = -1;
@@ -255,8 +256,8 @@ public class MagicStatTracker implements StatTracker
 	{
 		if (event.getGameState() != GameState.LOGGED_IN)
 		{
-			// Coins, XP and inventory move unobserved while away, so reprime instead of counting
-			// the jump. A half-formed offering cast is dropped so it can't resolve across the gap.
+			// Coins, XP and inventory all move unobserved while away. Reprime instead of counting
+			// the jump, and drop any half-formed offering cast before it resolves across the gap.
 			lastCoins = -1;
 			bufferedCoinGain = 0;
 			prevPrayerXp = -1;
@@ -276,8 +277,8 @@ public class MagicStatTracker implements StatTracker
 		{
 			return -1;
 		}
-		// Every cast overwrites the single legacy graphic slot, so at tick end it holds this
-		// cast's colour and no earlier one.
+		// Every cast overwrites the single legacy graphic slot. At tick end it holds this
+		// cast's colour and nothing earlier.
 		int g = me.getGraphic();
 		if (OFFERING_GFX.containsKey(g))
 		{

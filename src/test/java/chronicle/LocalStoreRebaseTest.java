@@ -16,10 +16,10 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 
 /**
- * Pins {@link LocalStore#rebase}. A lifetime figure is the frozen base plus the live
- * session, so anything that restarts the counters mid-session (plugin toggle, cloudSync
- * toggle) has to re-freeze the base first, or the next recompute resolves back to the
- * login values and the journal loses everything counted since.
+ * A lifetime figure is the frozen base plus the live session. A plugin toggle or a cloudSync
+ * toggle restarts the counters mid-session, and anything that does has to re-freeze the base
+ * first through {@link LocalStore#rebase}; without that the next recompute resolves back
+ * to the login values and the journal loses everything counted since.
  */
 public class LocalStoreRebaseTest
 {
@@ -29,7 +29,7 @@ public class LocalStoreRebaseTest
 	@Before
 	public void setUp() throws Exception
 	{
-		// nothing here prices an item, so the ItemManager mock never gets called
+		// nothing here prices an item; the ItemManager mock is never called
 		store = new LocalStore(Mockito.mock(ItemManager.class), new Gson());
 		dir = Files.createTempDirectory("chronicle-rebase").toFile();
 	}
@@ -41,7 +41,7 @@ public class LocalStoreRebaseTest
 		return m;
 	}
 
-	// sessionView() drops zeroed counters, so a cleared store arrives as an empty map.
+	// sessionView() drops zeroed counters: a cleared store arrives as an empty map.
 	private static Map<String, Integer> clearedStore()
 	{
 		return new HashMap<>();
@@ -67,7 +67,7 @@ public class LocalStoreRebaseTest
 		assertEquals(620L, (long) store.trackersSnapshot().get("tilesWalked"));
 
 		store.rebase("Alpha");
-		// those 120 belong to the base now, so the counters can restart from zero
+		// the 120 belong to the base now; counters can restart from zero
 		assertEquals(620L, store.trackerBase("tilesWalked"));
 
 		store.setTrackers(clearedStore(), "Alpha");
@@ -106,14 +106,14 @@ public class LocalStoreRebaseTest
 	{
 		mountWithLifetime("Alpha", "highestHit", 90);
 
-		// a peak merges by max, so a bigger session hit replaces the record
+		// peaks merge by max: a bigger session hit replaces the record
 		store.setTrackers(session("highestHit", 110), "Alpha");
 		assertEquals(110L, (long) store.trackersSnapshot().get("highestHit"));
 
 		store.rebase("Alpha");
 
-		// MAX_KEYS survive sessionView()'s zero filter, so a restarted store reports a
-		// peak of 0 rather than dropping the key
+		// MAX_KEYS survive sessionView()'s zero filter: a restarted store reports a
+		// peak of 0 instead of dropping the key
 		store.setTrackers(session("highestHit", 0), "Alpha");
 		assertEquals(110L, (long) store.trackersSnapshot().get("highestHit"));
 
@@ -129,9 +129,7 @@ public class LocalStoreRebaseTest
 		store.endSession();
 		assertFalse(store.isReadyFor("Alpha"));
 
-		// both callers capture the name and hop threads before rebasing, so one can land
-		// after the account has gone. Alpha's model stays mounted for the panel to
-		// browse, and freezing its totals would hand its lifetime to the next login.
+		// a rebase landing after the account has gone must not freeze its totals
 		store.rebase("Beta");
 		store.rebase("Alpha");
 		assertEquals(0L, store.trackerBase("tilesWalked"));
