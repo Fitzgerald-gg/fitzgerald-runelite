@@ -8,7 +8,7 @@ import net.runelite.client.externalplugins.ExternalPluginManager;
 
 // Dev launcher for `gradle run`, and the shadowJar Main-Class. Boots a
 // developer-mode client with Chronicle side-loaded. No JUnit tests here.
-public class ChroniclePluginTest
+public class ChronicleDevLauncher
 {
 	public static void main(String[] args) throws Exception
 	{

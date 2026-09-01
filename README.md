@@ -1,105 +1,85 @@
-# Chronicle — a local journal of your OSRS life
+# Chronicle
 
-A RuneLite plugin that keeps a **journal of your Old School RuneScape account on your own
-computer** — loot, levels, kill counts, collection log, clues, quests, diaries, combat
-achievements, slayer tasks, pets, deaths, and a few hundred lifetime counters — presented in a
-side panel. It captures everything natively; no other plugin is required.
+A RuneLite side panel that keeps a journal of your Old School RuneScape account on your own
+computer: loot, levels, kill counts, the collection log, clues, quests, diaries, combat
+achievements, slayer tasks, pets, deaths, and a few hundred lifetime counters.
 
-**Local-first is the whole design.** The journal lives in plain JSON under
-`.runelite/chronicle/`, every view in the panel is computed on your client, and the plugin ships
-with the reference tables it needs (skill XP ladders, production rules, drop-rate book). There is
-no server behind any feature: with the network unplugged you get the identical plugin.
+The journal is plain JSON under `.runelite/chronicle/`. Every view in the panel is computed on
+your machine, and the plugin ships the reference tables it needs, so with the network unplugged
+you get the same plugin.
 
-## What it keeps
+## What it records
 
-1. **Events** — loot drops (with per-source item bags, personal-best kill times, and loot you
-   walked away from), level-ups, deaths (and what killed you), quests, achievement diaries, combat
-   achievements, collection-log slots (counted the moment they drop), clue caskets, kill counts,
-   pets, and slayer kills tagged on-task. A dated feed — the journal proper — records the
-   milestones, and each session closes with its own diary line.
-2. **Lifetime counters** — running totals from tiles walked to per-wood logs chopped, per-NPC
-   pickpockets, per-potion doses (with what the habit cost), teleports by destination, and more.
-   The typed per-resource resolution happens **on your client** from the XP drop plus the gained
-   item, clicked object, consumed item or interaction target — so it survives chat being filtered,
-   and works entirely offline. A few zero-XP outcomes (failed pickpockets, burnt food, seeds
-   planted, agility laps) still read the game/spam chat and need those messages enabled.
-3. **History** — a daily baseline of your skills and counters, so the History tab can answer any
-   two dates. The panel also computes your **dry streaks** (collection-log chases against the
-   wiki's drop rates) and your **task-by-task slayer journey** locally.
+**Events.** Loot drops with per-source item bags, personal-best kill times, and loot left on the
+ground. Level-ups, deaths and what killed you, quests, diaries, combat achievements, clue
+caskets, kill counts, pets, and slayer kills tagged on-task. Milestones land in a dated feed, and
+each session closes with a line of its own.
 
-On first run the plugin also **inherits your existing Loot Tracker archive** (RuneLite's core
-Loot Tracker stores its record in your local profile), so your history starts years deep, not at
-zero.
+**Lifetime counters.** From tiles walked to per-wood logs chopped, per-NPC pickpockets, potion
+doses and what they cost, teleports by destination. Per-resource identity is worked out on your
+client from the XP drop plus the item gained, object clicked, item consumed or target
+interacted with, so it survives filtered chat. A few zero-XP outcomes read the game and spam chat
+instead: failed pickpockets, burnt food, seeds planted, agility laps.
 
-## Import and export
+**History.** A daily baseline of skills, counters and kill counts, so any two dates can be
+compared. Dry streaks are computed against a bundled drop-rate table, and the slayer journey is
+rebuilt from your own on-task kills.
 
-Your record is already a plain JSON file on your own disk — there is nothing to export, so the
-Journal tab simply opens the folder it lives in. What it does read is an import, which is for
-another copy of **the same account's** history — a backup, another computer, or a record someone
-has been keeping for you — and every store merges as a **floor**: per-key maximum, earliest
-first-sighting, best personal best, never a sum. Importing the same file twice does nothing the
-second time, and an older export can never lower what you already hold.
+On first run it also reads RuneLite's core Loot Tracker archive, which is already on your disk,
+so the record starts years back rather than empty.
 
-The file is a Chronicle journal (`<name>.json`). If a `<name>.history.jsonl` sits beside it, its
-calendar spine is folded in too, skipping days already on record.
+## Import
 
-## Optional cloud sync — upward only
+The Journal tab can merge another copy of the same account's record: a backup, another computer,
+or one kept for you elsewhere. Every store merges as a floor — per-key maximum, earliest
+first-sighting, best personal best — so importing twice changes nothing and an older file can
+never lower what you already hold. A `<name>.history.jsonl` sitting beside the journal comes
+across too.
 
-Off by default, blank by default. If you point the plugin at a Chronicle-compatible server
-(*Advanced → Cloud server* + a token issued by that server's operator), it will **additionally
-send a copy of your journal upward** on the journal's write interval and at logout. That is the entire
-relationship:
+There is nothing to export: the record is already a JSON file you own, so the tab opens the
+folder instead.
 
-- **One-way.** The plugin never reads anything back. Panels, counters, history and dryness are
-  identical with sync on or off. If the server vanishes, you lose nothing.
-- **Your own account only.** The plugin never submits another player's stats, drops or activity.
-- **What travels:** your display name, event data (raw item IDs/quantities), counter absolutes,
-  per-skill XP, and collection-log and achievement snapshots. No password, email or bank PIN is
-  ever read or transmitted.
-- **No images, ever.** Chronicle takes no screenshots. Nothing it sends can contain another
-  player's name or a line of your chat — every field is your own account's data by construction.
-  If you want screenshots of big moments, RuneLite's own Screenshot plugin does that job.
+## Optional cloud sync
 
-> **With cloud sync enabled, the plugin transmits your player data (and your IP address) to the
+Off by default, with the server field blank. Point it at a Chronicle-compatible server and it
+additionally sends a copy of the journal upward on the write interval and at logout.
+
+- One-way. Nothing is ever read back, and every feature works the same with it off.
+- Your own account only. Another player's stats, drops or activity are never submitted.
+- What travels: your display name, event data (raw item ids and quantities), counter totals,
+  per-skill XP, and collection-log and achievement snapshots.
+- No images. Chronicle takes no screenshots, so nothing it sends can carry another player's name
+  or a line of chat.
+
+> With cloud sync enabled the plugin transmits your player data, and your IP address, to the
 > server you configure — a third-party server not controlled or verified by the RuneLite
-> developers.** With it disabled (the default), Chronicle never touches the network.
+> developers. With it off, Chronicle never touches the network.
 
-## The side panel
+## The panel
 
-Seven tabs: **Home** (this session, adaptively — only the cards your play earned), **Drops**
-(the ledger: sources, items, taken and left behind), **Slayer** (current task, the journey, kill
-log), **Log** (the full collection log), **Stats** (every counter, in the same taxonomy the
-journal uses everywhere), **History** (any period, any two dates), **Journal** (the dated feed).
-Type any item or source into the search and press Enter to pivot between item and source views
-from anywhere.
+Seven tabs. **Home** shows the current session, with only the cards your play has earned.
+**Drops** is the ledger of sources and items, taken and left behind. **Slayer** holds the current
+task, the task-by-task journey and the kill log. **Log** is the collection log. **Stats** is every
+counter. **History** compares any two periods. **Journal** is the dated feed.
 
-## Settings
-
-| Setting | Default | Meaning |
-|---|---|---|
-| Journal write interval (Advanced) | 5 min | How often the session is folded into the journal and written to disk — and pushed upward, when cloud sync is on. |
-| Enable cloud sync (Advanced) | **off** | Additionally mirror the journal upward to the server below. |
-| Cloud server (Advanced) | *blank* | Base URL of a Chronicle-compatible server. Blank = no network, ever. |
-| Cloud token (Advanced) | *blank* | The push token for this account, issued by that server's operator. |
+Type any item or source into the search box and press Enter to pivot between the item's view and
+the source's view from anywhere.
 
 ## Dependencies
 
-- Depends on two of RuneLite's built-in plugins, both declared via `@PluginDependency`: **Slayer**,
-  so kills can be tagged on-task, and **Loot Tracker**, whose event carries chest and casket loot
-  (and whose stored archive a late install inherits its history from). Disable either and the side
-  panel says so; the rest keeps working.
-- No third-party plugins are required.
+Two of RuneLite's built-in plugins, declared with `@PluginDependency`: **Slayer**, so kills can be
+tagged on-task, and **Loot Tracker**, whose event carries chest and casket loot and whose stored
+archive a late install inherits. Disable either and the panel says so; everything else keeps
+working. No third-party plugins are needed.
 
-## Build & install
+## Build
 
 ```sh
-gradle run                # launches a dev-mode RuneLite with the plugin loaded
-gradle shadowJar          # -> build/libs/*-all.jar (manual side-load only)
-gradle test               # includes PanelPreviewTest: renders every panel surface to build/panel-preview/
+gradle run          # dev-mode RuneLite with the plugin side-loaded
+gradle shadowJar    # fat jar for manual side-loading
+gradle test         # includes PanelPreviewTest, which renders every panel surface to build/panel-preview/
 ```
 
 ## Licence
 
-BSD 2-Clause — see [LICENSE](LICENSE).
-
-- Not affiliated with Jagex, RuneLite, or any other plugin author.
+BSD 2-Clause, see [LICENSE](LICENSE). Not affiliated with Jagex or RuneLite.

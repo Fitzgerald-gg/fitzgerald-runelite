@@ -1,7 +1,4 @@
-/*
- * Fitzgerald.gg RuneLite companion plugin — build script.
- * Modelled on runelite/example-plugin (BSD 2-Clause).
- */
+// Build script, modelled on runelite/example-plugin (BSD 2-Clause).
 plugins {
 	id 'java'
 }
@@ -17,10 +14,9 @@ repositories {
 	mavenCentral()
 }
 
-// `runeLiteVersion` is read from gradle.properties. It defaults to
-// 'latest.release'; the Plugin Hub CI builds against a pinned client, and you
-// can pin it locally by editing gradle.properties if a fresh API breaks you.
-def pluginMainClass = 'chronicle.ChroniclePluginTest'
+// runeLiteVersion comes from gradle.properties. Pin it there if a new client
+// API breaks the build.
+def pluginMainClass = 'chronicle.ChronicleDevLauncher'
 
 dependencies {
 	compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
@@ -36,10 +32,8 @@ dependencies {
 
 group = 'chronicle'
 
-// Bundle the plugin descriptor into the jar so a dev-mode client can load it
-// from ~/.runelite/sideloaded-plugins (the Plugin Hub reads the repo-root copy
-// separately; `gradle run` uses loadBuiltin and needs neither). Without this
-// the sideloaded jar is discovered but exposes no plugin.
+// The descriptor has to be inside the jar or a sideloaded build is discovered
+// but exposes no plugin.
 jar {
 	from('.') {
 		include 'runelite-plugin.properties'
@@ -56,9 +50,8 @@ tasks.register('run', JavaExec) {
 	classpath = sourceSets.test.runtimeClasspath
 	mainClass = pluginMainClass
 
-	// macOS + JDK 17: RuneLite's OSXFullScreenAdapter uses the legacy
-	// com.apple.eawt API, which the module system no longer exports to the
-	// unnamed module by default → IllegalAccessError at UI init. Re-export it.
+	// macOS + JDK 17: RuneLite's OSXFullScreenAdapter needs com.apple.eawt,
+	// which the module system no longer exports by default.
 	jvmArgs "-ea", "--add-exports", "java.desktop/com.apple.eawt=ALL-UNNAMED"
 	args "--developer-mode", "--debug"
 }
@@ -90,8 +83,8 @@ tasks.register('shadowJar', Jar) {
 	archiveFileName.set("${rootProject.name}-${project.version}-all.jar")
 }
 
-// The operator tool (JournalReconcileTool) is driven by -Dchronicle.* switches
-// and prints what it merged; Gradle forwards neither to a test JVM by default.
+// JournalReconcileTool reads -Dchronicle.* switches and prints what it merged.
+// Gradle forwards neither to a test JVM on its own.
 tasks.named('test') {
 	System.properties.each { k, v ->
 		if (k.toString().startsWith('chronicle.')) {
