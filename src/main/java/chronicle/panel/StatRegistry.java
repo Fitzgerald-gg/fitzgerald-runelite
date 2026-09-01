@@ -123,7 +123,13 @@ public final class StatRegistry
 			new String[]{"bonesBuried", "ashesScattered", "headsReanimated",
 				"bonesOffered", "bonesSacrificed", "ashesSacrificed"},
 			NONE),
-		new SkillSpec("Construction", NONE, NONE, new String[]{"constructionBuilds"}));
+		new SkillSpec("Construction", NONE, NONE, new String[]{"constructionBuilds"}),
+		// Salvage splits into what the hook brought up and what the station sorted;
+		// the trials group by course, all four ranks folded together.
+		new SkillSpec("Sailing",
+			new String[]{"SalvagePulled", "SalvageSorted", "TrialsCompleted"},
+			new String[]{"salvagePulled", "salvageSorted", "barracudaTrialsCompleted"},
+			new String[]{"portTasksCompleted"}));
 
 	// Explicit claims resolve before any suffix sweep — a broad suffix
 	// (Fishing "Caught") can never steal another craft's key (implingsCaught).
@@ -183,6 +189,10 @@ public final class StatRegistry
 		LABELS.put("damageDealtRanged", "— by ranged");
 		LABELS.put("damageDealtMagic", "— by magic");
 		LABELS.put("teleportsFairyRing", "— by fairy ring");
+		// Courier and bounty tasks are both port tasks and both pay the same bag,
+		// so one row covers them.
+		LABELS.put("portTasksCompleted", "Port tasks");
+		LABELS.put("barracudaTrialsCompleted", "Barracuda trials");
 		LABELS.put("teleportsSpiritTree", "— by spirit tree");
 
 		// Destinations are place names: Title Case, with the punctuation the
@@ -537,6 +547,9 @@ public final class StatRegistry
 				break;
 			case "Cooked":
 				cand = "foodCooked";
+				break;
+			case "TrialsCompleted":
+				cand = "barracudaTrialsCompleted";
 				break;
 			default:
 				cand = Character.toLowerCase(suffix.charAt(0)) + suffix.substring(1);

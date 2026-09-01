@@ -1,5 +1,5 @@
 {
- "_comment": "Chat-free skilling: integer XP-delta \u2192 resource token, the POWER-SKILLING fallback (item dropped on a full inventory \u2192 no itemId). RuneLite's StatChanged.getXp() is the FLOORED integer career total, so a fractional base (oak 37.5) surfaces as alternating +37/+38 deltas \u2014 hence fractional bases have BOTH the floor and ceil integer as keys pointing to the same token (37\u2192oak, 38\u2192oak). Keyed by the raw integer XP delta. STRING value = unambiguous token \u2192 <token>+<suffix>. {\"members\":[...]} = a TRUE collision (>1 keyed resource share this delta) \u2192 server bumps only the generic total + logs the tuple; the itemId path resolves these exactly when banking. Suffixes: WOODCUTTING\u2192LogsChopped, MINING\u2192Mined, FISHING\u2192Caught, COOKING\u2192Cooked. Verified vs OSRS Wiki 2026-07-18. Unknown delta \u2192 generic+log, then add a row (hot-reloaded). || AGILITY / HUNTER / HUNTER_BIRDHOUSES / FARMING values are FULL counter keys read verbatim by their code branches (the original four skills stay token+family-suffix). FIREMAKING types the consumed-capture misses; the consumed-item path stays primary.",
+ "_comment": "Chat-free skilling: integer XP-delta \u2192 resource token, the POWER-SKILLING fallback (item dropped on a full inventory \u2192 no itemId). RuneLite's StatChanged.getXp() is the FLOORED integer career total, so a fractional base (oak 37.5) surfaces as alternating +37/+38 deltas \u2014 hence fractional bases have BOTH the floor and ceil integer as keys pointing to the same token (37\u2192oak, 38\u2192oak). Keyed by the raw integer XP delta. STRING value = unambiguous token \u2192 <token>+<suffix>. {\"members\":[...]} = a TRUE collision (>1 keyed resource share this delta) \u2192 server bumps only the generic total + logs the tuple; the itemId path resolves these exactly when banking. Suffixes: WOODCUTTING\u2192LogsChopped, MINING\u2192Mined, FISHING\u2192Caught, COOKING\u2192Cooked. Verified vs OSRS Wiki 2026-07-18. Unknown delta \u2192 generic+log, then add a row (hot-reloaded). || AGILITY / HUNTER / HUNTER_BIRDHOUSES / FARMING values are FULL counter keys read verbatim by their code branches (the original four skills stay token+family-suffix). FIREMAKING types the consumed-capture misses; the consumed-item path stays primary. || SAILING rows are Barracuda Trial completion lumps, one key per trial (Tempor Tantrum 385/650/1250; Jubbly Jive 1000/1700/3000/6200; Gwenith Glide 2050/3050/7250/16050, for unranked/swordfish/shark/marlin). Wiki-exact. The deriver reads them only when the xp drop carries no item at all, since port tasks, lost crates and lost caskets all pay lumps too and all hand over an item. Two gaps on purpose: 150 (Tempor Tantrum unranked) is also what a lost teak crate and a medium lost casket pay, and the 2.5% keg of horizons lure shifts every lump, so a boosted run is missed rather than guessed at.",
  "WOODCUTTING": {
   "25": "normal",
   "37": "oak",
@@ -276,5 +276,18 @@
   "19502": "spiritChecked",
   "14330": "celastrusChecked",
   "22680": "redwoodChecked"
+ },
+ "SAILING": {
+  "385": "temporTantrumTrialsCompleted",
+  "650": "temporTantrumTrialsCompleted",
+  "1250": "temporTantrumTrialsCompleted",
+  "1000": "jubblyJiveTrialsCompleted",
+  "1700": "jubblyJiveTrialsCompleted",
+  "3000": "jubblyJiveTrialsCompleted",
+  "6200": "jubblyJiveTrialsCompleted",
+  "2050": "gwenithGlideTrialsCompleted",
+  "3050": "gwenithGlideTrialsCompleted",
+  "7250": "gwenithGlideTrialsCompleted",
+  "16050": "gwenithGlideTrialsCompleted"
  }
 }

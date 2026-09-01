@@ -96,6 +96,27 @@ public class StatRegistryTest
 	}
 
 	@Test
+	public void sailingFilesUnderSkilling()
+	{
+		assertEquals("Sailing", StatRegistry.skillOf("salvagePulled"));
+		assertEquals("Sailing", StatRegistry.skillOf("opulentSalvageSorted"));
+		assertEquals("Sailing", StatRegistry.skillOf("gwenithGlideTrialsCompleted"));
+		assertEquals("Sailing", StatRegistry.skillOf("portTasksCompleted"));
+		assertEquals("Skilling", StatRegistry.family("smallSalvagePulled"));
+		assertEquals("Sailing", StatRegistry.subgroup("smallSalvagePulled"));
+		// the three totals head their groups, the typed rows sit under them
+		assertTrue(StatRegistry.isFloor("salvagePulled"));
+		assertTrue(StatRegistry.isFloor("barracudaTrialsCompleted"));
+		assertFalse(StatRegistry.isFloor("temporTantrumTrialsCompleted"));
+		assertEquals("barracudaTrialsCompleted",
+			StatRegistry.suffixFloor("Sailing", "TrialsCompleted"));
+		assertEquals("salvageSorted", StatRegistry.suffixFloor("Sailing", "SalvageSorted"));
+		assertEquals("Fremennik", StatRegistry.rowLabel("fremennikSalvagePulled"));
+		assertEquals("Tempor tantrum", StatRegistry.rowLabel("temporTantrumTrialsCompleted"));
+		assertEquals("Port tasks", StatRegistry.rowLabel("portTasksCompleted"));
+	}
+
+	@Test
 	public void labelsPolish()
 	{
 		// item-plus-action keys stutter; polish collapses the doubled word

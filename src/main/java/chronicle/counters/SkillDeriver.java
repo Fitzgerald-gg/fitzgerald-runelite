@@ -875,9 +875,8 @@ public class SkillDeriver
 		return pairs("pickPockets", 1, camel(low) + "Pickpockets", 1);
 	}
 
-	// Sailing pays out for a dozen different things at sea, and several of them
-	// share xp numbers with each other, so the item decides first and the xp
-	// number is only trusted when there is no item at all.
+	// Sailing pays out for half a dozen activities and several of them share xp
+	// numbers, so the item decides. The xp is only read when nothing changed hands.
 	private List<Map.Entry<String, Integer>> sailing(String xpStr, String itemId,
 		String consumedId)
 	{
@@ -912,8 +911,8 @@ public class SkillDeriver
 		{
 			return pairs("portTasksCompleted", 1);
 		}
-		// A Barracuda Trial pays a flat lump and hands over nothing. Everything
-		// else that pays a lump (port tasks, lost crates, lost caskets) hands over
+		// A Barracuda Trial pays a flat lump and hands over nothing. Port tasks,
+		// lost crates and lost caskets pay lumps too, and all of them hand over
 		// an item, so a bare drop is the trial.
 		if (itemId.isEmpty() && consumedId.isEmpty())
 		{

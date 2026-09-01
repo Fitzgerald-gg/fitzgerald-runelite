@@ -177,6 +177,48 @@ public class SkillDeriverTest
 	}
 
 	@Test
+	public void salvageRidesTheItemNotTheXp()
+	{
+		names.put(32847, "Small salvage");
+		Map<String, Integer> pulled = derive("SAILING|10||32847|1||");
+		assertEquals((Integer) 1, pulled.get("salvagePulled"));
+		assertEquals((Integer) 1, pulled.get("smallSalvagePulled"));
+		// Opulent salvage is 200 xp flat, 205 under a keg of horizons lure. The
+		// number moves, the item does not.
+		names.put(32861, "Opulent salvage");
+		assertEquals((Integer) 1, derive("SAILING|205||32861|1||").get("opulentSalvagePulled"));
+		// Sorting: loot comes in, the salvage goes out, and the salvage names the row.
+		names.put(1625, "Uncut opal");
+		Map<String, Integer> sorted = derive("SAILING|95||1625|1||32861");
+		assertEquals((Integer) 1, sorted.get("salvageSorted"));
+		assertEquals((Integer) 1, sorted.get("opulentSalvageSorted"));
+		assertNull(sorted.get("salvagePulled"));
+	}
+
+	@Test
+	public void barracudaTrialsRideTheBareCompletionLump()
+	{
+		Map<String, Integer> marlin = derive("SAILING|1250|||||");
+		assertEquals((Integer) 1, marlin.get("barracudaTrialsCompleted"));
+		assertEquals((Integer) 1, marlin.get("temporTantrumTrialsCompleted"));
+		assertEquals((Integer) 1, derive("SAILING|6200|||||").get("jubblyJiveTrialsCompleted"));
+		assertEquals((Integer) 1, derive("SAILING|16050|||||").get("gwenithGlideTrialsCompleted"));
+		// 150 is a lost teak crate and a medium lost casket as often as it is a
+		// Tempor Tantrum, so it is off the ladder.
+		assertNull(derive("SAILING|150|||||"));
+		// A courier delivery pays 385 too. The bag every port task hands over is
+		// what tells the two apart.
+		names.put(32950, "Medium port coin bag");
+		Map<String, Integer> port = derive("SAILING|385||32950|1||");
+		assertEquals((Integer) 1, port.get("portTasksCompleted"));
+		assertNull(port.get("barracudaTrialsCompleted"));
+		assertEquals((Integer) 1, derive("SAILING|385|||||").get("temporTantrumTrialsCompleted"));
+		// Trawling, sail trimming and cannon fire all drop bare xp that is nobody's
+		// completion.
+		assertNull(derive("SAILING|9|||||"));
+	}
+
+	@Test
 	public void chatChannelResiduals()
 	{
 		StatStore store = new StatStore();

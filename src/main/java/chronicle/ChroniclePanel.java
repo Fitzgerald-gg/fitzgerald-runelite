@@ -230,13 +230,13 @@ class ChroniclePanel extends PluginPanel
 		});
 		// ── tabs first (the mock's order), then search ──
 		tabGroup.setLayout(new GridLayout(1, 7, 2, 0));
-		addTab("construction", "Home", View.HOME);
-		addTab("combat", "Drops", View.DROPS);
-		addTab("slayer", "Slayer", View.SLAYER);
-		addTab("prayer", "Collection log", View.LOG);
-		addTab("overall", "Stats", View.STATS);
-		addTab("agility", "History", View.HISTORY);
-		addTab("fletching", "Journal", View.JOURNAL);
+		addTab("tab_home.png", "Home", View.HOME);
+		addTab("tab_drops.png", "Drops", View.DROPS);
+		addTab("tab_slayer.png", "Slayer", View.SLAYER);
+		addTab("tab_log.png", "Collection log", View.LOG);
+		addTab("tab_stats.png", "Stats", View.STATS);
+		addTab("tab_history.png", "History", View.HISTORY);
+		addTab("tab_journal.png", "Journal", View.JOURNAL);
 		north.add(tabGroup);
 		north.add(vgap(7));
 		north.add(searchField);
@@ -301,31 +301,9 @@ class ChroniclePanel extends PluginPanel
 		rebuild();
 	}
 
-	// Tab icons are the game's skill icons, in colour, taken from the full-size
-	// art and scaled down smoothly - the small ones lose too much at 18px, and
-	// greyed they all read as the same blob. They ship in the client jar, so no
-	// sprite cache is involved.
 	private static ImageIcon tabIcon(String name)
 	{
-		try
-		{
-			java.awt.image.BufferedImage img = ImageUtil.loadImageResource(
-				net.runelite.client.RuneLite.class, "/skill_icons/" + name + ".png");
-			java.awt.image.BufferedImage out = new java.awt.image.BufferedImage(
-				18, 18, java.awt.image.BufferedImage.TYPE_INT_ARGB);
-			java.awt.Graphics2D g = out.createGraphics();
-			g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
-				java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-			g.drawImage(img, 0, 0, 18, 18, null);
-			g.dispose();
-			return new ImageIcon(out);
-		}
-		catch (RuntimeException e)
-		{
-			// no icon rather than a broken tab
-			return new ImageIcon(new java.awt.image.BufferedImage(
-				16, 16, java.awt.image.BufferedImage.TYPE_INT_ARGB));
-		}
+		return new ImageIcon(ImageUtil.loadImageResource(ChroniclePanel.class, name));
 	}
 
 	private void addTab(String icon, String tooltip, View target)

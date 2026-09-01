@@ -50,11 +50,14 @@ public class SkillingStatTracker implements StatTracker
 
 	// Every non-combat skill rides the XP tuple. Combat (Att/Str/Def/Range/Magic/HP)
 	// + Slayer are handled by the kill/loot subsystem, not here.
+	// Sailing rides it too: salvage names itself by the item the hook brings up or
+	// the station eats, and a Barracuda Trial pays a bare lump.
 	private static final Set<Skill> DERIVABLE = EnumSet.of(
 		Skill.WOODCUTTING, Skill.MINING, Skill.FISHING, Skill.COOKING,
 		Skill.SMITHING, Skill.FLETCHING, Skill.CRAFTING, Skill.HERBLORE,
 		Skill.HUNTER, Skill.RUNECRAFT, Skill.FIREMAKING, Skill.THIEVING,
-		Skill.AGILITY, Skill.PRAYER, Skill.FARMING, Skill.CONSTRUCTION);
+		Skill.AGILITY, Skill.PRAYER, Skill.FARMING, Skill.CONSTRUCTION,
+		Skill.SAILING);
 
 	// --- chat-free XP/object/item/target detection state ---
 	private static final int TTL_TICKS = 6;   // forget a clicked target after ~3.6s
