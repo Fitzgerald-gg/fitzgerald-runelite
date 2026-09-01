@@ -44,11 +44,9 @@ public interface ChronicleConfig extends Config
 		description = "ALSO send a copy of your journal (loot, levels, kill counts, "
 			+ "collection log, clues, quests, diaries, combat achievements, slayer "
 			+ "tasks, pets, deaths, group-storage movements) UPWARD to the server "
-			+ "below. The only thing ever read back is a one-time import, once per "
-			+ "account, of the slayer-task history that server already holds for "
-			+ "you; nothing else is downloaded, and every feature works identically "
-			+ "with this off. Off by default: without this, Chronicle never touches "
-			+ "the network. Requires a server URL and a token.",
+			+ "below. One-way: nothing is ever read back, and every feature works "
+			+ "identically with this off. Off by default: without this, Chronicle "
+			+ "never touches the network. Requires a server URL and a token.",
 		warning = "This feature submits your IP address, and your own account's activity, "
 			+ "to the 3rd-party server you configure below — a server not controlled or "
 			+ "verified by the RuneLite developers",
@@ -113,6 +111,7 @@ public interface ChronicleConfig extends Config
 		return 5;
 	}
 
-	// Actions (Re-enrol, export) live in the side panel (see ChroniclePanel)
+	// Actions (import, opening the journal folder) live in the side panel,
+	// behind its "manage" control — RuneLite config items are values, not buttons.
 	// because the RuneLite config UI has no first-class button widget.
 }
