@@ -3191,7 +3191,7 @@ class ChroniclePanel extends PluginPanel
 		t.setAlignmentX(Component.LEFT_ALIGNMENT);
 		s.add(t);
 		s.add(vgap(4));
-		String rsn = plugin.enrolledRsn();
+		String rsn = plugin.syncedRsn();
 		if (rsn != null && !rsn.isEmpty())
 		{
 			s.add(row("Mirroring " + rsn + " upward", "", null));

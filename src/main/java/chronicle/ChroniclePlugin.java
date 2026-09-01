@@ -128,7 +128,8 @@ public class ChroniclePlugin extends Plugin
 	private NavigationButton navButton;
 
 	private ScheduledFuture<?> pushTask;
-	private boolean pendingEnrolCheck;
+	// Armed at login, spent on the first tick the player's name has populated.
+	private boolean pendingLoginSetup;
 	// True from the moment an account is in-game until its session is torn down. It
 	// can't key off the prior state: a dropped connection arrives via CONNECTION_LOST.
 	private boolean wasLoggedIn;
@@ -154,7 +155,7 @@ public class ChroniclePlugin extends Plugin
 	private GrindBook grindBook;
 
 	// Panel-facing status.
-	private volatile String enrolledRsn;
+	private volatile String syncedRsn;
 	// The logged-in name: the journal's identity, and the push name when cloud is on.
 	private volatile String localName;
 	private volatile String statusLine = "Waiting for a login.";
@@ -221,7 +222,7 @@ public class ChroniclePlugin extends Plugin
 		// If the plugin is toggled on mid-session, catch the already-logged-in case.
 		if (client.getGameState() == GameState.LOGGED_IN)
 		{
-			pendingEnrolCheck = true;
+			pendingLoginSetup = true;
 			// No LOGGED_IN transition will arrive; arm the teardown flag by hand.
 			wasLoggedIn = true;
 			// The clog fraction varps arrived with a LOGGED_IN we missed; read them now.
@@ -253,7 +254,7 @@ public class ChroniclePlugin extends Plugin
 			javax.swing.SwingUtilities.invokeLater(dying::shutdown);
 		}
 		panel = null;
-		pendingEnrolCheck = false;
+		pendingLoginSetup = false;
 		// Bank the session on the way out. A plugin toggle, or a client exit that shuts
 		// plugins down, would otherwise drop everything counted since the last fold.
 		if (localName != null && localStore.isReadyFor(localName))
@@ -326,7 +327,7 @@ public class ChroniclePlugin extends Plugin
 		GameState state = e.getGameState();
 		if (state == GameState.LOGGED_IN)
 		{
-			pendingEnrolCheck = true;
+			pendingLoginSetup = true;
 			wasLoggedIn = true;
 		}
 		else if (state == GameState.LOGIN_SCREEN && wasLoggedIn)
@@ -341,7 +342,7 @@ public class ChroniclePlugin extends Plugin
 	@Subscribe
 	public void onGameTick(GameTick tick)
 	{
-		if (!pendingEnrolCheck)
+		if (!pendingLoginSetup)
 		{
 			return;
 		}
@@ -354,7 +355,7 @@ public class ChroniclePlugin extends Plugin
 		{
 			return; // wait for the name to populate
 		}
-		pendingEnrolCheck = false;
+		pendingLoginSetup = false;
 		// LOGGED_IN fires again on every world hop and region load for the same session;
 		// reloading would re-freeze the lifetime base over totals it already holds.
 		if (name.equals(localName) && localStore.isReadyFor(name))
@@ -429,7 +430,7 @@ public class ChroniclePlugin extends Plugin
 					}
 					cachedToken = null;
 					cachedName = null;
-					enrolledRsn = null;
+					syncedRsn = null;
 				});
 			}
 			if ("cloudSync".equals(key) || "serverBaseUrl".equals(key))
@@ -454,7 +455,7 @@ public class ChroniclePlugin extends Plugin
 			// Turning cloud on re-runs the per-login branch so the token adopts now.
 			if (cloudActive() && client.getGameState() == GameState.LOGGED_IN)
 			{
-				pendingEnrolCheck = true;
+				pendingLoginSetup = true;
 			}
 			refreshPanel();
 		}
@@ -482,7 +483,7 @@ public class ChroniclePlugin extends Plugin
 			refreshPanel();
 			return;
 		}
-		enrolledRsn = name;
+		syncedRsn = name;
 		cachedToken = token;
 		cachedName = name;
 		statusLine = "Cloud sync on. Pushing on the next interval.";
@@ -565,7 +566,7 @@ public class ChroniclePlugin extends Plugin
 		cachedName = name;
 		cachedSnapshot = snapshot;
 		cachedAccountType = accountTypeTag(client.getVarbitValue(VarbitID.IRONMAN));
-		enrolledRsn = name;
+		syncedRsn = name;
 
 		log.debug("pushing {} counters for {}", snapshot.size(), name);
 		api.pushStats(config.serverBaseUrl(), token, name, snapshot, cachedAccountType,
@@ -642,7 +643,7 @@ public class ChroniclePlugin extends Plugin
 		cachedName = null;
 		cachedSnapshot = null;
 		cachedAccountType = null;
-		enrolledRsn = null;
+		syncedRsn = null;
 		if (!cloudActive() || token == null || who == null
 			|| snapshot == null || snapshot.isEmpty())
 		{
@@ -720,9 +721,9 @@ public class ChroniclePlugin extends Plugin
 		clientThread.invoke(this::pushCurrent);
 	}
 
-	String enrolledRsn()
+	String syncedRsn()
 	{
-		return enrolledRsn;
+		return syncedRsn;
 	}
 
 	// Cloud sync active: opted in and pointed at a server. Only the network is
@@ -1113,7 +1114,7 @@ public class ChroniclePlugin extends Plugin
 	// Name to show in the panel: the synced name when cloud is on, else the local one.
 	String displayRsn()
 	{
-		return cloudActive() && enrolledRsn != null && !enrolledRsn.isEmpty() ? enrolledRsn : localName;
+		return cloudActive() && syncedRsn != null && !syncedRsn.isEmpty() ? syncedRsn : localName;
 	}
 
 	// This session's increments, straight from the trackers. Max-type keys pass

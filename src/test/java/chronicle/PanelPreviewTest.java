@@ -690,7 +690,7 @@ public class PanelPreviewTest
 		}
 
 		@Override
-		String enrolledRsn()
+		String syncedRsn()
 		{
 			return rsn;
 		}
