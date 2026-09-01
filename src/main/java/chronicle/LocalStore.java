@@ -47,6 +47,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 	// into the drop and untaken ledgers; GROUP_STORAGE isn't kept at all.
 	private static final java.util.Set<String> FEED_TYPES = new java.util.HashSet<>(java.util.Arrays.asList(
 		"PET", "COLLECTION", "COMBAT_ACHIEVEMENT", "QUEST", "DIARY", "CLUE", "DEATH", "SLAYER",
+		"LEVEL",
 		"SESSION"));   // SESSION is recorded by the plugin itself, so it stays off the network
 
 	private final ItemManager itemManager;
@@ -1938,7 +1939,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		// Tried in order. questName/killerName/area are what the capture writes for
 		// QUEST, DEATH and DIARY; the last four turn up only in older journals.
 		for (String field : new String[]{"itemName", "petName", "questName",
-			"killerName", "area", "task", "monster",
+			"killerName", "area", "skill", "task", "monster",
 			"name", "quest", "diary", "achievement"})
 		{
 			if (d.has(field) && !d.get(field).isJsonNull())

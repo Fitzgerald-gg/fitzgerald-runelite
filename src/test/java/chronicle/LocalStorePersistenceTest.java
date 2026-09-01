@@ -320,4 +320,53 @@ public class LocalStorePersistenceTest
 		// a different character may log in next
 		assertFalse(store.wasGathered(440));
 	}
+
+	@Test
+	public void aLevelUpIsKeptInTheJournalLikeEveryOtherMilestone()
+	{
+		LocalStore store = mounted();
+		JsonObject d = new JsonObject();
+		d.addProperty("skill", "Attack");
+		d.addProperty("level", 99);
+		store.record("LEVEL", d, "Tester");
+
+		List<JsonObject> feed = store.feedNewest(10);
+		assertEquals(1, feed.size());
+		assertEquals("LEVEL", feed.get(0).get("type").getAsString());
+		assertEquals("Attack",
+			feed.get(0).getAsJsonObject("data").get("skill").getAsString());
+		assertEquals(99,
+			feed.get(0).getAsJsonObject("data").get("level").getAsInt());
+	}
+
+	@Test
+	public void oneLevelUpWrittenTwiceCollapsesOnLoad() throws Exception
+	{
+		// Dedupe runs when the journal is mounted, and a line's identity is its kind,
+		// its second and its subject. A level's subject is the skill, so the same
+		// level arriving twice in a shape that differs elsewhere is still one line.
+		write(FILE, "{\"schema\":1,\"rsn\":\"Tester\",\"feed\":["
+			+ "{\"ts\":1700000000000,\"type\":\"LEVEL\","
+			+ "\"data\":{\"skill\":\"Attack\",\"level\":99}},"
+			+ "{\"ts\":1700000000400,\"type\":\"LEVEL\","
+			+ "\"data\":{\"skill\":\"Attack\",\"level\":99,\"source\":\"import\"}}"
+			+ "]}");
+		LocalStore store = newStore();
+		store.load(dir, "Tester");
+		assertEquals(1, store.feedNewest(10).size());
+	}
+
+	@Test
+	public void twoSkillsLevellingInTheSameSecondBothSurvive() throws Exception
+	{
+		write(FILE, "{\"schema\":1,\"rsn\":\"Tester\",\"feed\":["
+			+ "{\"ts\":1700000000000,\"type\":\"LEVEL\","
+			+ "\"data\":{\"skill\":\"Attack\",\"level\":70}},"
+			+ "{\"ts\":1700000000400,\"type\":\"LEVEL\","
+			+ "\"data\":{\"skill\":\"Strength\",\"level\":70}}"
+			+ "]}");
+		LocalStore store = newStore();
+		store.load(dir, "Tester");
+		assertEquals(2, store.feedNewest(10).size());
+	}
 }

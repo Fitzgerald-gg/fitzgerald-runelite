@@ -2979,7 +2979,7 @@ class ChroniclePanel extends PluginPanel
 		{"All"},
 		{"Log", "COLLECTION"},
 		{"Slayer", "SLAYER"},
-		{"Feats", "COMBAT_ACHIEVEMENT", "QUEST", "DIARY", "CLUE", "PET"},
+		{"Feats", "COMBAT_ACHIEVEMENT", "QUEST", "DIARY", "CLUE", "PET", "LEVEL"},
 		{"Deaths", "DEATH"},
 		{"Sessions", "SESSION"},
 	};
@@ -3440,6 +3440,8 @@ class ChroniclePanel extends PluginPanel
 				return "Diary — " + str(d, "area", "") + " " + str(d, "difficulty", "");
 			case "CLUE":
 				return "Clue — " + str(d, "clueType", "casket opened");
+			case "LEVEL":
+				return "Level — " + str(d, "skill", "a skill") + " " + str(d, "level", "");
 			case "DEATH":
 			{
 				String k = str(d, "killerName", "");
