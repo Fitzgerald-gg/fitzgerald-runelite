@@ -9,11 +9,9 @@
 package chronicle;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.io.Reader;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -210,22 +208,6 @@ public class ChronicleApiClient
 		});
 	}
 
-	private static JsonObject countMapToJson(Map<String, Integer> m)
-	{
-		JsonObject o = new JsonObject();
-		if (m != null)
-		{
-			for (Map.Entry<String, Integer> e : m.entrySet())
-			{
-				if (e.getValue() != null && e.getValue() > 0)
-				{
-					o.addProperty(e.getKey(), e.getValue());
-				}
-			}
-		}
-		return o;
-	}
-
 	/**
 	 * Fire a single RAW event at POST /api/events/{token}. Fire-and-forget: the
 	 * plugin sends only raw fields (item ids + quantity, raw context) and the
@@ -267,17 +249,8 @@ public class ChronicleApiClient
 		});
 	}
 
-	/**
-	 * Seed the plugin's in-memory counter cache from the server (the store) on
-	 * login: GET the token-owner's current absolute counters. Calls back with the
-	 * map on success, or {@code null} on any failure (the caller must NOT push
-	 * absolutes it couldn't seed, or it would look like a wholesale regression).
-	 */
-	/**
-	 * Push a first-party collection-log snapshot (fire-and-forget). The snapshot
-	 * is the server's clog shape — {by_cat:{page:{item:count}}, kcs:{page:kc},
-	 * finished, available} — accreted by the passive capture; the server merges it.
-	 */
+	// Sends the collection log as {by_cat, kcs, finished, available}. The server
+	// merges partial snapshots, so sending whatever has been scraped is fine.
 	public void pushClog(String baseUrl, String token, String name, Map<String, Object> snapshot)
 	{
 		HttpUrl url = resolve(baseUrl, "api/clog/" + token);
@@ -375,30 +348,6 @@ public class ChronicleApiClient
 		}
 	}
 
-	private static java.util.List<String[]> untakenRows(JsonObject o, String field, String nameKey)
-	{
-		java.util.List<String[]> rows = new java.util.ArrayList<>();
-		if (o != null && o.has(field) && o.get(field).isJsonArray())
-		{
-			for (JsonElement el : o.getAsJsonArray(field))
-			{
-				if (!el.isJsonObject())
-				{
-					continue;
-				}
-				JsonObject row = el.getAsJsonObject();
-				String name = str(row, nameKey);
-				if (!name.isEmpty())
-				{
-					rows.add(new String[]{name,
-						String.valueOf(num(row, "qty").longValue()),
-						String.valueOf(num(row, "value").longValue())});
-				}
-			}
-		}
-		return rows;
-	}
-
 	/** The cloud's slayer journey, as the site's Slayer chapter reads it. */
 	public static final class SlayerJourney
 	{
@@ -443,49 +392,12 @@ public class ChronicleApiClient
 		}
 	}
 
-	// Ceilings for the one downward read. What comes back is inherited wholesale
-	// into the journal, which is the system of record, so every figure is bounded
-	// before it leaves this class: an absurd count or a far-future timestamp would
-	// otherwise be persisted to disk and skew the panel's totals for good. The
-	// task ceiling matches the journal's own runaway guard, and the reply arrives
-	// newest-first, so trimming at the ceiling keeps the recent history.
-	private static final int MAX_JOURNEY_TASKS = 1000;
-	private static final int MAX_TASK_NAME = 64;
-	private static final long MAX_COUNT = 10_000_000L;
-	private static final long MAX_GP = 1_000_000_000_000L;
-	private static final double MAX_TS = 4_102_444_800.0;   // 2100-01-01
-
-	private static long clamp(long v, long max)
-	{
-		return v < 0 ? 0 : Math.min(v, max);
-	}
-
-	private static double clampTs(double ts)
-	{
-		// Written as a negated test so a NaN reading falls through to zero.
-		return !(ts > 0) ? 0 : Math.min(ts, MAX_TS);
-	}
-
-
-	private static final String[] FEED_TYPES = {
-		"PET", "COLLECTION", "COMBAT_ACHIEVEMENT", "QUEST", "DIARY", "CLUE", "DEATH", "SLAYER"
-	};
-
-	private static String str(JsonObject o, String key)
-	{
-		return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : "";
-	}
-
 	private static Number num(JsonObject o, String key)
 	{
 		return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsNumber() : 0;
 	}
 
 
-	// ── Self-service profile management (token-authed) ─────────────────────
-	// The token proves ownership; the in-game name must belong to it, which the
-	// server re-checks. Each returns the parsed JSON reply (or null on any
-	// failure) so the caller can read the resulting state.
 
 	@Nullable
 	private HttpUrl resolve(String baseUrl, String path)
