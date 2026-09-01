@@ -47,8 +47,7 @@ import net.runelite.client.ui.NavigationButton;
 @PluginDescriptor(
 	name = "Chronicle",
 	description = "A comprehensive journal of your OSRS account - loot, levels, kill "
-		+ "counts, collection log, slayer, clues, quests, diaries and lifetime counters "
-		+ "- kept on your own computer and accessible via the side panel.",
+		+ "counts, collection log, slayer, clues, quests, diaries and lifetime counters.",
 	tags = {"chronicle", "journal", "stats", "tracker", "loot", "slayer", "collection", "osrs"}
 )
 // The Slayer plugin's service supplies the active task for on-task drop tagging.
