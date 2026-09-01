@@ -33,8 +33,12 @@ so the record starts years back rather than empty.
 Two ways, both driven by you. Logging in gives the completion fraction from varps. Opening the
 log yourself gives the pages you look at — and, on that same open, Chronicle fires the log's own
 Search operation so the server transmits every page at once, which is how one open records the
-whole log instead of only the tab you happened to click. This is the technique WikiSync and
-TempleOSRS use.
+whole log instead of only the tab you happened to click.
+
+WikiSync and TempleOSRS reach the same data with the same interface operation. They ask for it
+differently: WikiSync adds a button to the log and syncs when you press it, and TempleOSRS has
+an automatic mode you switch on yourself. Chronicle does it on your own log open, without asking
+and without a line of chat.
 
 It never opens the log for you, and it does nothing while you are viewing someone else's log
 through a POH adventure log. No log, no read.
