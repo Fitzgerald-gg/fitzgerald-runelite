@@ -83,15 +83,10 @@ tasks.register('shadowJar', Jar) {
 	archiveFileName.set("${rootProject.name}-${project.version}-all.jar")
 }
 
-// JournalReconcileTool reads -Dchronicle.* switches and prints what it merged.
-// Gradle forwards neither to a test JVM on its own.
+// PanelPreviewTest renders against a real journal when asked:
+//   gradle test -Dchronicle.realJournal=true
 tasks.named('test') {
-	System.properties.each { k, v ->
-		if (k.toString().startsWith('chronicle.')) {
-			systemProperty k.toString(), v
-		}
-	}
-	testLogging {
-		showStandardStreams = true
+	if (System.getProperty('chronicle.realJournal')) {
+		systemProperty 'chronicle.realJournal', System.getProperty('chronicle.realJournal')
 	}
 }

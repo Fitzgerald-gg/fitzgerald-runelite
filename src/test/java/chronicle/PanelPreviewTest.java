@@ -64,7 +64,10 @@ public class PanelPreviewTest
 
 		renderSet(out, "fix", fixturePlugin());
 
-		StubPlugin real = realJournalPlugin();
+		// Only when asked. A stranger running the suite should not have their own
+		// journal read, and the fixture set covers every surface anyway.
+		StubPlugin real = System.getProperty("chronicle.realJournal") != null
+			? realJournalPlugin() : null;
 		if (real != null)
 		{
 			renderSet(out, "real", real);
