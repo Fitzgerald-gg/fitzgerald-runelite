@@ -230,13 +230,13 @@ class ChroniclePanel extends PluginPanel
 		});
 		// ── tabs first (the mock's order), then search ──
 		tabGroup.setLayout(new GridLayout(1, 7, 2, 0));
-		addTab("tab_home.png", "Home", View.HOME);
-		addTab("tab_drops.png", "Drops", View.DROPS);
-		addTab("tab_slayer.png", "Slayer", View.SLAYER);
-		addTab("tab_log.png", "Collection log", View.LOG);
-		addTab("tab_stats.png", "Stats", View.STATS);
-		addTab("tab_history.png", "History", View.HISTORY);
-		addTab("tab_journal.png", "Journal", View.JOURNAL);
+		addTab("hitpoints", "Home", View.HOME);
+		addTab("thieving", "Drops", View.DROPS);
+		addTab("slayer", "Slayer", View.SLAYER);
+		addTab("prayer", "Collection log", View.LOG);
+		addTab("overall", "Stats", View.STATS);
+		addTab("farming", "History", View.HISTORY);
+		addTab("fletching", "Journal", View.JOURNAL);
 		north.add(tabGroup);
 		north.add(vgap(7));
 		north.add(searchField);
@@ -301,11 +301,27 @@ class ChroniclePanel extends PluginPanel
 		rebuild();
 	}
 
+	// Tab icons are the game's own skill sprites, greyed so the strip reads as one
+	// set. They ship inside the RuneLite client jar, so no sprite cache is needed.
+	private static ImageIcon tabIcon(String name)
+	{
+		try
+		{
+			java.awt.image.BufferedImage img = ImageUtil.loadImageResource(
+				net.runelite.client.RuneLite.class, "/skill_icons_small/" + name + ".png");
+			return new ImageIcon(ImageUtil.resizeImage(ImageUtil.grayscaleImage(img), 16, 16));
+		}
+		catch (RuntimeException e)
+		{
+			// no icon rather than a broken tab
+			return new ImageIcon(new java.awt.image.BufferedImage(
+				16, 16, java.awt.image.BufferedImage.TYPE_INT_ARGB));
+		}
+	}
+
 	private void addTab(String icon, String tooltip, View target)
 	{
-		MaterialTab tab = new MaterialTab(
-			new ImageIcon(ImageUtil.loadImageResource(ChroniclePanel.class, icon)),
-			tabGroup, new JPanel());
+		MaterialTab tab = new MaterialTab(tabIcon(icon), tabGroup, new JPanel());
 		tab.setToolTipText(tooltip);
 		tab.setOnSelectEvent(() ->
 		{
