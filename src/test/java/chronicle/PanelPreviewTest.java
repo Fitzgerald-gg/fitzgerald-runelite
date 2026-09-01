@@ -263,6 +263,19 @@ public class PanelPreviewTest
 		s.session.put("consumedValue", 112_400);
 		s.session.put("sharksEaten", 42);
 		s.session.put("teleportsTotal", 12);
+		// past the dozen the Home card used to stop at, so the render proves it does not
+		s.session.put("headlessArrowsFletched", 26_955);
+		s.session.put("distanceRan", 5_739);
+		s.session.put("distanceWalked", 3_786);
+		s.session.put("hitsBlocked", 135);
+		s.session.put("cabbagesPicked", 83);
+		s.session.put("flaxGathered", 61);
+		s.session.put("examines", 44);
+		s.session.put("animalsPetted", 19);
+		s.session.put("patchesRaked", 17);
+		s.session.put("itemsDiscarded", 14);
+		s.session.put("coinsSpentAtShops", 9_100);
+		s.session.put("highestHit", 71);
 
 		s.sessionLoots = 37;
 		s.sessionLootValue = 1_204_113L;

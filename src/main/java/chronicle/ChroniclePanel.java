@@ -579,18 +579,14 @@ class ChroniclePanel extends PluginPanel
 			}
 		}
 		movers.sort(Map.Entry.<String, Integer>comparingByValue().reversed());
-		int moverCap = Math.max(0, 12 - mounted);
-		for (int i = 0; i < Math.min(moverCap, movers.size()); i++)
+		// Everything the session moved, biggest first. The tab has the room and a
+		// session only counts what was actually done, so there is nothing to trim to.
+		for (Map.Entry<String, Integer> e : movers)
 		{
-			Map.Entry<String, Integer> e = movers.get(i);
 			long v = e.getValue();
 			strip.add(row(StatRegistry.label(e.getKey()),
 				StatRegistry.isGp(e.getKey()) ? gp(v) + " gp" : fmt(v), null));
 			mounted++;
-		}
-		if (movers.size() > moverCap)
-		{
-			strip.add(ghostRow("…and " + fmt(movers.size() - moverCap) + " more stirred", ""));
 		}
 		if (mounted == 0)
 		{
@@ -1062,8 +1058,8 @@ class ChroniclePanel extends PluginPanel
 			p.add(vgap(6));
 			if (bag.isEmpty())
 			{
-				p.add(note("The tally above predates the itemised record — what this "
-					+ "source leaves behind is listed here from now on."));
+				p.add(note("The count above is older than the itemised record. "
+					+ "What this source leaves behind is listed here from now on."));
 				return p;
 			}
 			p.add(group("Declined"));
@@ -1909,7 +1905,7 @@ class ChroniclePanel extends PluginPanel
 		}
 		if (rowsBySection.isEmpty() && floorTotals.isEmpty())
 		{
-			p.add(note("Nothing tracked in this facet yet."));
+			p.add(note("Nothing tracked here yet."));
 			return p;
 		}
 
@@ -2733,7 +2729,7 @@ class ChroniclePanel extends PluginPanel
 		}
 		if (historySpine == null)
 		{
-			p.add(note("Reading the journal's calendar spine…"));
+			p.add(note("Reading your history…"));
 			return p;
 		}
 		java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> hist = historySpine;
