@@ -2442,22 +2442,42 @@ class ChroniclePanel extends PluginPanel
 		return r;
 	}
 
-	// The hiscores order, which is the order every player already reads a
-	// skill list in. Overall is drawn separately, as its own headline.
-	private static final net.runelite.api.Skill[] SKILL_ORDER = {
-		net.runelite.api.Skill.ATTACK, net.runelite.api.Skill.HITPOINTS,
-		net.runelite.api.Skill.MINING, net.runelite.api.Skill.STRENGTH,
-		net.runelite.api.Skill.AGILITY, net.runelite.api.Skill.SMITHING,
-		net.runelite.api.Skill.DEFENCE, net.runelite.api.Skill.HERBLORE,
-		net.runelite.api.Skill.FISHING, net.runelite.api.Skill.RANGED,
-		net.runelite.api.Skill.THIEVING, net.runelite.api.Skill.COOKING,
-		net.runelite.api.Skill.PRAYER, net.runelite.api.Skill.CRAFTING,
-		net.runelite.api.Skill.FIREMAKING, net.runelite.api.Skill.MAGIC,
-		net.runelite.api.Skill.FLETCHING, net.runelite.api.Skill.WOODCUTTING,
-		net.runelite.api.Skill.RUNECRAFT, net.runelite.api.Skill.SLAYER,
-		net.runelite.api.Skill.FARMING, net.runelite.api.Skill.CONSTRUCTION,
-		net.runelite.api.Skill.HUNTER,
+	// The hiscores order, which is the order every player already reads a skill
+	// list in. Overall is drawn separately, as its own headline. This names an
+	// ORDER, never the membership: the grid is built from the API's own skills,
+	// so one Jagex adds appears the day the client knows it rather than waiting
+	// for someone to notice it missing from a list here. (Sailing did wait.)
+	private static final String[] SKILL_ORDER_NAMES = {
+		"ATTACK", "HITPOINTS", "MINING", "STRENGTH", "AGILITY", "SMITHING",
+		"DEFENCE", "HERBLORE", "FISHING", "RANGED", "THIEVING", "COOKING",
+		"PRAYER", "CRAFTING", "FIREMAKING", "MAGIC", "FLETCHING", "WOODCUTTING",
+		"RUNECRAFT", "SLAYER", "FARMING", "CONSTRUCTION", "HUNTER",
 	};
+
+	/** Every skill the client knows, in the order a player reads them. */
+	private static List<net.runelite.api.Skill> skillOrder()
+	{
+		List<net.runelite.api.Skill> out = new ArrayList<>();
+		for (String name : SKILL_ORDER_NAMES)
+		{
+			try
+			{
+				out.add(net.runelite.api.Skill.valueOf(name));
+			}
+			catch (IllegalArgumentException dropped)
+			{
+				// a skill this client no longer has — simply not drawn
+			}
+		}
+		for (net.runelite.api.Skill sk : net.runelite.api.Skill.values())
+		{
+			if (sk != net.runelite.api.Skill.OVERALL && !out.contains(sk))
+			{
+				out.add(sk);
+			}
+		}
+		return out;
+	}
 
 	/**
 	 * Every skill at once, the way a player already reads them: the hiscores
@@ -2487,7 +2507,7 @@ class ChroniclePanel extends PluginPanel
 		if (!gains.isEmpty())
 		{
 			Map.Entry<String, Long> top = gains.get(0);
-			head.add(row("Most moved", StatRegistry.prettify(top.getKey())
+			head.add(row("Biggest gain", StatRegistry.prettify(top.getKey())
 				+ " +" + gp(top.getValue()), null));
 		}
 		p.add(head);
@@ -2496,7 +2516,7 @@ class ChroniclePanel extends PluginPanel
 		JPanel grid = new JPanel(new GridLayout(0, 3, 2, 2));
 		grid.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		grid.setAlignmentX(Component.LEFT_ALIGNMENT);
-		for (net.runelite.api.Skill sk : SKILL_ORDER)
+		for (net.runelite.api.Skill sk : skillOrder())
 		{
 			String key = sk.name().toLowerCase(Locale.ROOT);
 			long[] cur = sheet.get(key);
