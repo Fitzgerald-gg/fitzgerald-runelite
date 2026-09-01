@@ -46,11 +46,9 @@ import net.runelite.client.ui.NavigationButton;
 @Slf4j
 @PluginDescriptor(
 	name = "Chronicle",
-	description = "A local journal of your OSRS activity — loot, levels, kill counts, "
-		+ "collection log, clues, quests, diaries, combat achievements, slayer, pets, "
-		+ "deaths and lifetime counters — kept on your own computer. Optional cloud sync "
-		+ "(off by default, server field blank) can additionally send it to a "
-		+ "Chronicle-compatible server you configure.",
+	description = "A comprehensive journal of your OSRS account - loot, levels, kill "
+		+ "counts, collection log, slayer, clues, quests, diaries and lifetime counters "
+		+ "- kept on your own computer and accessible via the side panel.",
 	tags = {"chronicle", "journal", "stats", "tracker", "loot", "slayer", "collection", "osrs"}
 )
 // The Slayer plugin's service supplies the active task for on-task drop tagging.
@@ -213,12 +211,12 @@ public class ChroniclePlugin extends Plugin
 		reschedulePushLoop();
 		warnIfDisabled(SlayerPlugin.class,
 			"Turn on the Slayer plugin for on-task drop tagging.",
-			"Slayer plugin is disabled — on-task drop tagging is inactive.");
+			"Slayer plugin is disabled: on-task drop tagging is inactive.");
 		warnIfDisabled(LootTrackerPlugin.class,
-			"Turn on the Loot Tracker plugin — chest and casket loot reaches Chronicle "
+			"Turn on the Loot Tracker plugin. Chest and casket loot reaches Chronicle "
 				+ "through it.",
-			"Loot Tracker is disabled — non-NPC loot is not being captured.");
-		log.debug("Chronicle started — slayer service: {}",
+			"Loot Tracker is disabled: non-NPC loot is not being captured.");
+		log.debug("Chronicle started - slayer service: {}",
 			eventCapture.hasSlayerService() ? "AVAILABLE" : "MISSING");
 
 		// If the plugin is toggled on mid-session, catch the already-logged-in case.
@@ -374,7 +372,7 @@ public class ChroniclePlugin extends Plugin
 		sessionStartMs = System.currentTimeMillis();
 		if (!cloudActive())
 		{
-			statusLine = "Journaling locally — nothing leaves this computer.";
+			statusLine = "Journaling locally. Nothing leaves this computer.";
 		}
 		refreshPanel();
 		final String who = name;
@@ -387,7 +385,7 @@ public class ChroniclePlugin extends Plugin
 			if (priorName != null && !LocalStore.slug(priorName).equals(LocalStore.slug(who))
 				&& LocalStore.migrateJournalFiles(localDir(), priorName, who))
 			{
-				chat("Chronicle: your journal followed the rename — "
+				chat("Chronicle: your journal followed the rename. "
 					+ priorName + " is now " + who + ".");
 			}
 			configManager.setRSProfileConfiguration(GROUP, KEY_JOURNAL_NAME, who);
@@ -480,7 +478,7 @@ public class ChroniclePlugin extends Plugin
 		}
 		if (token == null)
 		{
-			statusLine = "Cloud sync is on but this account has no token — paste one "
+			statusLine = "Cloud sync is on but this account has no token. Paste one "
 				+ "under Advanced in the plugin settings.";
 			refreshPanel();
 			return;
@@ -668,7 +666,7 @@ public class ChroniclePlugin extends Plugin
 			// The client stays authoritative for its own record; just surface it.
 			statusLine = "Server totals are ahead of this journal (another computer?) at "
 				+ nowClock() + ".";
-			log.debug("push 409 — server ahead; journal stays authoritative");
+			log.debug("push 409: server ahead; journal stays authoritative");
 		}
 		else
 		{
@@ -1414,7 +1412,7 @@ public class ChroniclePlugin extends Plugin
 		final String rsn = localName;
 		if (rsn == null || !localStore.isReadyFor(rsn))
 		{
-			chat("Chronicle: log in first — an import lands in the logged-in account's journal.");
+			chat("Chronicle: log in first. An import lands in the logged-in account's journal.");
 			return;
 		}
 		if (file == null || !file.isFile())
@@ -1434,7 +1432,7 @@ public class ChroniclePlugin extends Plugin
 			catch (Exception e)
 			{
 				log.debug("import read failed", e);
-				chat("Chronicle: couldn't read that file — it doesn't look like a journal.");
+				chat("Chronicle: couldn't read that file. It doesn't look like a journal.");
 				return;
 			}
 			if (in == null || !(in.has("trackers") || in.has("drops") || in.has("feed")))

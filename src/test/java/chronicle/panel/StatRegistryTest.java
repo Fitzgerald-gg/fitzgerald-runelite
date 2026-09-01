@@ -22,7 +22,7 @@ public class StatRegistryTest
 	@Test
 	public void teleportFamiliesLabelAsAnnotations()
 	{
-		assertEquals("— by jewellery", StatRegistry.label("teleportsViaJewellery"));
+		assertEquals("· by jewellery", StatRegistry.label("teleportsViaJewellery"));
 		assertEquals("Teleports", StatRegistry.label("teleportsTotal"));
 		// destinations read as place names, punctuation and all
 		assertEquals("Varrock", StatRegistry.label("teleportsVarrock"));

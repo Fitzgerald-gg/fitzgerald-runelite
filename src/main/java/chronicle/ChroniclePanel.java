@@ -663,7 +663,7 @@ class ChroniclePanel extends PluginPanel
 		sources.sort(Comparator.comparingLong((LocalStore.SourceRow r) -> r.value).reversed());
 		if (sources.isEmpty())
 		{
-			p.add(note("Drops appear here as you play — every kill, priced as it lands."));
+			p.add(note("Drops appear here as you play: every kill, priced as it lands."));
 			return p;
 		}
 		int shown = 0;
@@ -712,7 +712,7 @@ class ChroniclePanel extends PluginPanel
 		}
 		if (rows.isEmpty())
 		{
-			p.add(note("What you walk past gets counted here — priced at the "
+			p.add(note("What you walk past gets counted here, priced at the "
 				+ "moment you declined it."));
 			return p;
 		}
@@ -898,7 +898,7 @@ class ChroniclePanel extends PluginPanel
 				}
 				if (kcs.size() > 20)
 				{
-					card.add(ghostRow("and " + fmt(kcs.size() - 20) + " more — search finds them", ""));
+					card.add(ghostRow("and " + fmt(kcs.size() - 20) + " more. Search finds them", ""));
 				}
 				p.add(card);
 			}
@@ -1123,7 +1123,7 @@ class ChroniclePanel extends PluginPanel
 	{
 		if (j.tasks.isEmpty() && j.completedTasks == 0)
 		{
-			p.add(note("No tasks in the journal yet — they collect as "
+			p.add(note("No tasks in the journal yet. They collect as "
 				+ "you play with the Slayer plugin on."));
 			return;
 		}
@@ -1497,7 +1497,7 @@ class ChroniclePanel extends PluginPanel
 		}
 		p.add(note(sr == null
 			? "The journal has no drops from this source yet."
-			: "Items fill in as you play — the journal prices each drop the "
+			: "Items fill in as you play. The journal prices each drop the "
 			+ "moment it lands."));
 		return p;
 	}
@@ -2337,7 +2337,7 @@ class ChroniclePanel extends PluginPanel
 		Map<String, Long> standing = plugin.killCounts();
 		if (standing.isEmpty())
 		{
-			p.add(note("No kill counts recorded yet — they come from the "
+			p.add(note("No kill counts recorded yet: they come from the "
 				+ "collection log and from what the drop ledger witnesses."));
 			return;
 		}
@@ -2367,7 +2367,7 @@ class ChroniclePanel extends PluginPanel
 		}
 		else if (beforeKc == null || beforeKc.isEmpty())
 		{
-			p.add(note("Kill counts begin their record now — this period has no "
+			p.add(note("Kill counts begin their record now. This period has no "
 				+ "earlier count to measure against."));
 			p.add(vgap(4));
 		}
@@ -2524,7 +2524,7 @@ class ChroniclePanel extends PluginPanel
 		cell.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		cell.setBorder(BorderFactory.createEmptyBorder(3, 4, 3, 4));
 		cell.setToolTipText(StatRegistry.prettify(sk.name().toLowerCase(Locale.ROOT))
-			+ (gained != null ? " — +" + gp(gained) + " this period" : ""));
+			+ (gained != null ? ", +" + gp(gained) + " this period" : ""));
 
 		JLabel icon = new JLabel();
 		java.awt.image.BufferedImage img = skillIcon(sk);
@@ -2744,7 +2744,7 @@ class ChroniclePanel extends PluginPanel
 			String empty;
 			if (hist.isEmpty())
 			{
-				empty = "The record starts today — baselines close at each login, "
+				empty = "The record starts today: baselines close at each login, "
 					+ "day rollover and logout, and a period is the distance "
 					+ "between two of them.";
 			}
@@ -2753,7 +2753,7 @@ class ChroniclePanel extends PluginPanel
 			{
 				// The imported past resolves by month; day and week windows inside
 				// it hold no interior baseline.
-				empty = "The imported past resolves by month — switch to Month "
+				empty = "The imported past resolves by month. Switch to Month "
 					+ "or Year to read this era. Daily detail begins with the plugin.";
 			}
 			else
@@ -2769,7 +2769,7 @@ class ChroniclePanel extends PluginPanel
 			if (before != null && before.getKey().isBefore(pStart.minusDays(1)))
 			{
 				p.add(note("Measured since " + before.getKey().format(FULL_DAY)
-					+ " — the nearest earlier baseline."));
+					+ ", the nearest earlier baseline."));
 				p.add(vgap(4));
 			}
 			Map<String, Long> beforeSk = before != null ? before.getValue().skills
@@ -2901,7 +2901,7 @@ class ChroniclePanel extends PluginPanel
 		if (f == null || t == null)
 		{
 			JOptionPane.showMessageDialog(this,
-				"Dates read as yyyy-mm-dd (or d/m/yyyy) — nothing changed.");
+				"Dates read as yyyy-mm-dd (or d/m/yyyy). Nothing changed.");
 			return;
 		}
 		if (t.isBefore(f))
@@ -3031,7 +3031,7 @@ class ChroniclePanel extends PluginPanel
 		if (feed.isEmpty())
 		{
 			p.add(note("All".equals(journalLens)
-				? "Milestones — pets, log slots, tasks, quests, deaths — are noted "
+				? "Milestones (pets, log slots, tasks, quests, deaths) are noted "
 					+ "here as they happen."
 				: "Nothing of that kind on the record yet."));
 			return p;
@@ -3164,7 +3164,7 @@ class ChroniclePanel extends PluginPanel
 		importBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 		p.add(importBtn);
 		p.add(vgap(4));
-		p.add(note("your journal is plain JSON in .runelite/chronicle/ — an import "
+		p.add(note("your journal is plain JSON in .runelite/chronicle/. An import "
 			+ "merges another copy of THIS account's record in (a backup, another "
 			+ "computer, a record kept for you elsewhere). Everything floors, so "
 			+ "importing twice changes nothing."));
@@ -3175,7 +3175,7 @@ class ChroniclePanel extends PluginPanel
 		}
 		else
 		{
-			p.add(note("Journaling locally — nothing leaves this computer. "
+			p.add(note("Journaling locally: nothing leaves this computer. "
 				+ "Cloud sync lives under Advanced in the plugin settings."));
 		}
 		return p;
@@ -3425,19 +3425,19 @@ class ChroniclePanel extends PluginPanel
 		switch (type)
 		{
 			case "PET":
-				return "Pet — " + str(d, "petName", "a new companion");
+				return "Pet: " + str(d, "petName", "a new companion");
 			case "COLLECTION":
-				return "Log slot — " + str(d, "itemName", "new item");
+				return "Log slot: " + str(d, "itemName", "new item");
 			case "COMBAT_ACHIEVEMENT":
-				return "CA " + str(d, "tier", "") + " — " + str(d, "task", "task");
+				return "CA " + str(d, "tier", "") + ": " + str(d, "task", "task");
 			case "QUEST":
-				return "Quest — " + str(d, "questName", str(d, "quest", "complete"));
+				return "Quest: " + str(d, "questName", str(d, "quest", "complete"));
 			case "DIARY":
-				return "Diary — " + str(d, "area", "") + " " + str(d, "difficulty", "");
+				return "Diary: " + str(d, "area", "") + " " + str(d, "difficulty", "");
 			case "CLUE":
-				return "Clue — " + str(d, "clueType", "casket opened");
+				return "Clue: " + str(d, "clueType", "casket opened");
 			case "LEVEL":
-				return "Level — " + str(d, "skill", "a skill") + " " + str(d, "level", "");
+				return "Level: " + str(d, "skill", "a skill") + " " + str(d, "level", "");
 			case "DEATH":
 			{
 				String k = str(d, "killerName", "");
@@ -3449,7 +3449,7 @@ class ChroniclePanel extends PluginPanel
 				long xp = d.has("xp") ? d.get("xp").getAsLong() : 0;
 				long drops = d.has("drops") ? d.get("drops").getAsLong() : 0;
 				long dropsGp = d.has("dropsGp") ? d.get("dropsGp").getAsLong() : 0;
-				StringBuilder line = new StringBuilder("Session — ");
+				StringBuilder line = new StringBuilder("Session: ");
 				line.append(mins >= 60 ? (mins / 60) + "h " + (mins % 60) + "m" : mins + "m");
 				if (xp > 0)
 				{
@@ -3472,7 +3472,7 @@ class ChroniclePanel extends PluginPanel
 				// tasks-completed streak, and it prints here as a kill count.
 				String t = str(d, "slayerTask", str(d, "task", ""));
 				String kc = str(d, "killCount", "");
-				return "Task complete" + (t.isEmpty() ? "" : " — " + t)
+				return "Task complete" + (t.isEmpty() ? "" : ": " + t)
 					+ (kc.isEmpty() ? "" : ", " + kc + " killed");
 			}
 			default:

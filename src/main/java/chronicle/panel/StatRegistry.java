@@ -176,14 +176,14 @@ public final class StatRegistry
 		LABELS.put("highestHitTaken", "Highest hit taken");
 		LABELS.put("specialAttacksUsed", "Specials spent");
 		LABELS.put("consumedValue", "Consumed value");
-		LABELS.put("damageDealtMelee", "— by melee");
-		LABELS.put("damageDealtRanged", "— by ranged");
-		LABELS.put("damageDealtMagic", "— by magic");
-		LABELS.put("teleportsFairyRing", "— by fairy ring");
+		LABELS.put("damageDealtMelee", "· by melee");
+		LABELS.put("damageDealtRanged", "· by ranged");
+		LABELS.put("damageDealtMagic", "· by magic");
+		LABELS.put("teleportsFairyRing", "· by fairy ring");
 		// courier and bounty tasks both land on this one key
 		LABELS.put("portTasksCompleted", "Port tasks");
 		LABELS.put("barracudaTrialsCompleted", "Barracuda trials");
-		LABELS.put("teleportsSpiritTree", "— by spirit tree");
+		LABELS.put("teleportsSpiritTree", "· by spirit tree");
 
 		// destinations whose real name the camelCase split can't get back to
 		TELE_NAMES.put("teleportsSeersVillage", "Seers' Village");
@@ -379,7 +379,7 @@ public final class StatRegistry
 		}
 		if (key.startsWith("teleportsVia"))
 		{
-			return "— by " + key.substring("teleportsVia".length()).toLowerCase();
+			return "· by " + key.substring("teleportsVia".length()).toLowerCase();
 		}
 		if (key.equals("teleportsTotal") || key.equals("teleports"))
 		{

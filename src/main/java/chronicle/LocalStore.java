@@ -139,7 +139,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			log.warn("journal {} is schema {}; this build reads {}",
 				f.getName(), fileSchema, SCHEMA);
 			journalWarning = "This journal was written by a newer version of Chronicle. "
-				+ "Update the plugin to open it — nothing on disk has been changed.";
+				+ "Update the plugin to open it. Nothing on disk has been changed.";
 			synchronized (lock)
 			{
 				// Empty rather than null: a model going null under the panel's reads throws
@@ -506,7 +506,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			// A full, read-only or locked directory drops every write while the panel,
 			// served from memory, goes on looking live. Say so where it is read.
 			log.warn("local flush failed", e);
-			journalWarning = "Could not write the journal to disk — check free space and "
+			journalWarning = "Could not write the journal to disk: check free space and "
 				+ "permissions on " + dir.getAbsolutePath() + ".";
 		}
 	}

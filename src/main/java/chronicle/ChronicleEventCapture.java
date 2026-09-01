@@ -1192,7 +1192,7 @@ public class ChronicleEventCapture
 			}
 			else
 			{
-				log.debug("slayer streak line but no task identity — dropped: '{}'", msg);
+				log.debug("slayer streak line but no task identity, dropped: '{}'", msg);
 			}
 			pendingSlayerTask = null;
 			pendingSlayerMonster = null;

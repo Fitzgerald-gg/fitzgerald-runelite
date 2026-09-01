@@ -23,7 +23,7 @@ public interface ChronicleConfig extends Config
 	@ConfigSection(
 		name = "Advanced",
 		description = "Cloud sync and how often the journal is written. "
-			+ "Every network feature here is OFF/blank by default — Chronicle is a "
+			+ "Every network feature here is OFF/blank by default. Chronicle is a "
 			+ "local journal unless you point it somewhere.",
 		position = 1,
 		closedByDefault = true
@@ -40,13 +40,13 @@ public interface ChronicleConfig extends Config
 			+ "level/xp snapshot, kill counts and the rest of your lifetime "
 			+ "counters, collection log, clues, quests, diaries, combat "
 			+ "achievements, slayer tasks, pets, deaths and group-storage "
-			+ "movements — each stamped with your display name, your account type "
+			+ "movements, each stamped with your display name, your account type "
 			+ "(ironman, GIM and so on) and your RuneLite account hash. One-way: "
 			+ "nothing is ever read back, and every feature works identically with "
 			+ "this off. Off by default: without this, Chronicle never touches the "
 			+ "network. Requires a server URL and a token.",
 		warning = "This feature submits your IP address, and your own account's activity, "
-			+ "to the 3rd-party server you configure below — a server not controlled or "
+			+ "to the 3rd-party server you configure below: a server not controlled or "
 			+ "verified by the RuneLite developers",
 		position = 10,
 		section = advancedSection
@@ -60,7 +60,7 @@ public interface ChronicleConfig extends Config
 		keyName = "serverBaseUrl",
 		name = "Cloud server",
 		description = "Base URL of a Chronicle-compatible server to sync to (e.g. a "
-			+ "server you run yourself). Blank by default — cloud sync does nothing "
+			+ "server you run yourself). Blank by default. Cloud sync does nothing "
 			+ "until this is set.",
 		position = 11,
 		section = advancedSection
