@@ -110,6 +110,10 @@ class ChroniclePanel extends PluginPanel
 	// same period, so they share its stepper rather than each owning one.
 	private boolean histBosses;
 
+	// Only shown on the Journal tab: moving a record in or out belongs beside the
+	// record, and on every other tab it is a permanent advert for a rare errand.
+	private JLabel manage;
+
 	// Sits opposite "manage" on one row. Says whether the journal is reaching
 	// disk, which everything else in the panel hides: the views are served from
 	// memory and look identical either way.
@@ -266,7 +270,7 @@ class ChroniclePanel extends PluginPanel
 		// furniture, reached on the rare occasion something has to be moved in
 		// or out, and it should not read as an eighth place to go. Not hidden
 		// either — getting your own record out has to stay findable.
-		JLabel manage = new JLabel("manage");
+		manage = new JLabel("manage");
 		manage.setFont(FontManager.getRunescapeSmallFont());
 		manage.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker());
 		manage.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
@@ -375,6 +379,11 @@ class ChroniclePanel extends PluginPanel
 		heartbeat.setIconTextGap(4);
 		heartbeat.setForeground(pulse);
 		heartbeat.setFont(FontManager.getRunescapeSmallFont());
+		if (manage != null)
+		{
+			// Selecting the first tab rebuilds before the header is built.
+			manage.setVisible(view == View.JOURNAL || view == View.MANAGE);
+		}
 		display.removeAll();
 		JPanel body;
 		if (!searchQuery().isEmpty())
