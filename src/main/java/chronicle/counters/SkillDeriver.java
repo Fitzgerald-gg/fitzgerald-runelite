@@ -458,6 +458,10 @@ public class SkillDeriver
 		{
 			return pairs("constructionBuilds", 1);
 		}
+		if (skill.equals("SAILING"))
+		{
+			return sailing(xpStr, itemId, consumedId);
+		}
 		if (skill.equals("FARMING"))
 		{
 			List<Map.Entry<String, Integer>> out = pairs("farmingActions", 1);
@@ -869,6 +873,57 @@ public class SkillDeriver
 			return pairs("safesCracked", 1);
 		}
 		return pairs("pickPockets", 1, camel(low) + "Pickpockets", 1);
+	}
+
+	// Sailing pays out for a dozen different things at sea, and several of them
+	// share xp numbers with each other, so the item decides first and the xp
+	// number is only trusted when there is no item at all.
+	private List<Map.Entry<String, Integer>> sailing(String xpStr, String itemId,
+		String consumedId)
+	{
+		String gained = name(itemId).toLowerCase(Locale.ROOT);
+		// One hook roll, one salvage. 10 xp for small up to 200 for opulent, but
+		// crewmates on a hook earn a fraction of that, so count the item not the xp.
+		if (gained.endsWith(" salvage"))
+		{
+			String tok = stripCamel(gained, new String[]{" salvage"}, "");
+			List<Map.Entry<String, Integer>> out = pairs("salvagePulled", 1);
+			if (!tok.isEmpty())
+			{
+				out.add(entry(tok + "SalvagePulled", 1));
+			}
+			return out;
+		}
+		// Sorting hands back loot, so the salvage that LEFT the pack names the row.
+		String used = name(consumedId).toLowerCase(Locale.ROOT);
+		if (used.endsWith(" salvage"))
+		{
+			String tok = stripCamel(used, new String[]{" salvage"}, "");
+			List<Map.Entry<String, Integer>> out = pairs("salvageSorted", 1);
+			if (!tok.isEmpty())
+			{
+				out.add(entry(tok + "SalvageSorted", 1));
+			}
+			return out;
+		}
+		// Every finished courier or bounty task pays out one bag, so the bag is
+		// the receipt. Bags only ever arrive on a Sailing xp drop when a task ends.
+		if (gained.contains("port coin bag") || gained.contains("port reward bag"))
+		{
+			return pairs("portTasksCompleted", 1);
+		}
+		// A Barracuda Trial pays a flat lump and hands over nothing. Everything
+		// else that pays a lump (port tasks, lost crates, lost caskets) hands over
+		// an item, so a bare drop is the trial.
+		if (itemId.isEmpty() && consumedId.isEmpty())
+		{
+			String key = ladder("SAILING", xpStr);
+			if (!key.isEmpty())
+			{
+				return pairs("barracudaTrialsCompleted", 1, key, 1);
+			}
+		}
+		return null;
 	}
 
 	private List<Map.Entry<String, Integer>> netTrap(String xpStr)
