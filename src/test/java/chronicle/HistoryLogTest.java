@@ -184,4 +184,67 @@ public class HistoryLogTest
 	{
 		assertTrue(log.read(dir, "Nobody").isEmpty());
 	}
+
+	private int lineCount() throws Exception
+	{
+		return (int) java.nio.file.Files.readAllLines(spine(RSN).toPath()).stream()
+			.filter(l -> !l.trim().isEmpty()).count();
+	}
+
+	private String dayLine(String date, long attack)
+	{
+		return "{\"date\":\"" + date + "\",\"skills\":{\"attack\":" + attack
+			+ "},\"counters\":{},\"kcs\":{}}";
+	}
+
+	@Test
+	public void severalAppendsInOneDayLeaveOneLine() throws Exception
+	{
+		log.append(dir, RSN, map("attack", 100L), map("tilesWalked", 1L),
+			java.util.Collections.emptyMap());
+		log.append(dir, RSN, map("attack", 140L), map("tilesWalked", 2L),
+			java.util.Collections.emptyMap());
+		log.append(dir, RSN, map("attack", 180L), map("tilesWalked", 3L),
+			java.util.Collections.emptyMap());
+		assertEquals(1, lineCount());
+		assertEquals(180L, (long) log.read(dir, RSN).firstEntry().getValue().skills.get("attack"));
+	}
+
+	@Test
+	public void anEarlierDaySurvivesTodaysAppend() throws Exception
+	{
+		rawLine(RSN, dayLine("2020-01-01", 5L), true);
+		log.append(dir, RSN, map("attack", 200L), map("tilesWalked", 1L),
+			java.util.Collections.emptyMap());
+		assertEquals(2, lineCount());
+		assertEquals(2, log.read(dir, RSN).size());
+		assertEquals(5L, (long) log.read(dir, RSN)
+			.get(LocalDate.parse("2020-01-01")).skills.get("attack"));
+	}
+
+	@Test
+	public void compactionFoldsARepeatedDayAndKeepsTheLast() throws Exception
+	{
+		rawLine(RSN, dayLine("2026-01-01", 1L), true);
+		rawLine(RSN, dayLine("2026-01-01", 2L), true);
+		rawLine(RSN, dayLine("2026-01-01", 3L), true);
+		rawLine(RSN, dayLine("2026-01-02", 9L), true);
+		assertEquals(4, lineCount());
+		assertEquals(2, log.compact(dir, RSN));
+		assertEquals(2, lineCount());
+		TreeMap<LocalDate, HistoryLog.Baseline> got = log.read(dir, RSN);
+		assertEquals(3L, (long) got.get(LocalDate.parse("2026-01-01")).skills.get("attack"));
+		assertEquals(9L, (long) got.get(LocalDate.parse("2026-01-02")).skills.get("attack"));
+	}
+
+	@Test
+	public void compactionLeavesAFileWithoutRepeatsAlone() throws Exception
+	{
+		rawLine(RSN, dayLine("2026-01-01", 1L), true);
+		rawLine(RSN, dayLine("2026-01-02", 2L), true);
+		byte[] before = java.nio.file.Files.readAllBytes(spine(RSN).toPath());
+		assertEquals(0, log.compact(dir, RSN));
+		org.junit.Assert.assertArrayEquals(before,
+			java.nio.file.Files.readAllBytes(spine(RSN).toPath()));
+	}
 }

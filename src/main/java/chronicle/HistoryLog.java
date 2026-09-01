@@ -19,9 +19,11 @@ import lombok.extern.slf4j.Slf4j;
  * The journal's calendar spine: one JSON line per day per account, appended to
  * {@code <slug>.history.jsonl} beside the journal and never rewritten. A line is
  * that day's closing baseline ({@code {"date","skills","counters","kcs"}}). A
- * period's gain is one baseline minus another. Several lines for one date are
- * normal (login, rollover and logout all append); readers take the last line for
- * a date and skip a torn one. The History tab and PaceBook read it back.
+ * period's gain is one baseline minus another. Login, rollover and logout all
+ * append, and the later one replaces the day's earlier line rather than stacking
+ * beside it, so a date appears once. Readers still take the last line for a date
+ * and skip a torn one, which is what makes the replacement safe. The History tab
+ * and PaceBook read it back.
  */
 @Slf4j
 class HistoryLog
@@ -78,6 +80,10 @@ class HistoryLog
 				return;
 			}
 			File f = new File(dir, LocalStore.slug(rsn) + SPINE_SUFFIX);
+			// Appends are chronological, so any line already bearing today's date is
+			// at the tail. Cut it and let this one stand in its place: the reader
+			// would have taken the last of them anyway.
+			dropTrailingDate(f, today);
 			try (Writer w = new OutputStreamWriter(new FileOutputStream(f, true), StandardCharsets.UTF_8))
 			{
 				w.write(gson.toJson(line));
@@ -96,6 +102,148 @@ class HistoryLog
 		final Map<String, Long> skills = new java.util.HashMap<>();
 		final Map<String, Long> counters = new java.util.HashMap<>();
 		final Map<String, Long> kcs = new java.util.HashMap<>();
+	}
+
+	/**
+	 * Cut any trailing lines already carrying {@code date}, so the caller's line
+	 * becomes the only one for that day. Walks back from the end because appends
+	 * are in date order. Leaves the file untouched if the tail is a different day,
+	 * and gives up quietly on anything it cannot read.
+	 */
+	private static void dropTrailingDate(File f, String date)
+	{
+		if (!f.isFile())
+		{
+			return;
+		}
+		String needle = "\"date\":\"" + date + "\"";
+		try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(f, "rw"))
+		{
+			long keep = raf.length();
+			while (keep > 0)
+			{
+				long start = lineStart(raf, keep);
+				raf.seek(start);
+				byte[] buf = new byte[(int) (keep - start)];
+				raf.readFully(buf);
+				String line = new String(buf, StandardCharsets.UTF_8).trim();
+				if (!line.isEmpty() && !line.contains(needle))
+				{
+					break;
+				}
+				keep = start;
+			}
+			if (keep < raf.length())
+			{
+				raf.setLength(keep);
+			}
+		}
+		catch (Exception e)   // best-effort; a plain append still reads correctly
+		{
+			log.debug("history tail trim failed", e);
+		}
+	}
+
+	// Offset just past the newline before `end`, i.e. where that last line begins.
+	private static long lineStart(java.io.RandomAccessFile raf, long end) throws java.io.IOException
+	{
+		long i = end - 1;
+		while (i > 0)
+		{
+			raf.seek(i - 1);
+			if (raf.read() == '\n')
+			{
+				return i;
+			}
+			i--;
+		}
+		return 0;
+	}
+
+	/**
+	 * Rewrite the spine keeping one line per date, the last. Only touches a file
+	 * that actually repeats a date, which older builds produced by appending at
+	 * login, rollover and logout. Writes a sibling first and renames over the top,
+	 * so an interrupted compaction leaves the original standing. Returns the number
+	 * of lines dropped.
+	 */
+	synchronized int compact(File dir, String rsn)
+	{
+		if (rsn == null || rsn.isEmpty())
+		{
+			return 0;
+		}
+		File f = new File(dir, LocalStore.slug(rsn) + SPINE_SUFFIX);
+		if (!f.isFile())
+		{
+			return 0;
+		}
+		java.util.LinkedHashMap<String, String> keep = new java.util.LinkedHashMap<>();
+		int seen = 0;
+		try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(
+			new java.io.FileInputStream(f), StandardCharsets.UTF_8)))
+		{
+			String line;
+			while ((line = r.readLine()) != null)
+			{
+				if (line.trim().isEmpty())
+				{
+					continue;
+				}
+				String date;
+				try
+				{
+					JsonObject o = gson.fromJson(line, JsonObject.class);
+					date = o != null && o.has("date") ? o.get("date").getAsString() : null;
+				}
+				catch (RuntimeException torn)
+				{
+					continue;   // same torn line the reader skips
+				}
+				if (date == null)
+				{
+					continue;
+				}
+				seen++;
+				keep.put(date, line);   // last for a date wins, as the reader has it
+			}
+		}
+		catch (Exception e)
+		{
+			log.debug("history compaction read failed", e);
+			return 0;
+		}
+		int dropped = seen - keep.size();
+		if (dropped <= 0)
+		{
+			return 0;
+		}
+		File tmp = new File(dir, LocalStore.slug(rsn) + SPINE_SUFFIX + ".compact");
+		try (Writer w = new OutputStreamWriter(new FileOutputStream(tmp), StandardCharsets.UTF_8))
+		{
+			for (String line : keep.values())
+			{
+				w.write(line);
+				w.write('\n');
+			}
+		}
+		catch (Exception e)
+		{
+			log.debug("history compaction write failed", e);
+			return 0;
+		}
+		try
+		{
+			java.nio.file.Files.move(tmp.toPath(), f.toPath(),
+				java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+		}
+		catch (Exception e)
+		{
+			log.debug("history compaction rename failed", e);
+			return 0;
+		}
+		log.debug("history spine: dropped {} repeated day lines", dropped);
+		return dropped;
 	}
 
 	java.util.TreeMap<LocalDate, Baseline> read(File dir, String rsn)

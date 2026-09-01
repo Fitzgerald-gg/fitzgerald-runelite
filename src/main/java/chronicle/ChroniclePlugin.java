@@ -832,6 +832,9 @@ public class ChroniclePlugin extends Plugin
 	// Executor only: the spine read the EDT must not do, published to the panel.
 	private void reloadHistory(String rsn)
 	{
+		// Older builds appended at login, rollover and logout alike, so a long-running
+		// account carries several lines for the same day. Fold them before reading.
+		historyLog.compact(localDir(), rsn);
 		java.util.TreeMap<java.time.LocalDate, HistoryLog.Baseline> read =
 			historyLog.read(localDir(), rsn);
 		// An account switch can overtake the read; don't hand the panel the previous
