@@ -784,12 +784,6 @@ public class PanelPreviewTest
 		final Map<String, Long> kcs = new LinkedHashMap<>();
 
 		@Override
-		net.runelite.client.game.SpriteManager sprites()
-		{
-			return null;   // headless: no sprite cache
-		}
-
-		@Override
 		net.runelite.client.game.SkillIconManager skillIcons()
 		{
 			return null;   // headless: skillIcon() catches the NPE, grid shows a bare level

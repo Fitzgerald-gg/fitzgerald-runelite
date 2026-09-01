@@ -115,9 +115,6 @@ public class ChroniclePlugin extends Plugin
 	@Inject
 	private net.runelite.client.game.SkillIconManager skillIcons;
 
-	@Inject
-	private net.runelite.client.game.SpriteManager sprites;
-
 	// Injected: Hub review rejects a plugin that builds its own Gson.
 	@Inject
 	private com.google.gson.Gson gson;
@@ -879,11 +876,6 @@ public class ChroniclePlugin extends Plugin
 		return localStore.combatLevel();
 	}
 
-	net.runelite.client.game.SpriteManager sprites()
-	{
-		return sprites;
-	}
-
 	// Skill sprites for the History grid.
 	net.runelite.client.game.SkillIconManager skillIcons()
 	{
@@ -1454,7 +1446,7 @@ public class ChroniclePlugin extends Plugin
 			}
 			// The spine travels beside the journal in its own file.
 			File spine = new File(file.getParentFile(),
-				file.getName().replaceAll("\\.json$", "") + ".history.jsonl");
+				file.getName().replaceAll("\\.json$", "") + HistoryLog.SPINE_SUFFIX);
 			int days = spine.isFile() ? historyLog.importSpine(localDir(), rsn, spine) : 0;
 			localStore.flush(localDir());
 			reloadHistory(rsn);

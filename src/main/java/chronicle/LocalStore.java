@@ -164,7 +164,7 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			trackersBase = deepCopy(loaded.getAsJsonObject("trackers"));
 			currentRsn = rsn;
 			// An earlier build could file the same item twice in one source's bag.
-			int healed = dedupeSourceBags() + dedupeFeed();
+			int healed = dedupeSourceBags() + dedupeFeed() + reconcileUntaken();
 			if (healed > 0)
 			{
 				log.debug("collapsed {} duplicate item entries", healed);
@@ -1220,6 +1220,10 @@ class LocalStore implements chronicle.counters.GatheredLedger
 				seg.addProperty("assignment", 0);
 				seg.addProperty("value", 0);
 				tasks.add(seg);
+				while (tasks.size() > SLAYER_TASK_CAP)
+				{
+					tasks.remove(0);
+				}
 			}
 			long kills = seg.get("kills").getAsLong();
 			if (exact != null && exact > 0)
@@ -1635,11 +1639,14 @@ class LocalStore implements chronicle.counters.GatheredLedger
 							String key = byName.get(incName.toLowerCase(java.util.Locale.ROOT));
 							if (key == null)
 							{
-								// its id when the export carried one, so the panel can
-								// draw the sprite; dedupeSourceBags below folds in the
-								// plain-name keys an older export left behind
-								key = bagKey(incItem.has("id")
-									? incItem.get("id").getAsInt() : 0, incName);
+								// No name match: file it under its id when the entry
+								// carried one, so the panel can draw the sprite, else keep
+								// the incoming map key, which on an id-keyed bag is the id;
+								// dedupeSourceBags below folds in the plain-name keys an
+								// older export left behind
+								key = incItem.has("id") && incItem.get("id").getAsInt() > 0
+									? bagKey(incItem.get("id").getAsInt(), incName)
+									: ie.getKey();
 							}
 							JsonObject curItem = bag.has(key) && bag.get(key).isJsonObject()
 								? bag.getAsJsonObject(key) : new JsonObject();
@@ -1790,6 +1797,11 @@ class LocalStore implements chronicle.counters.GatheredLedger
 						{
 							tasks.add(t.getAsJsonObject().deepCopy());
 						}
+					}
+					// an imported spine is bounded like a grown one
+					while (tasks.size() > SLAYER_TASK_CAP)
+					{
+						tasks.remove(0);
 					}
 				}
 				else if (incSl.has("tasks") && incSl.get("tasks").isJsonArray())
@@ -2211,6 +2223,91 @@ class LocalStore implements chronicle.counters.GatheredLedger
 	}
 
 	/**
+	 * Rebuild the per-item untaken totals from the source-and-item pairs.
+	 *
+	 * <p>The same leavings are stored three ways: by source, by item, and by the pair.
+	 * The pairs carry the detail and the other two are sums of them, so anything that
+	 * edits one store without the others leaves the by-item view claiming more than the
+	 * by-source view of the same drops. This only runs when the pairs cover every source
+	 * the by-source store knows, which is what makes them safe to sum from; a journal
+	 * written before pairs existed is left alone. Callers hold {@code lock}. Returns how
+	 * many item rows it corrected.
+	 */
+	private int reconcileUntaken()
+	{
+		if (root == null || !root.has("untaken_pairs") || !root.get("untaken_pairs").isJsonObject()
+			|| !root.has("untaken_items") || !root.get("untaken_items").isJsonObject())
+		{
+			return 0;
+		}
+		JsonObject pairs = root.getAsJsonObject("untaken_pairs");
+		if (pairs.size() == 0)
+		{
+			return 0;
+		}
+		if (root.has("untaken") && root.get("untaken").isJsonObject())
+		{
+			for (java.util.Map.Entry<String, JsonElement> se
+				: root.getAsJsonObject("untaken").entrySet())
+			{
+				if (!pairs.has(se.getKey()))
+				{
+					return 0;
+				}
+			}
+		}
+		JsonObject rebuilt = new JsonObject();
+		for (java.util.Map.Entry<String, JsonElement> pe : pairs.entrySet())
+		{
+			if (!pe.getValue().isJsonObject())
+			{
+				continue;
+			}
+			for (java.util.Map.Entry<String, JsonElement> ie
+				: pe.getValue().getAsJsonObject().entrySet())
+			{
+				if (!ie.getValue().isJsonObject())
+				{
+					continue;
+				}
+				JsonObject inc = ie.getValue().getAsJsonObject();
+				if (!rebuilt.has(ie.getKey()))
+				{
+					JsonObject fresh = new JsonObject();
+					fresh.addProperty("qty", 0);
+					fresh.addProperty("value", 0);
+					rebuilt.add(ie.getKey(), fresh);
+				}
+				JsonObject cur = rebuilt.getAsJsonObject(ie.getKey());
+				cur.addProperty("qty", asLong(cur.get("qty")) + asLong(inc.get("qty")));
+				cur.addProperty("value", asLong(cur.get("value")) + asLong(inc.get("value")));
+			}
+		}
+		JsonObject was = root.getAsJsonObject("untaken_items");
+		int corrected = 0;
+		for (java.util.Map.Entry<String, JsonElement> e : rebuilt.entrySet())
+		{
+			JsonElement before = was.get(e.getKey());
+			if (before == null || !before.equals(e.getValue()))
+			{
+				corrected++;
+			}
+		}
+		for (java.util.Map.Entry<String, JsonElement> e : was.entrySet())
+		{
+			if (!rebuilt.has(e.getKey()))
+			{
+				corrected++;
+			}
+		}
+		if (corrected > 0)
+		{
+			root.add("untaken_items", rebuilt);
+		}
+		return corrected;
+	}
+
+	/**
 	 * Collapse item entries that name the same thing within one source. The bag is
 	 * keyed by item id, a merged-in record may know only names, and an earlier build
 	 * filed those alongside the entry already there. The survivor takes the higher of
@@ -2382,8 +2479,8 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			log.warn("journal rename failed: {} -> {}", journal, target);
 			return false;
 		}
-		File history = new File(dir, oldSlug + ".history.jsonl");
-		File historyTarget = new File(dir, newSlug + ".history.jsonl");
+		File history = new File(dir, oldSlug + HistoryLog.SPINE_SUFFIX);
+		File historyTarget = new File(dir, newSlug + HistoryLog.SPINE_SUFFIX);
 		if (history.isFile() && (!historyTarget.exists() || setAside(historyTarget, "conflict"))
 			&& !history.renameTo(historyTarget))
 		{

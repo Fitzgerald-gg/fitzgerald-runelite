@@ -203,7 +203,17 @@ class ChroniclePanel extends PluginPanel
 			MaterialTab target = searchJump != null ? tabByView.get(searchJump) : null;
 			if (target != null)
 			{
-				tabGroup.select(target);
+				// select() returns early on the tab already showing, so its
+				// onSelectEvent — the only place the query is cleared and the
+				// panel rebuilt — never fires. Do that work here instead.
+				if (target.isSelected())
+				{
+					applyTab(searchJump);
+				}
+				else
+				{
+					tabGroup.select(target);
+				}
 			}
 		});
 		searchField.getDocument().addDocumentListener(new DocumentListener()
@@ -247,7 +257,12 @@ class ChroniclePanel extends PluginPanel
 		// the panel rebuilds per game tick.
 		homeTicker = new Timer(3000, e ->
 		{
-			if (view == View.HOME && searchQuery().isEmpty())
+			// A detail opened from Home leaves the view on HOME, and a tick
+			// rebuilds the whole display — which would throw the reader back to
+			// the top of a fresh scroll pane every three seconds.
+			if (view == View.HOME && searchQuery().isEmpty()
+				&& detailItem == null && detailSource == null && detailTask < 0
+				&& leftBehindSource == null && leftBehindItem == null)
 			{
 				rebuild();
 			}
@@ -309,15 +324,7 @@ class ChroniclePanel extends PluginPanel
 		tab.setToolTipText(tooltip);
 		tab.setOnSelectEvent(() ->
 		{
-			view = target;
-			dropsShown = ROW_CAP;
-			slayerShown = ROW_CAP;
-			drillShown.clear();
-			detailItem = null;
-			detailSource = null;
-			detailStack.clear();
-			searchField.setText("");
-			rebuild();
+			applyTab(target);
 			return true;
 		});
 		tabGroup.addTab(tab);
@@ -326,6 +333,24 @@ class ChroniclePanel extends PluginPanel
 		{
 			tabGroup.select(tab);
 		}
+	}
+
+	/** Show a tab from scratch: no drilled detail, no query, nothing paged out.
+	 *  Every open detail is dropped, or rebuild() would paint it over the tab. */
+	private void applyTab(View target)
+	{
+		view = target;
+		dropsShown = ROW_CAP;
+		slayerShown = ROW_CAP;
+		drillShown.clear();
+		detailItem = null;
+		detailSource = null;
+		detailTask = -1;
+		leftBehindSource = null;
+		leftBehindItem = null;
+		detailStack.clear();
+		searchField.setText("");
+		rebuild();
 	}
 
 	// ------------------------------------------------------------------
@@ -811,15 +836,18 @@ class ChroniclePanel extends PluginPanel
 			p.add(vgap(6));
 		}
 
+		// Paint the cached journey at once — no flicker — and re-read the journal
+		// behind it. The read rebuilds only when the journey has actually moved,
+		// so an unchanged journal cannot start a loop.
 		if (journeyCache != null)
 		{
 			addJourney(p, journeyCache);
 		}
-		else if (journeyFetching)
+		else
 		{
 			p.add(note("Reading the task journey from the journal…"));
 		}
-		else
+		if (!journeyFetching)
 		{
 			journeyFetching = true;
 			plugin.fetchSlayerJourney(j -> SwingUtilities.invokeLater(() ->
@@ -831,13 +859,13 @@ class ChroniclePanel extends PluginPanel
 				{
 					return;
 				}
+				boolean moved = journeyMoved(journeyCache, j);
 				journeyCache = j;
-				if (view == View.SLAYER)
+				if (moved && view == View.SLAYER)
 				{
 					rebuild();
 				}
 			}));
-			p.add(note("Reading the task journey from the journal…"));
 		}
 		p.add(vgap(6));
 
@@ -880,6 +908,25 @@ class ChroniclePanel extends PluginPanel
 			}
 		}
 		return p;
+	}
+
+	// Has the journey moved since the copy on screen? A finished task, a new
+	// one, or another kill on the newest one is everything the block shows.
+	private static boolean journeyMoved(ChronicleApiClient.SlayerJourney was,
+		ChronicleApiClient.SlayerJourney now)
+	{
+		if (was == null)
+		{
+			return true;
+		}
+		if (was.completedTasks != now.completedTasks
+			|| was.totalKills != now.totalKills
+			|| was.tasks.size() != now.tasks.size())
+		{
+			return true;
+		}
+		return !was.tasks.isEmpty()
+			&& was.tasks.get(0).kills != now.tasks.get(0).kills;
 	}
 
 	// One task on its own: what it was made of and what it dropped. The
@@ -1088,7 +1135,11 @@ class ChroniclePanel extends PluginPanel
 		head.add(row("Tasks done", fmt(j.completedTasks), accent()));
 		head.add(row("Kills on task", fmt(j.totalKills), null));
 		head.add(row("On-task loot", gp(j.totalValueGp) + " gp", null));
-		head.add(row("Slayer xp (est.)", gp(j.totalXpEst), null));
+		// Only an imported legacy journal carries this; nothing writes it now.
+		if (j.totalXpEst > 0)
+		{
+			head.add(row("Slayer xp (est.)", gp(j.totalXpEst), null));
+		}
 		p.add(head);
 		p.add(vgap(6));
 		int mounted = 0;
@@ -1563,8 +1614,14 @@ class ChroniclePanel extends PluginPanel
 									: ", kc " + fmt(pet.kc));
 							}
 						}
-						drill.add(ghostRow(line.toString(), pet.ts > 0
-							? TASK_DAY.format(Instant.ofEpochMilli(pet.ts)) : ""));
+						// No provenance, no line: the plugin's own pet emit carries
+						// the name alone, and an empty label with a date adrift at
+						// the right margin reads as a fault.
+						if (line.length() > 0)
+						{
+							drill.add(ghostRow(line.toString(), pet.ts > 0
+								? TASK_DAY.format(Instant.ofEpochMilli(pet.ts)) : ""));
+						}
 					}
 				}
 				p.add(drill);
@@ -2766,7 +2823,9 @@ class ChroniclePanel extends PluginPanel
 						continue;
 					}
 					long d = e.getValue() - beforeCt.get(e.getKey());
-					if (d > 0 && !LocalStore.MAX_KEYS.contains(e.getKey()))
+					if (d > 0 && !LocalStore.MAX_KEYS.contains(e.getKey())
+						&& !StatRegistry.hidden(e.getKey())
+						&& !StatRegistry.isFloor(e.getKey()))
 					{
 						movers.add(new java.util.AbstractMap.SimpleEntry<>(e.getKey(), d));
 					}
