@@ -33,7 +33,10 @@ public final class StatRegistry
 		"specialAttacksUsed", "damageDealtMelee", "damageDealtRanged", "damageDealtMagic"));
 	private static final Set<String> LIVING_FLAT = new HashSet<>(Arrays.asList(
 		"foodEaten", "potionDoses", "beersDrunk", "vialsShattered",
-		"hitpointsRegenerated", "divinePotionDamage", "consumedValue"));
+		"hitpointsRegenerated", "divinePotionDamage", "consumedValue",
+		// this build writes consumedValue alone; the split pair only reaches the
+		// panel through an imported journal, and files under Living when it does
+		"potionsConsumedValue", "foodConsumedValue"));
 	private static final Set<String> LEDGER = new HashSet<>(Arrays.asList(
 		"resourcesGatheredValue", "coinsFromAlchemy", "itemsDroppedValue",
 		"itemsDiscarded", "examines", "coinsSpentAtShops", "coinsEarnedAtShops",
@@ -45,6 +48,9 @@ public final class StatRegistry
 	// resourcesGatheredValue row instead of standing on its own.
 	private static final Set<String> HIDE = new HashSet<>(Arrays.asList(
 		"totalXpGained", "demonicOfferingXp", "sinisterOfferingXp",
+		// bowsFletched predates bowsStrung and still sits in older journals;
+		// nothing writes it now, but family() would give it a row if it showed up
+		"bowsFletched",
 		"resourcesDroppedValue"));
 
 	// one craft's claim on the key space: named keys, floor totals, typed suffixes
