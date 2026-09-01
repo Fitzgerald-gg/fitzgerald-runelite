@@ -54,6 +54,12 @@ across too.
 There is nothing to export: the record is already a JSON file you own, so the tab opens the
 folder instead.
 
+**Upgrading from Fitzgerald.gg.** This plugin was called Fitzgerald.gg and kept its journal in
+`.runelite/fitzgerald`. Chronicle reads `.runelite/chronicle` and stores its settings under a new
+key, so an older record is not picked up on its own and the server URL and token need entering
+again. Nothing was deleted: point Import at `.runelite/fitzgerald/<name>.json` and the whole
+record merges in, history spine included.
+
 ## Optional cloud sync
 
 Off by default, with the server field blank. Point it at a Chronicle-compatible server and it
