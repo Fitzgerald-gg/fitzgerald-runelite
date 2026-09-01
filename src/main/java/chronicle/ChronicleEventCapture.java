@@ -100,16 +100,16 @@ public class ChronicleEventCapture
 	// of Blood: Hard Mode count is: 40." One expression covers both: the optional
 	// "completed " prefix, the optional tally word (which raids omit), and a lazy
 	// name so a mode suffix's own colon stays part of the name. Ends in a full stop.
-	private static final Pattern KILL_COUNT = Pattern.compile(
+	static final Pattern KILL_COUNT = Pattern.compile(
 		"^Your (?:completed )?(?<subject>.+?)"
 			+ "(?: (?:kill|chest|lap|harvest|success|completion))? count is: (?<tally>[\\d,]+)\\.$");
 
-	private static final Pattern COLLECTION_ITEM = Pattern.compile(
+	static final Pattern COLLECTION_ITEM = Pattern.compile(
 		"^New item added to your collection log: (?<entry>.+)$");
 
 	// Tier is a single word (Grandmaster among them); the challenge name is the rest
 	// of the line, trimmed of an optional trailing stop.
-	private static final Pattern COMBAT_TASK = Pattern.compile(
+	static final Pattern COMBAT_TASK = Pattern.compile(
 		"^Congratulations, you've completed an? (?<grade>\\w+) combat task: (?<challenge>.+?)\\.?$");
 	private static final Pattern COMBAT_TASK_POINTS = Pattern.compile("\\s*\\(\\d+ points?\\)$");
 
@@ -117,13 +117,13 @@ public class ChronicleEventCapture
 	// explicit set rather than a wildcard, and the closing full stop is required —
 	// which is what separates the running tally from the singular reward-open line
 	// "You have completed a hard Treasure Trail." (an "a", no stop-anchored count).
-	private static final Pattern CLUE_COMPLETION = Pattern.compile(
+	static final Pattern CLUE_COMPLETION = Pattern.compile(
 		"^You have completed (?<tally>[\\d,]+) (?<rank>beginner|easy|medium|hard|elite|master)"
 			+ " Treasure Trails?\\.$");
 
 	// MESBOX. More text follows the area name, so this is a find, not a full match,
 	// and the region span is lazy up to " area" so "Lumbridge & Draynor" stays whole.
-	private static final Pattern DIARY_COMPLETION = Pattern.compile(
+	static final Pattern DIARY_COMPLETION = Pattern.compile(
 		"Congratulations! You have completed all of the (?<grade>\\w+) tasks in the (?<region>.+?) area");
 
 	// Slayer prints the finished-task line and, separately, a running total. The
@@ -135,22 +135,22 @@ public class ChronicleEventCapture
 	// "Wilderness" task, or a master name as in "…1 Mortimer task;…"); "at least" is
 	// also optional, and a numeric total is required so "…enough tasks to unlock…"
 	// is ignored.
-	private static final Pattern SLAYER_FINISHED = Pattern.compile(
+	static final Pattern SLAYER_FINISHED = Pattern.compile(
 		"^You have completed your task! You killed (?<slain>[\\d,]+) (?<creature>[^.]+)\\.");
-	private static final Pattern SLAYER_TOTAL = Pattern.compile(
+	static final Pattern SLAYER_TOTAL = Pattern.compile(
 		"^You've completed (?:at least )?(?<total>[\\d,]+) (?<qual>[A-Za-z]+ )?tasks?"
 			+ "(?:;| and received)");
 
 	// The two real pet lines are spelled out in full, so a near-miss the game also
 	// prints — "being watched", "into your bank" — cannot slip through.
-	private static final Pattern PET_RECEIVED = Pattern.compile(
+	static final Pattern PET_RECEIVED = Pattern.compile(
 		"^(?:You have a funny feeling like you're being followed"
 			+ "|You feel something weird sneaking into your backpack"
 			+ "|You have a funny feeling like you would have been followed\\.\\.\\.)\\.?$");
 
 	// Carries no coin value and no trailing stop, unlike the sibling "Valuable drop:
 	// …(N coins)" line and the "<player> received a drop: …." clan broadcast.
-	private static final Pattern UNTRADEABLE_DROP = Pattern.compile("^Untradeable drop: (?<dropped>.+)$");
+	static final Pattern UNTRADEABLE_DROP = Pattern.compile("^Untradeable drop: (?<dropped>.+)$");
 
 	// Boss timers. The game phrases them several ways — "Fight duration: 1:26.40
 	// (new personal best)", "Duration: 36:04. Personal best: 31:12", "Subdued in
@@ -163,10 +163,10 @@ public class ChronicleEventCapture
 	// those times, and the PBs they carry, unread. The time span stays strict.
 	// The timer line never names the boss; pairing with the kill is done by tick
 	// adjacency against the next loot event.
-	private static final Pattern KILL_DURATION = Pattern.compile(
+	static final Pattern KILL_DURATION = Pattern.compile(
 		"(?i:Fight duration|Challenge duration|Corrupted challenge duration"
 			+ "|Completion time|Subdued in|Duration):? (?<time>\\d+(?::\\d{2})+(?:\\.\\d{1,2})?)");
-	private static final Pattern PERSONAL_BEST = Pattern.compile(
+	static final Pattern PERSONAL_BEST = Pattern.compile(
 		"[Pp]ersonal best[:!]? (?<pb>\\d+(?::\\d{2})+(?:\\.\\d{1,2})?)");
 	private static final String NEW_PB_MARK = "(new personal best)";
 

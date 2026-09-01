@@ -613,12 +613,6 @@ public class PanelPreviewTest
 		}
 
 		@Override
-		java.util.List<LocalStore.SourceRow> sessionSourceRows()
-		{
-			return new ArrayList<>(sessionSources);
-		}
-
-		@Override
 		java.util.List<LocalStore.BagItem> sourceItems(String source)
 		{
 			if (store != null)
@@ -680,12 +674,6 @@ public class PanelPreviewTest
 		boolean cloudActive()
 		{
 			return cloud;
-		}
-
-		@Override
-		String serverBaseUrl()
-		{
-			return cloud ? "https://example.invalid" : "";
 		}
 
 		@Override

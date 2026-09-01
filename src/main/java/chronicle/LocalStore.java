@@ -14,7 +14,6 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
@@ -83,7 +82,6 @@ class LocalStore implements chronicle.counters.GatheredLedger
 	private long sessionLootValue;
 	private int sessionUntaken;
 	private long sessionUntakenValue;
-	private final java.util.LinkedHashMap<String, long[]> sessionSources = new java.util.LinkedHashMap<>();
 	private final java.util.ArrayDeque<RecentDrop> recentDrops = new java.util.ArrayDeque<>();
 
 	// A runaway guard, not a retention policy: every log, ore, fish and gem in the
@@ -238,7 +236,6 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			sessionLootValue = 0;
 			sessionUntaken = 0;
 			sessionUntakenValue = 0;
-			sessionSources.clear();
 			recentDrops.clear();
 			// Not session scratch, but account scope: the next login may be a
 			// different character, and this one's ore must not vouch for theirs.
@@ -406,9 +403,6 @@ class LocalStore implements chronicle.counters.GatheredLedger
 			src.addProperty("value", asLong(src.get("value")) + batchValue);
 			sessionLoots++;
 			sessionLootValue += batchValue;
-			long[] tally = sessionSources.computeIfAbsent(source, k -> new long[2]);
-			tally[0]++;
-			tally[1] += batchValue;
 			for (JsonElement pe : priced)
 			{
 				JsonObject p = pe.getAsJsonObject();
@@ -1167,39 +1161,6 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		return itemId > 0 && gatheredItems.contains(itemId);
 	}
 
-	/**
-	 * Apply absolute corrections to the lifetime trackers — base AND shown value,
-	 * so the fix survives the next {@code setTrackers} recompute. A null value
-	 * deletes the key outright. One-shot migrations only.
-	 */
-	void correctTrackers(java.util.Map<String, Long> fixes, String rsn)
-	{
-		if (!isReadyFor(rsn) || fixes == null)
-		{
-			return;
-		}
-		synchronized (lock)
-		{
-			JsonObject tr = root.has("trackers") && root.get("trackers").isJsonObject()
-				? root.getAsJsonObject("trackers") : new JsonObject();
-			for (java.util.Map.Entry<String, Long> e : fixes.entrySet())
-			{
-				if (e.getValue() == null)
-				{
-					trackersBase.remove(e.getKey());
-					tr.remove(e.getKey());
-				}
-				else
-				{
-					trackersBase.addProperty(e.getKey(), e.getValue());
-					tr.addProperty(e.getKey(), e.getValue());
-				}
-			}
-			root.add("trackers", tr);
-			root.addProperty("updated_at", nowSec());
-		}
-	}
-
 	/** The lifetime base (pre-session) for one counter — 0 when unknown. */
 	long trackerBase(String key)
 	{
@@ -1541,21 +1502,6 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		{
 			return new long[]{sessionUntaken, sessionUntakenValue};
 		}
-	}
-
-	/** This session's drop sources only (loots, value per source). */
-	java.util.List<SourceRow> sessionSourceRows()
-	{
-		java.util.List<SourceRow> out = new java.util.ArrayList<>();
-		synchronized (lock)
-		{
-			for (java.util.Map.Entry<String, long[]> e : sessionSources.entrySet())
-			{
-				out.add(new SourceRow(e.getKey(), 0, (int) e.getValue()[0],
-					e.getValue()[1], null, 0));
-			}
-		}
-		return out;
 	}
 
 	/** The journal-held clog fraction: {finished, available}, zero when unknown. */
@@ -1904,6 +1850,36 @@ class LocalStore implements chronicle.counters.GatheredLedger
 				JsonObject cl = root.has("collection_log") && root.get("collection_log").isJsonObject()
 					? root.getAsJsonObject("collection_log") : new JsonObject();
 				root.add("collection_log", mergeClog(cl, in.getAsJsonObject("collection_log")));
+			}
+			// The gathered-item ledger travels too: without it, ore mined on the
+			// other machine is unrecognised here and binning it later reads as
+			// clearing bank junk rather than throwing back what the world gave.
+			if (in.has("gathered_items") && in.get("gathered_items").isJsonArray())
+			{
+				JsonArray have = root.has("gathered_items") && root.get("gathered_items").isJsonArray()
+					? root.getAsJsonArray("gathered_items") : new JsonArray();
+				java.util.Set<Integer> seen = new java.util.HashSet<>();
+				for (JsonElement g : have)
+				{
+					seen.add(g.getAsInt());
+				}
+				for (JsonElement g : in.getAsJsonArray("gathered_items"))
+				{
+					try
+					{
+						int id = g.getAsInt();
+						if (seen.add(id))
+						{
+							have.add(id);
+							gatheredItems.add(id);
+						}
+					}
+					catch (RuntimeException ignored)
+					{
+						// not an item id
+					}
+				}
+				root.add("gathered_items", have);
 			}
 			for (String store : new String[]{"untaken", "untaken_items", "consumable_values"})
 			{
@@ -2536,49 +2512,6 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		}
 	}
 
-	/** One collection-log page the journal holds. */
-	static final class ClogPage
-	{
-		final String page;
-		final int held;
-		final Integer kc;
-
-		ClogPage(String page, int held, Integer kc)
-		{
-			this.page = page;
-			this.held = held;
-			this.kc = kc;
-		}
-	}
-
-	/** Pages of the stored collection log (this session's capture), unsorted. */
-	java.util.List<ClogPage> clogPages()
-	{
-		java.util.List<ClogPage> out = new java.util.ArrayList<>();
-		synchronized (lock)
-		{
-			if (root == null || !root.has("collection_log")
-				|| !root.get("collection_log").isJsonObject())
-			{
-				return out;
-			}
-			JsonObject cl = root.getAsJsonObject("collection_log");
-			JsonObject byCat = cl.has("by_cat") && cl.get("by_cat").isJsonObject()
-				? cl.getAsJsonObject("by_cat") : new JsonObject();
-			JsonObject kcs = cl.has("kcs") && cl.get("kcs").isJsonObject()
-				? cl.getAsJsonObject("kcs") : new JsonObject();
-			for (java.util.Map.Entry<String, JsonElement> e : byCat.entrySet())
-			{
-				int held = e.getValue().isJsonObject()
-					? e.getValue().getAsJsonObject().size() : 0;
-				Integer kc = kcs.has(e.getKey()) && !kcs.get(e.getKey()).isJsonNull()
-					? kcs.get(e.getKey()).getAsInt() : null;
-				out.add(new ClogPage(e.getKey(), held, kc));
-			}
-		}
-		return out;
-	}
-
 	/**
 	 * Carry an account's journal across an in-game rename: move
 	 * {@code <oldslug>.json} and {@code <oldslug>.history.jsonl} to the new
@@ -2696,15 +2629,4 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		}
 	}
 
-	private static byte[] readAll(InputStream in) throws IOException
-	{
-		java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-		byte[] buf = new byte[8192];
-		int n;
-		while ((n = in.read(buf)) != -1)
-		{
-			out.write(buf, 0, n);
-		}
-		return out.toByteArray();
-	}
 }

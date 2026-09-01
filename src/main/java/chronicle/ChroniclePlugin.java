@@ -878,11 +878,6 @@ public class ChroniclePlugin extends Plugin
 		clientThread.invoke(this::pushCurrent);
 	}
 
-	String serverBaseUrl()
-	{
-		return config.serverBaseUrl().replaceAll("/+$", "");
-	}
-
 	String enrolledRsn()
 	{
 		return enrolledRsn;
@@ -955,11 +950,6 @@ public class ChroniclePlugin extends Plugin
 	ChronicleEventCapture.SlayerView slayerView()
 	{
 		return eventCapture.slayerView();
-	}
-
-	java.util.List<LocalStore.ClogPage> clogPages()
-	{
-		return localStore.clogPages();
 	}
 
 	/** The calendar spine as last parsed. Called from the panel's rebuild (EDT),
@@ -1269,11 +1259,6 @@ public class ChroniclePlugin extends Plugin
 	long[] sessionUntakenTally()
 	{
 		return localStore.sessionUntakenTally();
-	}
-
-	java.util.List<LocalStore.SourceRow> sessionSourceRows()
-	{
-		return localStore.sessionSourceRows();
 	}
 
 	/**
