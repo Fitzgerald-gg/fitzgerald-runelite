@@ -5,6 +5,7 @@ package chronicle.panel;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
@@ -93,6 +94,33 @@ public class StatRegistryTest
 		assertEquals("Wrath", StatRegistry.rowLabel("wrathRunecrafted"));
 		// explicit keys keep their full label
 		assertEquals("Herbs cleaned", StatRegistry.rowLabel("herbsCleaned"));
+	}
+
+	@Test
+	public void theTwoPetCountersFileWithTheirCraft()
+	{
+		// essence is a Runecraft row, not an "Odds & ends" leftover, and it is
+		// claimed by name so the Runecrafted floor arithmetic never sees it
+		assertEquals("Runecraft", StatRegistry.skillOf("essenceCrafted"));
+		assertEquals("Skilling", StatRegistry.family("essenceCrafted"));
+		assertEquals("Runecraft", StatRegistry.subgroup("essenceCrafted"));
+		assertEquals("Essence crafted", StatRegistry.label("essenceCrafted"));
+		assertFalse(StatRegistry.typed("essenceCrafted"));
+		assertFalse(StatRegistry.isFloor("essenceCrafted"));
+
+		// a planted crop is a typed Farming row that sheds its verb like the rest
+		assertEquals("Farming", StatRegistry.skillOf("potatoPlanted"));
+		assertEquals("Skilling", StatRegistry.family("potatoPlanted"));
+		assertEquals("Farming", StatRegistry.subgroup("potatoPlanted"));
+		assertTrue(StatRegistry.typed("potatoPlanted"));
+		assertEquals("Planted", StatRegistry.suffixOf("potatoPlanted"));
+		assertEquals("Potato", StatRegistry.rowLabel("potatoPlanted"));
+		assertEquals("Bittercap mushroom", StatRegistry.rowLabel("bittercapMushroomPlanted"));
+		// and the aggregate it was added beside is untouched
+		assertEquals("Farming", StatRegistry.skillOf("seedsPlanted"));
+		assertFalse(StatRegistry.typed("seedsPlanted"));
+		assertNull(StatRegistry.suffixOf("seedsPlanted"));
+		assertEquals("Seeds planted", StatRegistry.rowLabel("seedsPlanted"));
 	}
 
 	@Test

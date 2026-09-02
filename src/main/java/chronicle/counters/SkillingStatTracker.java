@@ -39,7 +39,7 @@ import static chronicle.counters.StatKeys.*;
  * Chat-free skilling detection for every non-combat skill. Each positive XP drop
  * (StatChanged) becomes one raw tuple that SkillDeriver turns into typed counters:
  *
- * <pre>SKILL | xpDelta | objectId | gainedItemId | gainedQty | targetName | consumedItemId</pre>
+ * <pre>SKILL | xpDelta | objectId | gainedItemId | gainedQty | targetName | consumedItemId | consumedQty</pre>
  *
  * <p>Which field names the action varies by skill: gathering and production go by the
  * gained item, thieving and agility by the interaction target, firemaking and prayer by
@@ -73,6 +73,9 @@ public class SkillingStatTracker implements StatTracker
 	// the firemaking/prayer xp drop can land a tick or two after the item leaves the
 	// pack. This one carries a TTL; the gained item stays same-tick.
 	private int lastConsumedItem = -1;
+	// how much of it went. An altar eats a whole pack of essence on one click,
+	// and the essence is the unit that action was measured in, not the runes.
+	private int lastConsumedQty = 0;
 	private int consumedTtl = 0;
 	private Map<Integer, Integer> invSnapshot = null;
 
@@ -205,6 +208,7 @@ public class SkillingStatTracker implements StatTracker
 				if (d > 0)
 				{
 					lastConsumedItem = e.getKey();
+					lastConsumedQty = d;
 					consumedTtl = TTL_TICKS;
 				}
 			}
@@ -221,7 +225,9 @@ public class SkillingStatTracker implements StatTracker
 		{
 			String gainStr = tickGainedItem > 0 ? Integer.toString(tickGainedItem) : "";
 			String qtyStr = tickGainedItem > 0 ? Integer.toString(tickGainedQty) : "";
-			String consStr = (consumedTtl > 0 && lastConsumedItem > 0) ? Integer.toString(lastConsumedItem) : "";
+			boolean haveConsumed = consumedTtl > 0 && lastConsumedItem > 0;
+			String consStr = haveConsumed ? Integer.toString(lastConsumedItem) : "";
+			String consQtyStr = haveConsumed ? Integer.toString(lastConsumedQty) : "";
 			String target = targetTtl > 0 ? lastTargetName : "";
 			for (Map.Entry<Skill, List<Integer>> e : tickDrops.entrySet())
 			{
@@ -231,9 +237,10 @@ public class SkillingStatTracker implements StatTracker
 				String objStr = useObj ? Integer.toString(lastObjectId) : "";
 				for (int delta : e.getValue())
 				{
-					// 7 fields; targetName may contain spaces but never '|'.
+					// 8 fields; targetName may contain spaces but never '|'.
 					String tuple = skill.name() + "|" + delta + "|" + objStr
-						+ "|" + gainStr + "|" + qtyStr + "|" + target + "|" + consStr;
+						+ "|" + gainStr + "|" + qtyStr + "|" + target + "|" + consStr
+						+ "|" + consQtyStr;
 					deriver.apply(tuple);
 				}
 			}
@@ -303,6 +310,7 @@ public class SkillingStatTracker implements StatTracker
 			tickGainedItem = -1;
 			tickGainedQty = 0;
 			lastConsumedItem = -1;
+			lastConsumedQty = 0;
 			consumedTtl = 0;
 			lastObjectId = -1;
 			objectTtl = 0;

@@ -247,6 +247,15 @@ public final class StatKeys
 	// Ammo that left the quiver. Unequipping it into the pack doesn't count.
 	public static final String AMMO_CONSUMED = "ammoConsumed";
 
+	// ── At the altar ──────────────────────────────────────────────────────
+	// The rune keys (natureRunecrafted) are minted from the rune that lands,
+	// and from level 33 one essence returns several of those. This counts
+	// the essence the altar ate instead, which is the unit a craft is asked for
+	// in. Guardians of the Rift is out of it: its altars take guardian essence
+	// and nothing else, and that essence isn't in the set that counts.
+
+	public static final String ESSENCE_CRAFTED = "essenceCrafted";
+
 	// ── Experience ────────────────────────────────────────────────────────
 
 	// Every skill's gains added up, from the point the plugin started watching.

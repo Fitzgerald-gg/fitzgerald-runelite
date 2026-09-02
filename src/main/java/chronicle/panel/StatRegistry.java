@@ -97,7 +97,10 @@ public final class StatRegistry
 				"moltenGlassMade", "snakeskinCrafted", "xericianCrafted", "silverCrafted",
 				"amuletsStrung", "potteryFired", "birdHousesCrafted", "itemsWoven",
 				"amethystCut"}),
-		new SkillSpec("Runecraft", new String[]{"Runecrafted"}, new String[]{"runesCrafted"}, NONE),
+		// essenceCrafted is claimed by name so the "Runecrafted" sweep leaves it
+		// alone: it counts crafts, not runes, and can't reconcile against the floor
+		new SkillSpec("Runecraft", new String[]{"Runecrafted"}, new String[]{"runesCrafted"},
+			new String[]{"essenceCrafted"}),
 		new SkillSpec("Agility", new String[]{"Laps", "Cleared"},
 			new String[]{"agilityObstacles"},
 			new String[]{"rooftopAgilityLaps", "normalAgilityLaps"}),
@@ -105,7 +108,8 @@ public final class StatRegistry
 			new String[]{"FailedPickpockets", "Pickpockets", "StallsThieved", "ChestsLooted"},
 			new String[]{"pickPockets", "stallsThieved", "chestsLooted"},
 			new String[]{"failedPickPockets", "safesCracked", "pyramidPlunderUrns"}),
-		new SkillSpec("Farming", new String[]{"Harvested", "Checked"},
+		// "Planted" is one to a patch; "Harvested" is one to an item pulled out of it
+		new SkillSpec("Farming", new String[]{"Harvested", "Checked", "Planted"},
 			new String[]{"farmingActions"},
 			new String[]{"seedsPlanted"}),
 		new SkillSpec("Hunter", new String[]{"Trapped", "BirdhousesEmptied"},
@@ -184,6 +188,8 @@ public final class StatRegistry
 		LABELS.put("portTasksCompleted", "Port tasks");
 		LABELS.put("barracudaTrialsCompleted", "Barracuda trials");
 		LABELS.put("teleportsSpiritTree", "· by spirit tree");
+		// the essence spent, not the runes it came back as
+		LABELS.put("essenceCrafted", "Essence crafted");
 
 		// destinations whose real name the camelCase split can't get back to
 		TELE_NAMES.put("teleportsSeersVillage", "Seers' Village");

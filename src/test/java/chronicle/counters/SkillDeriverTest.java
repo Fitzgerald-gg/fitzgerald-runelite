@@ -18,7 +18,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-/** Tuple fields: skill|xp|objId|itemId|qty|target|consumedId. */
+/** Tuple fields: skill|xp|objId|itemId|qty|target|consumedId|consumedQty. */
 public class SkillDeriverTest
 {
 	private final Map<Integer, String> names = new HashMap<>();
@@ -226,6 +226,74 @@ public class SkillDeriverTest
 		assertEquals(1, store.getStat("rooftopAgilityLaps"));
 		cd.applyChat("Your Ardougne lap count is: 100.");
 		assertEquals(1, store.getStat("normalAgilityLaps"));
+	}
+
+	@Test
+	public void essenceIsCountedApartFromTheRunesItMakes()
+	{
+		names.put(7936, "Pure essence");
+		names.put(561, "Nature rune");
+		// 27 essence, two nature runes apiece: the altar was asked 27 times
+		Map<String, Integer> got = derive("RUNECRAFT|243||561|54||7936|27");
+		assertEquals((Integer) 54, got.get("runesCrafted"));
+		assertEquals((Integer) 54, got.get("natureRunecrafted"));
+		assertEquals((Integer) 27, got.get("essenceCrafted"));
+		// rune essence is the same craft and shares the counter
+		names.put(1436, "Rune essence");
+		names.put(556, "Air rune");
+		assertEquals((Integer) 14, derive("RUNECRAFT|70||556|28||1436|14").get("essenceCrafted"));
+		// blood runes come off fragments, one rune to a fragment
+		names.put(7938, "Dark essence fragments");
+		names.put(565, "Blood rune");
+		assertEquals((Integer) 1, derive("RUNECRAFT|24||565|1||7938|1").get("essenceCrafted"));
+		// a craft whose rune never resolved still counts the essence behind it
+		assertEquals((Integer) 5, derive("RUNECRAFT|25|||||7936|5").get("essenceCrafted"));
+		// a tuple from before the count existed reads as the one item it meant
+		assertEquals((Integer) 1, derive("RUNECRAFT|5||556|1||7936").get("essenceCrafted"));
+	}
+
+	@Test
+	public void theRiftMinigameAndTheDarkAltarAreNotCrafts()
+	{
+		// Guardians of the Rift altars take guardian essence and roll no pet
+		names.put(26879, "Guardian essence");
+		names.put(556, "Air rune");
+		Map<String, Integer> got = derive("RUNECRAFT|50||556|50||26879|25");
+		assertEquals((Integer) 50, got.get("runesCrafted"));
+		assertNull(got.get("essenceCrafted"));
+		// venerating dense essence eats essence and makes no rune at all
+		names.put(13445, "Dense essence block");
+		names.put(13446, "Dark essence block");
+		assertNull(derive("RUNECRAFT|2||13446|1||13445|1"));
+		// nor does a tiara, though the talisman leaves the pack on the way
+		names.put(5525, "Air tiara");
+		names.put(1438, "Air talisman");
+		assertNull(derive("RUNECRAFT|25||5525|1||1438|1"));
+	}
+
+	@Test
+	public void plantingIsCountedByThePatchAndByTheCrop()
+	{
+		StatStore store = new StatStore();
+		SkillDeriver cd = new SkillDeriver(Mockito.mock(ItemManager.class), store, new Gson());
+		// three seeds go in, but the patch was planted once
+		cd.applyChat("You plant 3 potato seeds in the allotment.");
+		assertEquals(1, store.getStat("seedsPlanted"));
+		assertEquals(1, store.getStat("potatoPlanted"));
+		cd.applyChat("You plant a guam seed in the herb patch.");
+		assertEquals(1, store.getStat("guamPlanted"));
+		// saplings and spores name their crop the same way
+		cd.applyChat("You plant an oak sapling in the tree patch.");
+		assertEquals(1, store.getStat("oakPlanted"));
+		cd.applyChat("You plant a bittercap mushroom spore in the mushroom patch.");
+		assertEquals(1, store.getStat("bittercapMushroomPlanted"));
+		cd.applyChat("You plant a seaweed spore in the seaweed patch.");
+		assertEquals(1, store.getStat("seaweedPlanted"));
+		assertEquals(5, store.getStat("seedsPlanted"));
+		// a line that names no seed leaves the aggregate to carry it alone
+		cd.applyChat("You plant the explosive.");
+		assertEquals(6, store.getStat("seedsPlanted"));
+		assertEquals(0, store.getStat("explosivePlanted"));
 	}
 
 	@Test

@@ -45,7 +45,8 @@ public class GrindBookTest
 	private static Map<String, GrindBook.PetChase> chases(JsonObject clog,
 		List<LocalStore.SourceRow> sources)
 	{
-		return new GrindBook(new Gson()).petChases(clog, sources, PETS);
+		return new GrindBook(new Gson()).petChases(clog, sources,
+			new java.util.HashMap<>(), new java.util.HashMap<>(), PETS);
 	}
 
 	// 2,023 Zalcano against Smolcano's 1/2,250: 1 - (1 - 1/2250)^2023 = 59.3%.

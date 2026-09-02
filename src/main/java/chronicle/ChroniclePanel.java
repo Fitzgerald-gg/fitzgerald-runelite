@@ -1687,6 +1687,16 @@ class ChroniclePanel extends PluginPanel
 				// journal has a kill count; the rest of the page is untouched.
 				Map<String, GrindBook.PetChase> chases = petPage
 					? plugin.petChases(slots) : java.util.Collections.emptyMap();
+				// A skilling pet's odds move with the level, and the journal knows
+				// the level held now, not the one each log was cut at. That reads a
+				// little dry, and it is said once here, above the rows it applies to,
+				// rather than left for whoever thinks to hover.
+				if (levelRead(chases, known, slots, lit))
+				{
+					drill.add(note("Skilling odds are read at the levels you hold now, "
+						+ "not the ones the work was done at, so they run a little dry."));
+					drill.add(vgap(3));
+				}
 				for (int i = 0; i < slots.size(); i++)
 				{
 					LocalStore.PetRow pet = known.get(slots.get(i).toLowerCase(Locale.ROOT));
@@ -1742,6 +1752,14 @@ class ChroniclePanel extends PluginPanel
 	// matters.
 	private static String chaseSources(GrindBook.PetChase chase)
 	{
+		// A skilling pet's sources are the twenty tree types behind one grind, not
+		// twenty grinds. Naming them all would spend the whole line on a list nobody
+		// reads; the activity and its total say what was done, and which tree carried
+		// it is a detail, which is where details go.
+		if (chase.activity != null)
+		{
+			return chase.activity + ", " + fmt(chase.kc) + " " + chase.unit;
+		}
 		StringBuilder sb = new StringBuilder();
 		for (GrindBook.PetSource s : chase.sources)
 		{
@@ -1760,8 +1778,39 @@ class ChroniclePanel extends PluginPanel
 	{
 		double pct = chase.percentileDry;
 		String share = pct < 1 ? "Under 1%" : pct > 99 ? "Over 99%" : Math.round(pct) + "%";
-		return share + " of players have " + chase.pet + " by this point. "
-			+ chaseSources(chase);
+		StringBuilder sb = new StringBuilder(share + " of players have " + chase.pet
+			+ " by this point. " + chaseSources(chase));
+		if (chase.activity != null && !chase.sources.isEmpty())
+		{
+			// the line spent itself on the activity, so the hover names the one
+			// source that carried it
+			sb.append(", mostly ").append(chase.sources.get(0).boss.toLowerCase(Locale.ROOT));
+		}
+		if (chase.level > 0)
+		{
+			sb.append(". Priced at ").append(chase.level)
+				.append(", the level you hold now, not the level each one was rolled at");
+		}
+		return sb.append(".").toString();
+	}
+
+	// True when a chase about to be drawn has its odds read off a level. The note
+	// belongs to the page, not to each row: eight repetitions of the same caveat is
+	// not restraint.
+	private static boolean levelRead(Map<String, GrindBook.PetChase> chases,
+		Map<String, LocalStore.PetRow> known, List<String> slots, boolean[] lit)
+	{
+		for (int i = 0; i < slots.size(); i++)
+		{
+			String key = slots.get(i).toLowerCase(Locale.ROOT);
+			// exactly the rows the loop below draws a chase on
+			GrindBook.PetChase c = lit[i] || known.get(key) != null ? null : chases.get(key);
+			if (c != null && c.level > 0)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	// One tooltip over a row and everything in it: a panel's own tip never fires,

@@ -32,7 +32,7 @@ import net.runelite.client.game.ItemManager;
 
 /**
  * Turns a raw action tuple
- * {@code SKILL|xpDelta|objId|itemId|qty|targetName|consumedId} into typed
+ * {@code SKILL|xpDelta|objId|itemId|qty|targetName|consumedId|consumedQty} into typed
  * counters, off the bundled tables {@code osrs_skill_xp.json},
  * {@code osrs_skill_item_rules.json} and {@code osrs_object_species.json}.
  * Item names come from {@link ItemManager}; untradeables resolve too.
@@ -74,6 +74,12 @@ public class SkillDeriver
 	private static final Map<String, Double> PRAYER_BASE_XP = new HashMap<>();
 	private static final Map<String, String> HUNTER_ITEM_SPECIES = new HashMap<>();
 	private static final Map<String, String> BUTTERFLY_TARGETS = new HashMap<>();
+	// What an altar eats to make a rune, by name so a reskinned id still lands.
+	// Guardian essence is deliberately absent: it is the only essence the
+	// Guardians of the Rift altars take, and those altars roll no pet, so
+	// leaving it out keeps the minigame out of the count entirely.
+	private static final Set<String> ALTAR_ESSENCE = new HashSet<>(Arrays.asList(
+		"pure essence", "rune essence", "daeyalt essence", "dark essence fragments"));
 
 	static
 	{
@@ -241,6 +247,15 @@ public class SkillDeriver
 	private static final Pattern FAILED_PICKPOCKET =
 		Pattern.compile("You fail to pick (?:the )?([\\w'. -]+?)'s pocket.*");
 
+	// "You plant 3 potato seeds in the allotment." — the crop is whatever sits
+	// in front of the seed noun, and the count in the line is the seeds one
+	// planting takes, not a number of plantings. A line naming no seed (the
+	// quest lines that also start "You plant ") matches nothing and leaves the
+	// aggregate to carry it alone.
+	private static final Pattern PLANTED = Pattern.compile(
+		"You plant (?:\\d+ )?(?:a |an |the |some )?([\\w'-]+(?: [\\w'-]+)*?) "
+			+ "(?:seed|seeds|spore|spores|sapling|saplings|seedling|seedlings)\\b");
+
 	// the signals no xp drop carries: burns, failed pickpockets, seeds planted
 	// and lap lines. SkillingStatTracker pre-filters before anything reaches here.
 	void applyChat(String msg)
@@ -257,6 +272,16 @@ public class SkillDeriver
 		if (msg.contains("You plant "))
 		{
 			statStore.incrementStat("seedsPlanted");
+			Matcher planted = PLANTED.matcher(msg);
+			if (planted.find())
+			{
+				String crop = camel(planted.group(1));
+				if (!crop.isEmpty())
+				{
+					// one to a patch, whatever the yield it later gives up
+					statStore.incrementStat(crop + "Planted");
+				}
+			}
 			return;
 		}
 		if (msg.contains("Rooftop lap"))
@@ -306,6 +331,20 @@ public class SkillDeriver
 		}
 		String target = parts.length >= 6 ? parts[5] : "";
 		String consumedId = parts.length >= 7 ? parts[6] : "";
+		// how much of it left the pack. A tuple from before this field carried a
+		// count reads as the single item its consumedId used to mean.
+		int consumedQty = 1;
+		if (parts.length >= 8 && !parts[7].isEmpty())
+		{
+			try
+			{
+				consumedQty = Math.max(1, Integer.parseInt(parts[7]));
+			}
+			catch (NumberFormatException ignored)
+			{
+				consumedQty = 1;
+			}
+		}
 
 		// XP-windfall consumables (lamps/tomes): reward xp with no action behind it.
 		if (consumedId.equals("2528") || consumedId.equals("13148") || consumedId.equals("34057"))
@@ -387,13 +426,16 @@ public class SkillDeriver
 				{
 					out.add(entry(tok + "Runecrafted", qty));
 				}
+				essenceSpent(out, consumedId, consumedQty);
 				return out;
 			}
 			if (!itemId.isEmpty())
 			{
 				return null;   // tiaras, veneration and rewards make no runes
 			}
-			return pairs("runesCrafted", qty);
+			List<Map.Entry<String, Integer>> out = pairs("runesCrafted", qty);
+			essenceSpent(out, consumedId, consumedQty);
+			return out;
 		}
 
 		if (skill.equals("FIREMAKING"))
@@ -552,6 +594,25 @@ public class SkillDeriver
 	}
 
 	// ── skill branches ─────────────────────────────────────────────────
+
+	// Essence spent at an altar, counted beside the runes it made. The runes are
+	// the wrong unit for how often the altar was asked for something: from level
+	// 33 upwards one essence returns several of the same rune, so runesCrafted
+	// runs several times ahead of the crafts behind it. Rune and pure essence
+	// share the counter because nothing downstream tells them apart either.
+	private void essenceSpent(List<Map.Entry<String, Integer>> out, String consumedId,
+		int consumedQty)
+	{
+		if (consumedId.isEmpty())
+		{
+			return;
+		}
+		String consumed = name(consumedId).toLowerCase(Locale.ROOT);
+		if (ALTAR_ESSENCE.contains(consumed))
+		{
+			out.add(entry(StatKeys.ESSENCE_CRAFTED, consumedQty));
+		}
+	}
 
 	private List<Map.Entry<String, Integer>> smithing(String itemName, int qty)
 	{

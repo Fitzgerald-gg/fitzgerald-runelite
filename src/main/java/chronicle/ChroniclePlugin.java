@@ -1058,8 +1058,10 @@ public class ChroniclePlugin extends Plugin
 	}
 
 	// The chase behind each unearned pet a log page lists, keyed by lower-cased name.
-	// Cheap enough for the panel to ask on the spot: the rate book is parsed once and
-	// held, and the reads are the two the log page already makes.
+	// Cheap enough for the panel to ask on the spot: both rate books are parsed once
+	// and held, and the reads are ones the log page already makes. Skilling pets need
+	// two more: the lifetime counters their attempts are in, and the skill sheet the
+	// grid reads its levels off.
 	java.util.Map<String, GrindBook.PetChase> petChases(java.util.Collection<String> pets)
 	{
 		final String rsn = localName;
@@ -1067,7 +1069,8 @@ public class ChroniclePlugin extends Plugin
 		{
 			return java.util.Collections.emptyMap();
 		}
-		return grindBook.petChases(localStore.clogSnapshot(), localStore.dropSources(), pets);
+		return grindBook.petChases(localStore.clogSnapshot(), localStore.dropSources(),
+			localStore.trackersSnapshot(), localStore.skillSheet(), pets);
 	}
 
 	// True once this session produced an on-task slayer kill.

@@ -1,0 +1,892 @@
+{
+  "_meta": {
+    "source": "oldschool.runescape.wiki, one page per pet, read as raw wikitext",
+    "read": "2026-09-02",
+    "formula": "Eight of the nine skilling pets roll 1 / (base - level * 25), where level is the player's base level in the pet's skill and stops helping at 99. Herbi is flat. levelScaled says which.",
+    "approximation": "Chronicle knows the level held now, not the level each attempt was made at. Applying today's level to yesterday's work prices early attempts better than they were, so every level-scaled figure reads a little dry. Said on the page, not only here.",
+    "unlisted": "A source the wiki prints as Unknown, or that no counter can name in the unit the roll is asked in, is absent. Absence is deliberate everywhere; each pet's _excluded says what and why.",
+    "notImplemented": "The 200,000,000 xp fifteen-fold bonus. No account here is near it and the wiki gives no worked denominators for it."
+  },
+  "pets": {
+    "Beaver": {
+      "skill": "woodcutting",
+      "activity": "Woodcutting",
+      "unit": "logs",
+      "levelScaled": true,
+      "_excluded": "Hollow trees (bark) and sulliusceps (caps) hand over no log, so they mint no typed counter at all. Bloodwood is rolled per Chop swing and the engorged tree per successful cut, neither of which is a log received, so bloodwoodLogsChopped is deliberately absent. logsChopped is the untyped floor and would double every row below.",
+      "sources": [
+        {
+          "counter": "normalLogsChopped",
+          "name": "Normal trees",
+          "base": 317647
+        },
+        {
+          "counter": "acheyTreeLogsChopped",
+          "name": "Achey trees",
+          "base": 317647
+        },
+        {
+          "counter": "oakLogsChopped",
+          "name": "Oak trees",
+          "base": 361146
+        },
+        {
+          "counter": "willowLogsChopped",
+          "name": "Willow trees",
+          "base": 289286
+        },
+        {
+          "counter": "teakLogsChopped",
+          "name": "Teak trees",
+          "base": 264336
+        },
+        {
+          "counter": "jatobaLogsChopped",
+          "name": "Jatoba trees",
+          "base": 264336
+        },
+        {
+          "counter": "juniperLogsChopped",
+          "name": "Juniper trees",
+          "base": 360000
+        },
+        {
+          "counter": "mapleLogsChopped",
+          "name": "Maple trees",
+          "base": 221918
+        },
+        {
+          "counter": "mahoganyLogsChopped",
+          "name": "Mahogany trees",
+          "base": 220623
+        },
+        {
+          "counter": "arcticPineLogsChopped",
+          "name": "Arctic pines",
+          "base": 145758
+        },
+        {
+          "counter": "yewLogsChopped",
+          "name": "Yew trees",
+          "base": 145013
+        },
+        {
+          "counter": "camphorLogsChopped",
+          "name": "Camphor trees",
+          "base": 145013
+        },
+        {
+          "counter": "blisterwoodLogsChopped",
+          "name": "Blisterwood trees",
+          "base": 289286
+        },
+        {
+          "counter": "magicLogsChopped",
+          "name": "Magic trees",
+          "base": 72321
+        },
+        {
+          "counter": "ironwoodLogsChopped",
+          "name": "Ironwood trees",
+          "base": 72321
+        },
+        {
+          "counter": "redwoodLogsChopped",
+          "name": "Redwood trees",
+          "base": 72321
+        },
+        {
+          "counter": "rosewoodLogsChopped",
+          "name": "Rosewood trees",
+          "base": 72321
+        }
+      ]
+    },
+    "Rock golem": {
+      "skill": "mining",
+      "activity": "Mining",
+      "unit": "ore",
+      "levelScaled": true,
+      "_excluded": "The wiki's own cannot-drop list: the salt mine (teSaltMined, urtSaltMined, efhSaltMined), daeyaltShardMined, denseEssenceBlockMined and pureEssenceMined. Then two counters that measure the wrong thing: barroniteShardsMined and volcanicAshMined count the items handed over, several to a rock, so they cannot stand as attempts. Sunstone, calcified rocks, volcanic sulphur, the blast mine, the Volcanic Mine and crashed stars are rolled but mint no typed counter. rocksMined is the untyped floor.",
+      "sources": [
+        {
+          "counter": "clayMined",
+          "name": "Clay rocks",
+          "base": 741600
+        },
+        {
+          "counter": "copperOreMined",
+          "name": "Copper rocks",
+          "base": 741600
+        },
+        {
+          "counter": "tinOreMined",
+          "name": "Tin rocks",
+          "base": 741600
+        },
+        {
+          "counter": "bluriteOreMined",
+          "name": "Blurite rocks",
+          "base": 741600
+        },
+        {
+          "counter": "limestoneMined",
+          "name": "Limestone rocks",
+          "base": 741600
+        },
+        {
+          "counter": "ironOreMined",
+          "name": "Iron rocks",
+          "base": 741600
+        },
+        {
+          "counter": "silverOreMined",
+          "name": "Silver rocks",
+          "base": 741600
+        },
+        {
+          "counter": "leadOreMined",
+          "name": "Lead rocks",
+          "base": 741600
+        },
+        {
+          "counter": "sandstoneMined",
+          "name": "Sandstone rocks",
+          "base": 741600
+        },
+        {
+          "counter": "graniteMined",
+          "name": "Granite rocks",
+          "base": 741600
+        },
+        {
+          "counter": "coalMined",
+          "name": "Coal rocks",
+          "base": 290640
+        },
+        {
+          "counter": "goldOreMined",
+          "name": "Gold rocks",
+          "base": 296640
+        },
+        {
+          "counter": "gemRockMined",
+          "name": "Gem rocks",
+          "base": 211886
+        },
+        {
+          "counter": "mithrilOreMined",
+          "name": "Mithril rocks",
+          "base": 148320
+        },
+        {
+          "counter": "lovakiteOreMined",
+          "name": "Lovakite rocks",
+          "base": 245562
+        },
+        {
+          "counter": "nickelOreMined",
+          "name": "Nickel rocks",
+          "base": 247200
+        },
+        {
+          "counter": "payDirtMined",
+          "name": "Motherlode Mine",
+          "base": 247200
+        },
+        {
+          "counter": "adamantiteOreMined",
+          "name": "Adamantite rocks",
+          "base": 59328
+        },
+        {
+          "counter": "amethystMined",
+          "name": "Amethyst crystals",
+          "base": 46350
+        },
+        {
+          "counter": "runiteOreMined",
+          "name": "Runite rocks",
+          "base": 42377
+        }
+      ]
+    },
+    "Rocky": {
+      "skill": "thieving",
+      "activity": "Thieving",
+      "unit": "thefts",
+      "levelScaled": true,
+      "_excluded": "Failed pickpockets roll nothing, so every <npc>FailedPickpockets key is held out of the Pickpockets sweep by name. Chests are out: only Pyramid Plunder's Grand Gold Chest is a source and its rate differs by room, which <base>ChestsLooted cannot say. pyramidPlunderUrns is not a source at all, safesCracked has no published rate, and pickPockets and stallsThieved are the untyped floors.",
+      "sources": [
+        {
+          "suffix": "Pickpockets",
+          "notSuffix": "FailedPickpockets",
+          "name": "Pickpocketing",
+          "base": 257211
+        },
+        {
+          "counter": "watchmanPickpockets",
+          "name": "Watchmen",
+          "base": 134625
+        },
+        {
+          "counter": "paladinPickpockets",
+          "name": "Paladins",
+          "base": 127056
+        },
+        {
+          "counter": "gnomePickpockets",
+          "name": "Gnomes",
+          "base": 108718
+        },
+        {
+          "counter": "heroPickpockets",
+          "name": "Heroes",
+          "base": 99175
+        },
+        {
+          "counter": "elfPickpockets",
+          "name": "Elves",
+          "base": 99175
+        },
+        {
+          "counter": "vyrewatchPickpockets",
+          "name": "Vyres",
+          "base": 99175
+        },
+        {
+          "counter": "vyrewatchSentinelPickpockets",
+          "name": "Vyres",
+          "base": 99175
+        },
+        {
+          "counter": "tzhaarHurPickpockets",
+          "name": "TzHaar-Hur",
+          "base": 176743
+        },
+        {
+          "counter": "vegStallsThieved",
+          "name": "Veg stall",
+          "base": 206777
+        },
+        {
+          "counter": "vegetableStallsThieved",
+          "name": "Veg stall",
+          "base": 206777
+        },
+        {
+          "counter": "bakeryStallsThieved",
+          "name": "Bakery stall",
+          "base": 124066
+        },
+        {
+          "counter": "fruitStallsThieved",
+          "name": "Fruit stall",
+          "base": 124066
+        },
+        {
+          "counter": "silkStallsThieved",
+          "name": "Silk stall",
+          "base": 68926
+        },
+        {
+          "counter": "teaStallsThieved",
+          "name": "Tea stall",
+          "base": 68926
+        },
+        {
+          "counter": "craftingStallsThieved",
+          "name": "Crafting stall",
+          "base": 47718
+        },
+        {
+          "counter": "foodStallsThieved",
+          "name": "Food stall",
+          "base": 47718
+        },
+        {
+          "counter": "marketStallsThieved",
+          "name": "Market stall",
+          "base": 36490
+        },
+        {
+          "counter": "cannonballStallsThieved",
+          "name": "Cannonball stall",
+          "base": 36490
+        },
+        {
+          "counter": "seedStallsThieved",
+          "name": "Seed stall",
+          "base": 36490
+        },
+        {
+          "counter": "furStallsThieved",
+          "name": "Fur stall",
+          "base": 36490
+        },
+        {
+          "counter": "fishStallsThieved",
+          "name": "Fish stall",
+          "base": 36490
+        },
+        {
+          "counter": "crossbowStallsThieved",
+          "name": "Crossbow stall",
+          "base": 36490
+        },
+        {
+          "counter": "silverStallsThieved",
+          "name": "Silver stall",
+          "base": 36490
+        },
+        {
+          "counter": "magicStallsThieved",
+          "name": "Magic stall",
+          "base": 36490
+        },
+        {
+          "counter": "scimitarStallsThieved",
+          "name": "Scimitar stall",
+          "base": 36490
+        },
+        {
+          "counter": "spiceStallsThieved",
+          "name": "Spice stall",
+          "base": 36490
+        },
+        {
+          "counter": "gemStallsThieved",
+          "name": "Gem stall",
+          "base": 36490
+        },
+        {
+          "counter": "oreStallsThieved",
+          "name": "Ore stall",
+          "base": 36490
+        }
+      ]
+    },
+    "Giant Squirrel": {
+      "skill": "agility",
+      "activity": "Agility",
+      "unit": "laps",
+      "levelScaled": true,
+      "_excluded": "agilityObstacles counts obstacles, not laps, and the roll is per completed lap. rooftopAgilityLaps and normalAgilityLaps are chat-driven aggregates over the same laps as the rows below. The Colossal Wyrm Remains courses print Unknown on the wiki and the section carries an obsolete banner naming that very course, so both are left out rather than guessed. The Hallowed Sepulchre rolls once a run at the highest floor cleared, but sepulchreFloor<n>Cleared bumps once a floor, so a three-floor run counts three: not a roll unit.",
+      "sources": [
+        {
+          "counter": "draynorLaps",
+          "name": "Draynor Rooftop",
+          "base": 33005
+        },
+        {
+          "counter": "varrockLaps",
+          "name": "Varrock Rooftop",
+          "base": 24410
+        },
+        {
+          "counter": "canifisLaps",
+          "name": "Canifis Rooftop",
+          "base": 36842
+        },
+        {
+          "counter": "faladorLaps",
+          "name": "Falador Rooftop",
+          "base": 26806
+        },
+        {
+          "counter": "seersLaps",
+          "name": "Seers' Village Rooftop",
+          "base": 35205
+        },
+        {
+          "counter": "pollnivneachLaps",
+          "name": "Pollnivneach Rooftop",
+          "base": 33422
+        },
+        {
+          "counter": "rellekkaLaps",
+          "name": "Rellekka Rooftop",
+          "base": 31063
+        },
+        {
+          "counter": "ardougneLaps",
+          "name": "Ardougne Rooftop",
+          "base": 34440
+        },
+        {
+          "counter": "apeAtollLaps",
+          "name": "Ape Atoll",
+          "base": 37720
+        },
+        {
+          "counter": "barbarianOutpostLaps",
+          "name": "Barbarian Outpost",
+          "base": 44376
+        },
+        {
+          "counter": "wildernessLaps",
+          "name": "Wilderness course",
+          "base": 34666
+        },
+        {
+          "counter": "prifddinasLaps",
+          "name": "Prifddinas",
+          "base": 25146
+        },
+        {
+          "counter": "shayzienBasicLaps",
+          "name": "Shayzien (basic)",
+          "base": 31804
+        },
+        {
+          "counter": "shayzienAdvancedLaps",
+          "name": "Shayzien (advanced)",
+          "base": 29738
+        },
+        {
+          "counter": "werewolfLaps",
+          "name": "Werewolf course",
+          "base": 32597
+        }
+      ]
+    },
+    "Baby chinchompa": {
+      "skill": "hunter",
+      "activity": "Hunter",
+      "unit": "chinchompas",
+      "levelScaled": true,
+      "_excluded": "Nothing: the three species are the whole table.",
+      "sources": [
+        {
+          "counter": "greyChinchompasTrapped",
+          "name": "Grey chinchompas",
+          "base": 131395
+        },
+        {
+          "counter": "redChinchompasTrapped",
+          "name": "Red chinchompas",
+          "base": 98373
+        },
+        {
+          "counter": "blackChinchompasTrapped",
+          "name": "Black chinchompas",
+          "base": 82758
+        }
+      ]
+    },
+    "Herbi": {
+      "skill": "hunter",
+      "activity": "Herbiboar",
+      "unit": "harvests",
+      "levelScaled": false,
+      "_excluded": "Flat 1/6,500 on harvesting the herbs. The wiki states no Hunter-level term anywhere, so none is applied.",
+      "sources": [
+        {
+          "counter": "herbiboarsHarvested",
+          "name": "Herbiboar",
+          "base": 6500
+        }
+      ]
+    },
+    "Rift guardian": {
+      "skill": "runecraft",
+      "activity": "Runecraft",
+      "unit": "essence",
+      "levelScaled": true,
+      "_excluded": "Guardians of the Rift is already out of essenceCrafted: its altars take guardian essence alone and that essence is not in the set the counter watches. Blood and soul runes are one to an essence, so they are netted out of the total and priced on their own altars. Ourania cannot be told apart from an ordinary altar by anything the counter carries, so its essence sits in the remainder at 1,795,758 rather than its own 1,487,213.",
+      "sources": [
+        {
+          "counter": "essenceCrafted",
+          "name": "Every other altar",
+          "base": 1795758,
+          "minus": [
+            "bloodRunecrafted",
+            "soulRunecrafted"
+          ]
+        },
+        {
+          "counter": "bloodRunecrafted",
+          "name": "Blood altar",
+          "base": 804984
+        },
+        {
+          "counter": "soulRunecrafted",
+          "name": "Soul altar",
+          "base": 782999
+        }
+      ]
+    },
+    "Tangleroot": {
+      "skill": "farming",
+      "activity": "Farming",
+      "unit": "patches",
+      "levelScaled": true,
+      "_excluded": "hesporiPlanted is left out on purpose: the Hespori kill count below is the same event and is the older, fuller record of it. Tithe Farm and the corals have a printed rate but no roll unit this journal can name. <produce>Harvested counts items pulled out of a patch, not patches, and farmingActions is the untyped floor: neither belongs in this denominator.",
+      "_approximation": "The roll is per check-health, or per final harvest where a patch has no check-health. <crop>Planted counts the patch going in, which is one to one with that roll for a patch that runs its course; a patch that died, or is still growing, is counted here and rolled nothing.",
+      "sources": [
+        {
+          "counter": "potatoPlanted",
+          "name": "Potato",
+          "base": 281040
+        },
+        {
+          "counter": "onionPlanted",
+          "name": "Onion",
+          "base": 281040
+        },
+        {
+          "counter": "cabbagePlanted",
+          "name": "Cabbage",
+          "base": 281040
+        },
+        {
+          "counter": "tomatoPlanted",
+          "name": "Tomato",
+          "base": 281040
+        },
+        {
+          "counter": "sweetcornPlanted",
+          "name": "Sweetcorn",
+          "base": 224832
+        },
+        {
+          "counter": "strawberryPlanted",
+          "name": "Strawberry",
+          "base": 187360
+        },
+        {
+          "counter": "watermelonPlanted",
+          "name": "Watermelon",
+          "base": 160594
+        },
+        {
+          "counter": "snapeGrassPlanted",
+          "name": "Snape grass",
+          "base": 173977
+        },
+        {
+          "counter": "potatoCactusPlanted",
+          "name": "Potato cactus",
+          "base": 160594
+        },
+        {
+          "counter": "marigoldPlanted",
+          "name": "Marigolds",
+          "base": 281040
+        },
+        {
+          "counter": "rosemaryPlanted",
+          "name": "Rosemary",
+          "base": 281040
+        },
+        {
+          "counter": "nasturtiumPlanted",
+          "name": "Nasturtiums",
+          "base": 281040
+        },
+        {
+          "counter": "woadPlanted",
+          "name": "Woad leaf",
+          "base": 281040
+        },
+        {
+          "counter": "limpwurtPlanted",
+          "name": "Limpwurt root",
+          "base": 281040
+        },
+        {
+          "counter": "whiteLilyPlanted",
+          "name": "White lily",
+          "base": 281040
+        },
+        {
+          "counter": "barleyPlanted",
+          "name": "Barley",
+          "base": 112416
+        },
+        {
+          "counter": "hammerstonePlanted",
+          "name": "Hammerstone",
+          "base": 112416
+        },
+        {
+          "counter": "asgarnianPlanted",
+          "name": "Asgarnian",
+          "base": 89933
+        },
+        {
+          "counter": "jutePlanted",
+          "name": "Jute",
+          "base": 89933
+        },
+        {
+          "counter": "yanillianPlanted",
+          "name": "Yanillian",
+          "base": 74944
+        },
+        {
+          "counter": "krandorianPlanted",
+          "name": "Krandorian",
+          "base": 64238
+        },
+        {
+          "counter": "wildbloodPlanted",
+          "name": "Wildblood",
+          "base": 56208
+        },
+        {
+          "counter": "guamPlanted",
+          "name": "Guam",
+          "base": 98364
+        },
+        {
+          "counter": "marrentillPlanted",
+          "name": "Marrentill",
+          "base": 98364
+        },
+        {
+          "counter": "tarrominPlanted",
+          "name": "Tarromin",
+          "base": 98364
+        },
+        {
+          "counter": "harralanderPlanted",
+          "name": "Harralander",
+          "base": 98364
+        },
+        {
+          "counter": "ranarrPlanted",
+          "name": "Ranarr",
+          "base": 98364
+        },
+        {
+          "counter": "toadflaxPlanted",
+          "name": "Toadflax",
+          "base": 98364
+        },
+        {
+          "counter": "iritPlanted",
+          "name": "Irit",
+          "base": 98364
+        },
+        {
+          "counter": "avantoePlanted",
+          "name": "Avantoe",
+          "base": 98364
+        },
+        {
+          "counter": "kwuarmPlanted",
+          "name": "Kwuarm",
+          "base": 98364
+        },
+        {
+          "counter": "huascaPlanted",
+          "name": "Huasca",
+          "base": 98364
+        },
+        {
+          "counter": "snapdragonPlanted",
+          "name": "Snapdragon",
+          "base": 98364
+        },
+        {
+          "counter": "cadantinePlanted",
+          "name": "Cadantine",
+          "base": 98364
+        },
+        {
+          "counter": "lantadymePlanted",
+          "name": "Lantadyme",
+          "base": 98364
+        },
+        {
+          "counter": "dwarfWeedPlanted",
+          "name": "Dwarf weed",
+          "base": 98364
+        },
+        {
+          "counter": "torstolPlanted",
+          "name": "Torstol",
+          "base": 98364
+        },
+        {
+          "counter": "redberryPlanted",
+          "name": "Redberries",
+          "base": 44966
+        },
+        {
+          "counter": "cadavaPlanted",
+          "name": "Cadava berries",
+          "base": 37472
+        },
+        {
+          "counter": "dwellberryPlanted",
+          "name": "Dwellberries",
+          "base": 32119
+        },
+        {
+          "counter": "jangerberryPlanted",
+          "name": "Jangerberries",
+          "base": 28104
+        },
+        {
+          "counter": "whiteberryPlanted",
+          "name": "White berries",
+          "base": 28104
+        },
+        {
+          "counter": "poisonIvyPlanted",
+          "name": "Poison ivy",
+          "base": 28104
+        },
+        {
+          "counter": "oakPlanted",
+          "name": "Oak",
+          "base": 22483
+        },
+        {
+          "counter": "willowPlanted",
+          "name": "Willow",
+          "base": 16059
+        },
+        {
+          "counter": "maplePlanted",
+          "name": "Maple",
+          "base": 14052
+        },
+        {
+          "counter": "yewPlanted",
+          "name": "Yew",
+          "base": 11242
+        },
+        {
+          "counter": "magicPlanted",
+          "name": "Magic",
+          "base": 9368
+        },
+        {
+          "counter": "teakPlanted",
+          "name": "Teak",
+          "base": 5000
+        },
+        {
+          "counter": "mahoganyPlanted",
+          "name": "Mahogany",
+          "base": 5000
+        },
+        {
+          "counter": "redwoodPlanted",
+          "name": "Redwood",
+          "base": 5000
+        },
+        {
+          "counter": "camphorPlanted",
+          "name": "Camphor",
+          "base": 5000
+        },
+        {
+          "counter": "ironwoodPlanted",
+          "name": "Ironwood",
+          "base": 5000
+        },
+        {
+          "counter": "rosewoodPlanted",
+          "name": "Rosewood",
+          "base": 5000
+        },
+        {
+          "counter": "spiritPlanted",
+          "name": "Spirit tree",
+          "base": 5000
+        },
+        {
+          "counter": "calquatPlanted",
+          "name": "Calquat tree",
+          "base": 6000
+        },
+        {
+          "counter": "celastrusPlanted",
+          "name": "Celastrus tree",
+          "base": 9000
+        },
+        {
+          "counter": "crystalPlanted",
+          "name": "Crystal tree",
+          "base": 9000
+        },
+        {
+          "counter": "applePlanted",
+          "name": "Apple",
+          "base": 9000
+        },
+        {
+          "counter": "bananaPlanted",
+          "name": "Banana",
+          "base": 9000
+        },
+        {
+          "counter": "orangePlanted",
+          "name": "Orange",
+          "base": 9000
+        },
+        {
+          "counter": "curryPlanted",
+          "name": "Curry",
+          "base": 9000
+        },
+        {
+          "counter": "pineapplePlanted",
+          "name": "Pineapple",
+          "base": 9000
+        },
+        {
+          "counter": "papayaPlanted",
+          "name": "Papaya",
+          "base": 9000
+        },
+        {
+          "counter": "palmPlanted",
+          "name": "Palm",
+          "base": 9000
+        },
+        {
+          "counter": "dragonfruitPlanted",
+          "name": "Dragonfruit",
+          "base": 9000
+        },
+        {
+          "counter": "cactusPlanted",
+          "name": "Cactus",
+          "base": 7000
+        },
+        {
+          "counter": "belladonnaPlanted",
+          "name": "Nightshade",
+          "base": 8000
+        },
+        {
+          "counter": "bittercapMushroomPlanted",
+          "name": "Mushrooms",
+          "base": 7500
+        },
+        {
+          "counter": "seaweedPlanted",
+          "name": "Giant seaweed",
+          "base": 7500
+        },
+        {
+          "counter": "grapePlanted",
+          "name": "Grapes",
+          "base": 385426
+        }
+      ],
+      "kills": [
+        {
+          "kc": "Hespori",
+          "name": "Hespori",
+          "base": 7000
+        }
+      ]
+    }
+  }
+}

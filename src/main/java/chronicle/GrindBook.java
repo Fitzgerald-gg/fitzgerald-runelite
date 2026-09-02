@@ -211,7 +211,17 @@ class GrindBook
 	// pinned at certainty and the figure is a corrupt count, not a grind.
 	private static final long MAX_KC = 100_000_000L;
 
-	/** One place a pet drops from, and how far the journal has gone there. */
+	// A skilling roll stops improving here; the wiki's level term is flat past 99.
+	private static final int LEVEL_CAP = 99;
+	// Below this a denominator is not a grind any more, and a level term that ate
+	// the whole base would print certainty off a handful of actions.
+	private static final long MIN_RATE = 2;
+
+	/**
+	 * One place a pet rolls from, and how far the journal has gone there. For a boss
+	 * that is a kill count; for a skilling pet it is the activity's own unit, and
+	 * {@code rate} is the denominator after the level term has been taken off.
+	 */
 	static final class PetSource
 	{
 		final String boss;
@@ -238,25 +248,46 @@ class GrindBook
 		final long kc;                    // kills across the sources that contributed
 		final double percentileDry;
 		final List<PetSource> sources;    // heaviest first
+		// A skilling pet answers to a craft, not a monster: the activity it was
+		// worked at, the noun its attempts are counted in, and the level the odds
+		// were read at. All null/0 on a boss chase, which reads as it always did.
+		final String activity;
+		final String unit;
+		final long level;
 
 		PetChase(String pet, long kc, double percentileDry, List<PetSource> sources)
+		{
+			this(pet, kc, percentileDry, sources, null, null, 0);
+		}
+
+		PetChase(String pet, long kc, double percentileDry, List<PetSource> sources,
+			String activity, String unit, long level)
 		{
 			this.pet = pet;
 			this.kc = kc;
 			this.percentileDry = percentileDry;
 			this.sources = sources;
+			this.activity = activity;
+			this.unit = unit;
+			this.level = level;
 		}
 	}
 
 	/**
 	 * The chase behind each pet a collection log page lists, keyed by lower-cased pet
-	 * name. Only pets the log has not lit, that the rate book prices, and that have a
-	 * kill count somewhere. Everything else is absent from the map: the page renders
-	 * those slots exactly as it did before. Off the client thread or on; reads nothing
-	 * but its arguments.
+	 * name. Only pets the log has not lit, that one of the two rate books prices, and
+	 * that the journal has counted something for. Everything else is absent from the
+	 * map: the page renders those slots exactly as it did before. Off the client
+	 * thread or on; reads nothing but its arguments.
+	 *
+	 * <p>A skilling pet is weighed the same way, off {@code counters} rather than kill
+	 * counts, and off {@code skills} for the level its odds are read at. Where a pet
+	 * is in both books the skilling book wins outright: Tangleroot is the one that is,
+	 * and the boss table's Hespori denominator is this same formula frozen at Farming
+	 * 65, so admitting both would print two numbers for one event.
 	 */
 	Map<String, PetChase> petChases(JsonObject clog, List<LocalStore.SourceRow> dropSources,
-		Collection<String> pets)
+		Map<String, Long> counters, Map<String, long[]> skills, Collection<String> pets)
 	{
 		Map<String, PetChase> out = new LinkedHashMap<>();
 		if (pets == null || pets.isEmpty())
@@ -264,7 +295,8 @@ class GrindBook
 			return out;
 		}
 		Map<String, Map<String, Integer>> rates = book();
-		if (rates.isEmpty())
+		Map<String, SkillPet> skilling = skillBook();
+		if (rates.isEmpty() && skilling.isEmpty())
 		{
 			return out;
 		}
@@ -300,8 +332,22 @@ class GrindBook
 				continue;
 			}
 			String key = pet.toLowerCase(Locale.ROOT);
+			if (obtained.contains(key))
+			{
+				continue;
+			}
+			SkillPet spec = skilling.get(key);
+			if (spec != null)
+			{
+				PetChase chase = skillingChase(pet, spec, counters, skills, kcByNorm);
+				if (chase != null)
+				{
+					out.put(key, chase);
+				}
+				continue;
+			}
 			List<PetSource> src = bySource.get(key);
-			if (src == null || obtained.contains(key))
+			if (src == null)
 			{
 				continue;
 			}
@@ -320,6 +366,286 @@ class GrindBook
 			out.put(key, new PetChase(pet, kc, Math.round(pct * 10.0) / 10.0, sorted));
 		}
 		return out;
+	}
+
+	// ------------------------------------------------------------------
+	// Skilling pets
+	// ------------------------------------------------------------------
+
+	/**
+	 * One way a skilling pet is rolled for, and the counter that counts it. Either
+	 * {@code counter} names a key outright, or {@code suffix} takes a whole family of
+	 * them ({@code manPickpockets}, {@code guardPickpockets}) less the ones
+	 * {@code notSuffix} holds back and the ones this pet prices by name. {@code minus}
+	 * takes another counter off the first, which is how the altars that have a rate of
+	 * their own come out of the essence total.
+	 */
+	private static final class SkillSource
+	{
+		final String counter;
+		final String suffix;
+		final String notSuffix;
+		final List<String> minus;
+		final String name;
+		final long base;
+
+		SkillSource(String counter, String suffix, String notSuffix, List<String> minus,
+			String name, long base)
+		{
+			this.counter = counter;
+			this.suffix = suffix;
+			this.notSuffix = notSuffix;
+			this.minus = minus;
+			this.name = name;
+			this.base = base;
+		}
+	}
+
+	/** A source counted in kills rather than actions: only Hespori, for Tangleroot. */
+	private static final class SkillKill
+	{
+		final String kc;
+		final String name;
+		final long base;
+
+		SkillKill(String kc, String name, long base)
+		{
+			this.kc = kc;
+			this.name = name;
+			this.base = base;
+		}
+	}
+
+	/** A skilling pet: the craft it answers to, and every way it is rolled for. */
+	private static final class SkillPet
+	{
+		final String skill;          // skillSheet key, lower-cased Skill name
+		final String activity;       // what the row calls the grind
+		final String unit;           // the noun its attempts are counted in
+		final boolean levelScaled;
+		final List<SkillSource> sources;
+		final List<SkillKill> kills;
+		final Set<String> named;     // counters this pet prices by name
+
+		SkillPet(String skill, String activity, String unit, boolean levelScaled,
+			List<SkillSource> sources, List<SkillKill> kills)
+		{
+			this.skill = skill;
+			this.activity = activity;
+			this.unit = unit;
+			this.levelScaled = levelScaled;
+			this.sources = sources;
+			this.kills = kills;
+			this.named = new HashSet<>();
+			for (SkillSource s : sources)
+			{
+				if (s.counter != null)
+				{
+					this.named.add(s.counter);
+				}
+			}
+		}
+	}
+
+	// lower-cased pet name -> its book entry, loaded on first use.
+	private volatile Map<String, SkillPet> skillPets;
+
+	private Map<String, SkillPet> skillBook()
+	{
+		Map<String, SkillPet> loaded = skillPets;
+		if (loaded != null)
+		{
+			return loaded;
+		}
+		Map<String, SkillPet> out = new HashMap<>();
+		try (InputStream in = GrindBook.class.getResourceAsStream(
+			"/chronicle/osrs_skilling_pet_rates.json"))
+		{
+			if (in != null)
+			{
+				JsonObject root = gson.fromJson(
+					new InputStreamReader(in, StandardCharsets.UTF_8), JsonObject.class);
+				JsonObject pets = root != null && root.has("pets")
+					&& root.get("pets").isJsonObject()
+					? root.getAsJsonObject("pets") : new JsonObject();
+				for (Map.Entry<String, JsonElement> e : pets.entrySet())
+				{
+					if (!e.getValue().isJsonObject())
+					{
+						continue;
+					}
+					SkillPet pet = readSkillPet(e.getValue().getAsJsonObject());
+					if (pet != null)
+					{
+						out.put(e.getKey().toLowerCase(Locale.ROOT), pet);
+					}
+				}
+			}
+		}
+		catch (Exception e)
+		{
+			log.debug("skilling pet rate book load failed", e);
+		}
+		skillPets = out;
+		return out;
+	}
+
+	private static SkillPet readSkillPet(JsonObject o)
+	{
+		List<SkillSource> sources = new ArrayList<>();
+		if (o.has("sources") && o.get("sources").isJsonArray())
+		{
+			for (JsonElement el : o.getAsJsonArray("sources"))
+			{
+				if (!el.isJsonObject())
+				{
+					continue;
+				}
+				JsonObject s = el.getAsJsonObject();
+				long base = safeLong(s.get("base"));
+				if (base <= 0)
+				{
+					continue;   // an unpriced row is left unpriced, never guessed
+				}
+				List<String> minus = new ArrayList<>();
+				if (s.has("minus") && s.get("minus").isJsonArray())
+				{
+					for (JsonElement m : s.getAsJsonArray("minus"))
+					{
+						minus.add(m.getAsString());
+					}
+				}
+				sources.add(new SkillSource(str(s, "counter"), str(s, "suffix"),
+					str(s, "notSuffix"), minus, str(s, "name"), base));
+			}
+		}
+		if (sources.isEmpty())
+		{
+			return null;
+		}
+		List<SkillKill> kills = new ArrayList<>();
+		if (o.has("kills") && o.get("kills").isJsonArray())
+		{
+			for (JsonElement el : o.getAsJsonArray("kills"))
+			{
+				if (!el.isJsonObject())
+				{
+					continue;
+				}
+				JsonObject k = el.getAsJsonObject();
+				long base = safeLong(k.get("base"));
+				if (base > 0 && str(k, "kc") != null)
+				{
+					kills.add(new SkillKill(str(k, "kc"), str(k, "name"), base));
+				}
+			}
+		}
+		return new SkillPet(str(o, "skill"), str(o, "activity"), str(o, "unit"),
+			o.has("levelScaled") && o.get("levelScaled").getAsBoolean(), sources, kills);
+	}
+
+	private static String str(JsonObject o, String field)
+	{
+		return o.has(field) && o.get(field).isJsonPrimitive()
+			? o.get(field).getAsString() : null;
+	}
+
+	/**
+	 * A skilling pet weighed against its own activity. The odds are read at the level
+	 * the player holds NOW, which is not the level each past attempt was made at: an
+	 * account that levelled along the way rolled worse odds early than this prices
+	 * them, so the figure runs a little dry. The panel says so where it prints it.
+	 * Null when nothing has been counted, or when a level-scaled pet has no level to
+	 * read: a guessed level is a guessed percentage.
+	 */
+	private PetChase skillingChase(String pet, SkillPet spec, Map<String, Long> counters,
+		Map<String, long[]> skills, Map<String, Long> kcByNorm)
+	{
+		long level = 0;
+		if (spec.levelScaled)
+		{
+			long[] sheet = skills != null && spec.skill != null
+				? skills.get(spec.skill) : null;
+			level = sheet != null && sheet.length > 0 ? sheet[0] : 0;
+			if (level <= 0)
+			{
+				return null;
+			}
+			level = Math.min(level, LEVEL_CAP);
+		}
+		List<PetSource> sources = new ArrayList<>();
+		long total = 0;
+		double miss = 1.0;
+		for (SkillSource s : spec.sources)
+		{
+			long n = Math.min(count(s, spec, counters), MAX_KC);
+			long rate = spec.levelScaled ? s.base - 25L * level : s.base;
+			if (n <= 0 || rate < MIN_RATE)
+			{
+				continue;
+			}
+			sources.add(new PetSource(s.name, n, rate));
+			total += n;
+			miss *= Math.pow(1.0 - 1.0 / rate, n);
+		}
+		for (SkillKill k : spec.kills)
+		{
+			Long kc = kcByNorm.get(norm(k.kc));
+			long n = kc != null ? Math.min(kc, MAX_KC) : 0;
+			long rate = spec.levelScaled ? k.base - 25L * level : k.base;
+			if (n <= 0 || rate < MIN_RATE)
+			{
+				continue;
+			}
+			sources.add(new PetSource(k.name, n, rate));
+			total += n;
+			miss *= Math.pow(1.0 - 1.0 / rate, n);
+		}
+		if (sources.isEmpty())
+		{
+			return null;
+		}
+		sources.sort((a, b) -> Long.compare(b.kc, a.kc));
+		double pct = Math.max(0.0, Math.min(100.0, (1.0 - miss) * 100.0));
+		return new PetChase(pet, total, Math.round(pct * 10.0) / 10.0, sources,
+			spec.activity, spec.unit, level);
+	}
+
+	// What the journal has counted for one source. A family sweep takes every key in
+	// it except the ones held back by name: a failed pickpocket is spelled like a
+	// pickpocket and rolls nothing.
+	private static long count(SkillSource s, SkillPet spec, Map<String, Long> counters)
+	{
+		if (counters == null || counters.isEmpty())
+		{
+			return 0;
+		}
+		if (s.suffix != null)
+		{
+			long n = 0;
+			for (Map.Entry<String, Long> e : counters.entrySet())
+			{
+				String k = e.getKey();
+				if (!k.endsWith(s.suffix)
+					|| (s.notSuffix != null && k.endsWith(s.notSuffix))
+					|| spec.named.contains(k))
+				{
+					continue;
+				}
+				n += Math.max(0L, e.getValue() != null ? e.getValue() : 0L);
+			}
+			return n;
+		}
+		if (s.counter == null)
+		{
+			return 0;
+		}
+		long n = counters.getOrDefault(s.counter, 0L);
+		for (String m : s.minus)
+		{
+			n -= counters.getOrDefault(m, 0L);
+		}
+		return Math.max(0L, n);
 	}
 
 	// Every item the stored log holds, whole-log set and each page's own capture

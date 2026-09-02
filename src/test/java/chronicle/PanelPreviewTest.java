@@ -274,6 +274,45 @@ public class PanelPreviewTest
 		s.lifetime.put("clueScrollsCompleted", 213L);
 		s.lifetime.put("deaths", 148L);
 
+		// The skilling pets' own attempts, and the levels their odds are read at.
+		// Between them these light every skilling row the pets page can draw, and
+		// three counters that must stay out of it: agilityObstacles is obstacles
+		// where the roll is laps, the failed pickpockets never rolled, and
+		// bloodwood is rolled per swing rather than per log.
+		s.skills.put("woodcutting", new long[]{92, 6_517_253L});
+		s.skills.put("mining", new long[]{85, 3_258_594L});
+		s.skills.put("thieving", new long[]{78, 1_629_200L});
+		s.skills.put("agility", new long[]{88, 4_470_000L});
+		s.skills.put("hunter", new long[]{80, 1_986_068L});
+		s.skills.put("runecraft", new long[]{91, 5_902_831L});
+		s.skills.put("farming", new long[]{84, 3_000_000L});
+		s.lifetime.put("yewLogsChopped", 14_204L);
+		s.lifetime.put("willowLogsChopped", 5_185L);
+		s.lifetime.put("magicLogsChopped", 3_112L);
+		s.lifetime.put("bloodwoodLogsChopped", 4_002L);
+		s.lifetime.put("coalMined", 6_204L);
+		s.lifetime.put("ironOreMined", 2_113L);
+		s.lifetime.put("amethystMined", 1_204L);
+		s.lifetime.put("runiteOreMined", 402L);
+		s.lifetime.put("masterFarmerPickpockets", 9_204L);
+		s.lifetime.put("masterFarmerFailedPickpockets", 4_112L);
+		s.lifetime.put("elfPickpockets", 2_100L);
+		s.lifetime.put("gemStallsThieved", 3_012L);
+		s.lifetime.put("seersLaps", 2_204L);
+		s.lifetime.put("ardougneLaps", 1_113L);
+		s.lifetime.put("canifisLaps", 402L);
+		s.lifetime.put("agilityObstacles", 41_002L);
+		s.lifetime.put("blackChinchompasTrapped", 8_204L);
+		s.lifetime.put("redChinchompasTrapped", 1_112L);
+		s.lifetime.put("herbiboarsHarvested", 812L);
+		s.lifetime.put("bloodRunecrafted", 12_004L);
+		s.lifetime.put("soulRunecrafted", 2_100L);
+		s.lifetime.put("ranarrPlanted", 1_204L);
+		s.lifetime.put("guamPlanted", 402L);
+		s.lifetime.put("torstolPlanted", 120L);
+		s.lifetime.put("oakPlanted", 88L);
+		s.lifetime.put("yewPlanted", 44L);
+
 		s.session.put("damageDealt", 24_113);
 		s.session.put("tilesRan", 8_442);
 		s.session.put("consumedValue", 112_400);
@@ -350,6 +389,9 @@ public class PanelPreviewTest
 		kcs.addProperty("artio", 900);
 		kcs.addProperty("giant mole", 12_000);
 		kcs.addProperty("kraken", 3_000);
+		// Tangleroot's other half: the Hespori kill count, which the skilling book
+		// prices off the same formula as the patches
+		kcs.addProperty("hespori", 61);
 		clog.add("kcs", kcs);
 		JsonObject skcs = new JsonObject();
 		skcs.addProperty("Abyssal demon", 4112);
@@ -551,6 +593,8 @@ public class PanelPreviewTest
 		ChronicleEventCapture.SlayerView slayer;
 		Map<String, Long> lifetime = new LinkedHashMap<>();
 		Map<String, Integer> session = new LinkedHashMap<>();
+		// standing levels, in the shape LocalStore keeps them: {level, xp}
+		Map<String, long[]> skills = new LinkedHashMap<>();
 		final java.util.List<chronicle.counters.ExperienceStatTracker.SkillGain> skillXp =
 			new java.util.ArrayList<>();
 		int sessionLoots;
@@ -731,7 +775,8 @@ public class PanelPreviewTest
 		@Override
 		java.util.Map<String, GrindBook.PetChase> petChases(java.util.Collection<String> pets)
 		{
-			return new GrindBook(new Gson()).petChases(clog, sources, pets);
+			return new GrindBook(new Gson()).petChases(clog, sources, lifetime,
+				skillSheet(), pets);
 		}
 
 		@Override
@@ -850,7 +895,7 @@ public class PanelPreviewTest
 		@Override
 		java.util.Map<String, long[]> skillSheet()
 		{
-			return store != null ? store.skillSheet() : new java.util.LinkedHashMap<>();
+			return store != null ? store.skillSheet() : skills;
 		}
 
 		@Override
