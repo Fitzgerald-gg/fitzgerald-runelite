@@ -342,6 +342,14 @@ public class PanelPreviewTest
 		JsonObject kcs = new JsonObject();
 		kcs.addProperty("abyssal sire", 214);
 		kcs.addProperty("zulrah", 502);
+		// the pets page reads these: Smolcano out of one source, Callisto cub out of
+		// two, Baby mole past the drought line, and a Kraken kc under a pet the log
+		// already holds, which must stay silent
+		kcs.addProperty("zalcano", 2_023);
+		kcs.addProperty("callisto", 1_500);
+		kcs.addProperty("artio", 900);
+		kcs.addProperty("giant mole", 12_000);
+		kcs.addProperty("kraken", 3_000);
 		clog.add("kcs", kcs);
 		JsonObject skcs = new JsonObject();
 		skcs.addProperty("Abyssal demon", 4112);
@@ -718,6 +726,12 @@ public class PanelPreviewTest
 			java.util.function.Consumer<java.util.List<ChronicleApiClient.GrindRow>> onDone)
 		{
 			onDone.accept(new ArrayList<>(grinds));
+		}
+
+		@Override
+		java.util.Map<String, GrindBook.PetChase> petChases(java.util.Collection<String> pets)
+		{
+			return new GrindBook(new Gson()).petChases(clog, sources, pets);
 		}
 
 		@Override

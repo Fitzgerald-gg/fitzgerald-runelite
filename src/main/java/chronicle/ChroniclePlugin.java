@@ -1057,6 +1057,19 @@ public class ChroniclePlugin extends Plugin
 		executor.submit(() -> onDone.accept(grindBook.grinds(clog, sources)));
 	}
 
+	// The chase behind each unearned pet a log page lists, keyed by lower-cased name.
+	// Cheap enough for the panel to ask on the spot: the rate book is parsed once and
+	// held, and the reads are the two the log page already makes.
+	java.util.Map<String, GrindBook.PetChase> petChases(java.util.Collection<String> pets)
+	{
+		final String rsn = localName;
+		if (rsn == null || !localStore.isReadyFor(rsn))
+		{
+			return java.util.Collections.emptyMap();
+		}
+		return grindBook.petChases(localStore.clogSnapshot(), localStore.dropSources(), pets);
+	}
+
 	// True once this session produced an on-task slayer kill.
 	boolean slayerSeenThisSession()
 	{

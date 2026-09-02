@@ -1678,8 +1678,15 @@ class ChroniclePanel extends PluginPanel
 				// Pets pages get a dated line under each slot. Source and count
 				// only appear on rows an older record supplied; the plugin's own
 				// pet emit carries the name alone.
-				Map<String, LocalStore.PetRow> known = page.toLowerCase(Locale.ROOT).contains("pet")
+				boolean petPage = page.toLowerCase(Locale.ROOT).contains("pet");
+				Map<String, LocalStore.PetRow> known = petPage
 					? petsByName() : java.util.Collections.emptyMap();
+				// And a pet still out there gets the same line read the other way:
+				// what has been killed for it, and how much of the field holds it
+				// by that point. Only where the rate book prices the pet and the
+				// journal has a kill count; the rest of the page is untouched.
+				Map<String, GrindBook.PetChase> chases = petPage
+					? plugin.petChases(slots) : java.util.Collections.emptyMap();
 				for (int i = 0; i < slots.size(); i++)
 				{
 					LocalStore.PetRow pet = known.get(slots.get(i).toLowerCase(Locale.ROOT));
@@ -1711,12 +1718,83 @@ class ChroniclePanel extends PluginPanel
 								? TASK_DAY.format(Instant.ofEpochMilli(pet.ts)) : ""));
 						}
 					}
+					else if (!lit[i])
+					{
+						GrindBook.PetChase chase =
+							chases.get(slots.get(i).toLowerCase(Locale.ROOT));
+						if (chase != null)
+						{
+							JPanel r = ghostRow(chaseSources(chase), holdShare(chase),
+								chase.percentileDry >= 90 ? ACCENT_RED : null);
+							drill.add(tipped(r, chaseTip(chase)));
+						}
+					}
 				}
 				p.add(drill);
 				p.add(vgap(3));
 			}
 		}
 		return p;
+	}
+
+	// Where the kills went, in the same breath an owned pet uses for its own
+	// provenance. Heaviest source first, so a clipped column keeps the one that
+	// matters.
+	private static String chaseSources(GrindBook.PetChase chase)
+	{
+		StringBuilder sb = new StringBuilder();
+		for (GrindBook.PetSource s : chase.sources)
+		{
+			if (sb.length() > 0)
+			{
+				sb.append(" · ");
+			}
+			sb.append(s.boss).append(", kc ").append(fmt(s.kc));
+		}
+		return sb.toString();
+	}
+
+	// The whole sentence, kept for the hover: the line itself has 200px, and two
+	// sources with long names run past it.
+	private static String chaseTip(GrindBook.PetChase chase)
+	{
+		double pct = chase.percentileDry;
+		String share = pct < 1 ? "Under 1%" : pct > 99 ? "Over 99%" : Math.round(pct) + "%";
+		return share + " of players have " + chase.pet + " by this point. "
+			+ chaseSources(chase);
+	}
+
+	// One tooltip over a row and everything in it: a panel's own tip never fires,
+	// the label under the pointer swallows it.
+	private static JPanel tipped(JPanel r, String tip)
+	{
+		r.setToolTipText(tip);
+		for (Component c : r.getComponents())
+		{
+			if (c instanceof javax.swing.JComponent)
+			{
+				((javax.swing.JComponent) c).setToolTipText(tip);
+			}
+		}
+		return r;
+	}
+
+	// The share of players who hold the pet by this point. Clipped at both ends
+	// rather than rounded to them: "0% have" under a kill count that exists reads
+	// as a fault, and nothing short of certainty should print as certainty. Terse
+	// because the column is 200px and the source list has first call on it.
+	private static String holdShare(GrindBook.PetChase chase)
+	{
+		double pct = chase.percentileDry;
+		if (pct < 1)
+		{
+			return "<1% have";
+		}
+		if (pct > 99)
+		{
+			return ">99% have";
+		}
+		return Math.round(pct) + "% have";
 	}
 
 	// True when a pet's source names a skill, not a monster.
@@ -2310,7 +2388,14 @@ class ChroniclePanel extends PluginPanel
 	// A quiet row for a remainder or an aside.
 	private static JPanel ghostRow(String left, String right)
 	{
-		JPanel r = row(left, right, null);
+		return ghostRow(left, right, null);
+	}
+
+	// The same aside, with a value allowed its own colour: the line still reads as
+	// an aside, but a drought can flare.
+	private static JPanel ghostRow(String left, String right, Color rightColor)
+	{
+		JPanel r = row(left, right, rightColor);
 		((JLabel) ((BorderLayout) r.getLayout()).getLayoutComponent(BorderLayout.CENTER))
 			.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker().darker());
 		return r;
