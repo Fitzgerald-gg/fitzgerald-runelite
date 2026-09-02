@@ -100,6 +100,17 @@ public class PanelPreviewTest
 		void run() throws Exception;
 	}
 
+	// SkillGain's constructor is package-private to counters, so build one reflectively.
+	private static chronicle.counters.ExperienceStatTracker.SkillGain gain(
+		net.runelite.api.Skill skill, long xp, long perHour) throws Exception
+	{
+		java.lang.reflect.Constructor<chronicle.counters.ExperienceStatTracker.SkillGain> c =
+			chronicle.counters.ExperienceStatTracker.SkillGain.class.getDeclaredConstructor(
+				net.runelite.api.Skill.class, long.class, long.class);
+		c.setAccessible(true);
+		return c.newInstance(skill, xp, perHour);
+	}
+
 	private void renderSet(File out, String prefix, StubPlugin stub) throws Exception
 	{
 		final ChroniclePanel[] holder = new ChroniclePanel[1];
@@ -107,6 +118,11 @@ public class PanelPreviewTest
 		ChroniclePanel panel = holder[0];
 
 		shoot(panel, out, prefix + "-home", "HOME");
+		// the xp fold open: the rows only exist in this state, so the closed shot
+		// above cannot tell anyone whether they still render
+		set(panel, "xpBySkill", Boolean.TRUE);
+		shoot(panel, out, prefix + "-home-xp", "HOME");
+		set(panel, "xpBySkill", Boolean.FALSE);
 		shoot(panel, out, prefix + "-drops", "DROPS");
 		// the journey lands via invokeLater after the first paint, so shoot twice
 		// and let the settled view overwrite the file
@@ -216,7 +232,7 @@ public class PanelPreviewTest
 	// Fixture data: long names and dense lists, the states that clip
 	// ------------------------------------------------------------------
 
-	private StubPlugin fixturePlugin()
+	private StubPlugin fixturePlugin() throws Exception
 	{
 		StubPlugin s = new StubPlugin(mockItems());
 		s.rsn = "Fixture";
@@ -263,6 +279,13 @@ public class PanelPreviewTest
 		s.session.put("consumedValue", 112_400);
 		s.session.put("sharksEaten", 42);
 		s.session.put("teleportsTotal", 12);
+		// the fold header is a pinned row, so it needs the total to exist at all;
+		// this is the sum of the four skills below it
+		s.session.put("totalXpGained", 533_100);
+		s.skillXp.add(gain(net.runelite.api.Skill.RUNECRAFT, 400_000, 250_000));
+		s.skillXp.add(gain(net.runelite.api.Skill.SLAYER, 96_400, 60_250));
+		s.skillXp.add(gain(net.runelite.api.Skill.HITPOINTS, 32_100, 20_060));
+		s.skillXp.add(gain(net.runelite.api.Skill.FLETCHING, 4_600, 2_875));
 		// past the dozen the Home card used to stop at, so the render proves it does not
 		s.session.put("headlessArrowsFletched", 26_955);
 		s.session.put("distanceRan", 5_739);
@@ -520,6 +543,8 @@ public class PanelPreviewTest
 		ChronicleEventCapture.SlayerView slayer;
 		Map<String, Long> lifetime = new LinkedHashMap<>();
 		Map<String, Integer> session = new LinkedHashMap<>();
+		final java.util.List<chronicle.counters.ExperienceStatTracker.SkillGain> skillXp =
+			new java.util.ArrayList<>();
 		int sessionLoots;
 		long sessionLootValue;
 		long[] sessionUntaken = {0, 0};
@@ -573,6 +598,12 @@ public class PanelPreviewTest
 		Map<String, Integer> sessionDisplayCounters()
 		{
 			return session;
+		}
+
+		@Override
+		java.util.List<chronicle.counters.ExperienceStatTracker.SkillGain> sessionSkillXp()
+		{
+			return skillXp;
 		}
 
 		@Override

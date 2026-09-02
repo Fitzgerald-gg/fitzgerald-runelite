@@ -8,6 +8,7 @@
  */
 package chronicle;
 
+import chronicle.counters.ExperienceStatTracker;
 import chronicle.panel.StatRegistry;
 import com.google.gson.JsonObject;
 import java.awt.BorderLayout;
@@ -264,7 +265,16 @@ class ChroniclePanel extends PluginPanel
 				&& detailItem == null && detailSource == null && detailTask < 0
 				&& leftBehindSource == null && leftBehindItem == null)
 			{
-				rebuild();
+				// Same view, same content: the reader stays where they were reading.
+				keepScroll = true;
+				try
+				{
+					rebuild();
+				}
+				finally
+				{
+					keepScroll = false;
+				}
 			}
 		});
 		homeTicker.start();
@@ -378,8 +388,21 @@ class ChroniclePanel extends PluginPanel
 		SwingUtilities.invokeLater(this::rebuild);
 	}
 
+	// Set only for the home ticker's own rebuild. Every other rebuild is a move to
+	// somewhere new — a tab, a search, an opened detail — and lands at the top.
+	private boolean keepScroll;
+
 	private void rebuild()
 	{
+		// rebuild() throws the whole scroll pane away and hangs a fresh one, which
+		// starts at the top. Expanded, Home is longer than the panel.
+		int priorScroll = 0;
+		if (keepScroll && display.getComponentCount() > 0
+			&& display.getComponent(0) instanceof JScrollPane)
+		{
+			priorScroll = ((JScrollPane) display.getComponent(0))
+				.getVerticalScrollBar().getValue();
+		}
 		String stalled = plugin.journalWarning();
 		Color pulse = stalled == null ? ACCENT_SESSION : ColorScheme.PROGRESS_ERROR_COLOR;
 		heartbeat.setText(stalled == null ? "logging" : "not saving");
@@ -454,6 +477,14 @@ class ChroniclePanel extends PluginPanel
 		display.add(scroll, BorderLayout.CENTER);
 		display.revalidate();
 		display.repaint();
+		if (priorScroll > 0)
+		{
+			// A scrollbar with no extent yet clamps every value to zero, and the layout
+			// revalidate() asks for is queued behind us. Lay the new pane out now so the
+			// restore takes, rather than letting the reader see a frame at the top.
+			display.validate();
+			scroll.getVerticalScrollBar().setValue(priorScroll);
+		}
 	}
 
 	private void onSearchChanged()
@@ -513,6 +544,56 @@ class ChroniclePanel extends PluginPanel
 		};
 	}
 
+	// Whether Home's xp total is showing its per-skill breakdown. A panel field, not
+	// a local: the home ticker rebuilds every three seconds and would otherwise shut
+	// the fold on the reader between one glance and the next.
+	private boolean xpBySkill;
+
+	// The pinned xp total doubles as a fold head. Closed it is the row it has always
+	// been; open, the name takes the accent this panel's other fold heads use.
+	private void xpFoldHead(JPanel head)
+	{
+		JLabel name = (JLabel) ((BorderLayout) head.getLayout())
+			.getLayoutComponent(BorderLayout.CENTER);
+		if (xpBySkill)
+		{
+			name.setForeground(accent());
+		}
+		head.setToolTipText("Each skill's xp and xp per hour this session");
+		head.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+		head.addMouseListener(clicker(() ->
+		{
+			xpBySkill = !xpBySkill;
+			rebuild();
+		}));
+	}
+
+	// One row per skill that moved this session, biggest first: the xp it gained and
+	// what that comes to per hour. No icons; the strip above is a column of names and
+	// figures, and a sprite gutter on these rows alone would break it. Indented under
+	// the total they add up to.
+	private void addXpBySkill(JPanel strip)
+	{
+		List<ExperienceStatTracker.SkillGain> gains = plugin.sessionSkillXp();
+		if (gains.isEmpty())
+		{
+			// The split lives in the experience tracker alone, and that is built on
+			// the session's first event. Without this the fold opens onto nothing.
+			strip.add(ghostRow("no skill breakdown yet", ""));
+			return;
+		}
+		for (ExperienceStatTracker.SkillGain g : gains)
+		{
+			// The rate is left off until the tally has a minute behind it; a few
+			// seconds of play extrapolates to a figure nobody earned.
+			String right = "+" + gp(g.xp)
+				+ (g.perHour >= 0 ? " · " + gp(g.perHour) + "/h" : "");
+			JPanel r = row(g.skill.getName(), right, null);
+			r.setBorder(BorderFactory.createEmptyBorder(1, 10, 1, 2));
+			strip.add(r);
+		}
+	}
+
 	private JPanel buildHome()
 	{
 		JPanel p = column();
@@ -547,10 +628,20 @@ class ChroniclePanel extends PluginPanel
 			long v = sess.getOrDefault(key, 0);
 			if (v > 0)
 			{
-				strip.add(row(homeLabel(key),
+				boolean isXp = "totalXpGained".equals(key);
+				JPanel r = row(homeLabel(key),
 					StatRegistry.isGp(key) ? gp(v) + " gp"
-						: ("totalXpGained".equals(key) ? "+" + gp(v) : fmt(v)),
-					ACCENT_SESSION));
+						: (isXp ? "+" + gp(v) : fmt(v)),
+					ACCENT_SESSION);
+				if (isXp)
+				{
+					xpFoldHead(r);
+				}
+				strip.add(r);
+				if (isXp && xpBySkill)
+				{
+					addXpBySkill(strip);
+				}
 				shownKeys.add(key);
 				mounted++;
 			}
@@ -802,6 +893,7 @@ class ChroniclePanel extends PluginPanel
 		detailStack.clear();
 		drillShown.clear();
 		statsExpanded.clear();
+		xpBySkill = false;
 		gatherHistory();
 		rebuild();
 	}

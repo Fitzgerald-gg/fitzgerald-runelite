@@ -52,6 +52,10 @@ public class ChronicleCounters
 	// on the EDT from a settings toggle while the client thread is fanning out here.
 	private volatile StatTracker[] trackers;
 
+	// The experience tracker out of that array, held by name so the panel can read
+	// this session's xp split by skill off it. Volatile on the same grounds.
+	private volatile ExperienceStatTracker experience;
+
 	@Inject
 	ChronicleCounters(Client client, StatStore store, ItemManager itemManager,
 		SkillDeriver skillDeriver)
@@ -83,6 +87,7 @@ public class ChronicleCounters
 		StatTracker[] built = trackers;
 		if (built == null)
 		{
+			ExperienceStatTracker xp = new ExperienceStatTracker(store);
 			built = new StatTracker[]{
 				new GoldStatTracker(store, client),
 				new ItemStatTracker(store, client, itemManager, gatheredLedger),
@@ -90,11 +95,14 @@ public class ChronicleCounters
 				new SkillingStatTracker(store, client, skillDeriver),
 				new FoodStatTracker(store, client, itemManager, consumableSink),
 				new NPCStatTracker(store),
-				new ExperienceStatTracker(store),
+				xp,
 				new MagicStatTracker(store, client),
 				new RangedStatTracker(store, client),
 				new CombatStatTracker(store, client),
 			};
+			// Published before the array, so nothing can see the new trackers counting
+			// into an experience tracker that is still the last session's.
+			experience = xp;
 			trackers = built;
 		}
 		return built;
@@ -109,6 +117,19 @@ public class ChronicleCounters
 	public void reset()
 	{
 		trackers = null;
+		experience = null;
+	}
+
+	/**
+	 * This session's xp by skill, biggest first, with each skill's rate over the window
+	 * that tally has been running. Empty until the first event of a session builds the
+	 * trackers. Read from the EDT for the panel; never from the journal's own totals.
+	 */
+	public java.util.List<ExperienceStatTracker.SkillGain> sessionSkillXp()
+	{
+		// Read the field once: a reset() landing mid-call must not null it under us.
+		ExperienceStatTracker xp = experience;
+		return xp == null ? java.util.Collections.emptyList() : xp.sessionGains();
 	}
 
 	// Catch per tracker. One throwing on a line it did not expect otherwise robs every

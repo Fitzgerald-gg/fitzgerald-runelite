@@ -747,6 +747,16 @@ public class ChroniclePlugin extends Plugin
 		return sessionView();
 	}
 
+	// This session's xp split by skill, biggest first, each with its own rate. Held in
+	// memory by the experience tracker alone: it never enters the journal or the push.
+	java.util.List<chronicle.counters.ExperienceStatTracker.SkillGain> sessionSkillXp()
+	{
+		// Guarded for the panel's test doubles, which stand in for the plugin without
+		// Guice ever filling this field.
+		chronicle.counters.ChronicleCounters c = counters;
+		return c == null ? java.util.Collections.emptyList() : c.sessionSkillXp();
+	}
+
 	java.util.List<LocalStore.SourceRow> dropSources()
 	{
 		return localStore.dropSources();
