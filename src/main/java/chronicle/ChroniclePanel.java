@@ -17,6 +17,7 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.GridLayout;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -76,6 +77,13 @@ class ChroniclePanel extends PluginPanel
 	private static final Color ACCENT_RED = new Color(196, 84, 74);
 	// Rows mounted per list before a "Show more" button.
 	private static final int ROW_CAP = 30;
+	// Every inset between the sidebar's own width and a row's label, named where it
+	// is applied so a line that measures itself against them cannot drift out of
+	// step with the layout. See chaseRoom().
+	private static final int PANEL_INSET = 8;   // this panel's border, a side
+	private static final int CARD_INSET = 8;    // a card's border, a side
+	private static final int ROW_INSET = 2;     // a row's border, a side
+	private static final int ROW_GAP = 8;       // a row's gap, name to value
 
 	private enum View
 	{
@@ -128,7 +136,8 @@ class ChroniclePanel extends PluginPanel
 		this.plugin = plugin;
 
 		setLayout(new BorderLayout());
-		setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		setBorder(BorderFactory.createEmptyBorder(
+			PANEL_INSET, PANEL_INSET, PANEL_INSET, PANEL_INSET));
 		setBackground(ColorScheme.DARK_GRAY_COLOR);
 
 		JPanel north = new JPanel();
@@ -1734,7 +1743,10 @@ class ChroniclePanel extends PluginPanel
 							chases.get(slots.get(i).toLowerCase(Locale.ROOT));
 						if (chase != null)
 						{
-							JPanel r = ghostRow(chaseSources(chase), holdShare(chase),
+							// The share is drawn at its own width, so it is what
+							// the name has left to fit inside.
+							String share = holdShare(chase);
+							JPanel r = ghostRow(fitChase(chase, share), share,
 								chase.percentileDry >= 90 ? ACCENT_RED : null);
 							drill.add(tipped(r, chaseTip(chase)));
 						}
@@ -1748,8 +1760,8 @@ class ChroniclePanel extends PluginPanel
 	}
 
 	// Where the kills went, in the same breath an owned pet uses for its own
-	// provenance. Heaviest source first, so a clipped column keeps the one that
-	// matters.
+	// provenance. Heaviest source first, which is what lets fitChase() give up the
+	// tail of the line and keep the source that matters.
 	private static String chaseSources(GrindBook.PetChase chase)
 	{
 		// A skilling pet's sources are the twenty tree types behind one grind, not
@@ -1772,8 +1784,233 @@ class ChroniclePanel extends PluginPanel
 		return sb.toString();
 	}
 
-	// The whole sentence, kept for the hover: the line itself has 200px, and two
-	// sources with long names run past it.
+	// ── fitting the chase line ──────────────────────────────────────────
+	//
+	// A JLabel clips its own end, so a long source name walks the kill count off
+	// the row and leaves "kc" standing over nothing. A name read half way still
+	// names the boss; a figure read half way is worth less than no figure at all.
+	// So the letters give way here and every digit stays. The hover keeps the
+	// sentence whole either way.
+
+	// Three dots as one glyph. The game font draws it as three single pixels, and
+	// it is 7px wide where "..." is 9 — worth two more letters of a name. Checked
+	// against the .notdef box the font falls back to for a glyph it lacks, which
+	// is why an em dash appears nowhere in these strings.
+	private static final String ELLIPSIS = "…";
+	// Letters kept in front of the ellipsis before a name stops being a name. Only
+	// the last source standing is cut below this, and then only to save its count.
+	private static final int NAME_FLOOR = 3;
+	// Rows are fitted as they are built, before any of them has a graphics context
+	// of its own, so the measure comes off a label that is never shown.
+	private static final JLabel MEASURE = new JLabel();
+
+	static FontMetrics rowMetrics()
+	{
+		return MEASURE.getFontMetrics(FontManager.getRunescapeFont());
+	}
+
+	// What the look and feel actually draws a vertical scrollbar at. RuneLite's
+	// SCROLLBAR_WIDTH is the sidebar's allowance for one, not the width of one;
+	// under the client's own LAF the bar is far slimmer, and eight pixels is a
+	// whole letter here.
+	private static int scrollbarWidth()
+	{
+		return Math.max(1, new javax.swing.JScrollBar(
+			javax.swing.JScrollBar.VERTICAL).getPreferredSize().width);
+	}
+
+	// The pixels a chase row's name has, worked out from the layout rather than
+	// read off a picture. The sidebar is a fixed width and every inset between it
+	// and the label is one of ours:
+	//
+	//     225   PluginPanel.PANEL_WIDTH       the sidebar's content
+	//   +  17   PluginPanel.SCROLLBAR_WIDTH   and its allowance for a bar; this
+	//                                         panel is unwrapped (super(false)),
+	//                                         so it is the whole 242 itself
+	//   -  16   this panel's border, PANEL_INSET a side (the constructor)
+	//   -   9   the bar rebuild()'s own scroll pane raises, which a pets page is
+	//           always long enough to need, measured off the LAF above
+	//   -  16   the drill card's border, CARD_INSET a side (cardPlain)
+	//   -   4   the row's border, ROW_INSET a side (row)
+	//   -   8   ROW_GAP, between the name and the share
+	//   = 189   less the share, which BorderLayout draws at its preferred width.
+	static int chaseRoom(String share, FontMetrics fm)
+	{
+		return PluginPanel.PANEL_WIDTH + PluginPanel.SCROLLBAR_WIDTH
+			- 2 * PANEL_INSET - scrollbarWidth() - 2 * CARD_INSET
+			- 2 * ROW_INSET - ROW_GAP - fm.stringWidth(share);
+	}
+
+	// A line under construction: the pieces in order, and which of them are names
+	// and may be shortened. Everything else is a figure and is not negotiable.
+	private static final class Line
+	{
+		final List<String> pieces = new ArrayList<>();
+		final List<Integer> names = new ArrayList<>();
+
+		void fixed(String s)
+		{
+			pieces.add(s);
+		}
+
+		void name(String s)
+		{
+			names.add(pieces.size());
+			pieces.add(s);
+		}
+
+		String whole()
+		{
+			StringBuilder sb = new StringBuilder();
+			for (String s : pieces)
+			{
+				sb.append(s);
+			}
+			return sb.toString();
+		}
+	}
+
+	// A name cut to its first letters. Any trailing space goes with them:
+	// "Commander …" is a ragged thing to print.
+	private static String stub(String name, int keep)
+	{
+		if (name.length() <= keep)
+		{
+			return name;
+		}
+		int end = keep;
+		while (end > 0 && name.charAt(end - 1) == ' ')
+		{
+			end--;
+		}
+		return name.substring(0, end) + ELLIPSIS;
+	}
+
+	/**
+	 * Shortens the named pieces of a line, in the order given, until the whole of it
+	 * measures no wider than {@code avail}. Pieces outside {@code order} are left
+	 * exactly as they are, which is where the figures live. Returns null when even
+	 * every one of those names cut to {@code floor} letters is still too wide: the
+	 * caller's cue to give up a whole source rather than cut any further.
+	 */
+	private static String fitLine(Line line, List<Integer> order, int floor,
+		FontMetrics fm, int avail)
+	{
+		Line work = new Line();
+		work.pieces.addAll(line.pieces);
+		if (fm.stringWidth(work.whole()) <= avail)
+		{
+			return work.whole();
+		}
+		for (int idx : order)
+		{
+			String name = line.pieces.get(idx);
+			for (int keep = name.length() - 1; keep >= floor; keep--)
+			{
+				work.pieces.set(idx, stub(name, keep));
+				String s = work.whole();
+				if (fm.stringWidth(s) <= avail)
+				{
+					return s;
+				}
+			}
+			// As short as this one goes. Keep whichever form is the narrower — a
+			// stub of a short name can cost more than the name — and move along to
+			// the next name in the order.
+			String shortest = stub(name, floor);
+			work.pieces.set(idx,
+				fm.stringWidth(shortest) < fm.stringWidth(name) ? shortest : name);
+		}
+		return null;
+	}
+
+	// The first {@code kept} sources, heaviest first, and a count of the ones left
+	// off the end so the reader knows they are there. The hover names them.
+	private static Line sourceLine(List<GrindBook.PetSource> src, int kept, String mark)
+	{
+		Line l = new Line();
+		for (int i = 0; i < kept; i++)
+		{
+			if (i > 0)
+			{
+				l.fixed(" · ");
+			}
+			l.name(src.get(i).boss);
+			l.fixed(", kc " + fmt(src.get(i).kc));
+		}
+		if (kept < src.size())
+		{
+			l.fixed(mark + (src.size() - kept));
+		}
+		return l;
+	}
+
+	// How the sources left off are marked. The first form sets them off with the
+	// same separator the kept ones use, so "kc 1 · +1" cannot be read as a count of
+	// two; the second is for a row too tight to afford that, where a bare mark
+	// still beats giving up another name.
+	private static final String[] DROP_MARKS = {" · +", " +"};
+
+	// The names of a line, last first: a line gives up its tail before its head,
+	// because the sources are sorted with the one that carried the grind in front.
+	private static List<Integer> tailFirst(Line l, int from)
+	{
+		List<Integer> order = new ArrayList<>(l.names.subList(from, l.names.size()));
+		java.util.Collections.reverse(order);
+		return order;
+	}
+
+	// The chase line as the row will print it: the words chaseSources() gives the
+	// hover, cut to what the row can hold.
+	static String fitChase(GrindBook.PetChase chase, String share)
+	{
+		FontMetrics fm = rowMetrics();
+		int avail = chaseRoom(share, fm);
+		if (chase.activity != null)
+		{
+			// A skilling chase is one activity and the noun its attempts are
+			// counted in, with the count between them. The noun gives way first,
+			// then the activity; the count gives way to nothing.
+			Line l = new Line();
+			l.name(chase.activity);
+			l.fixed(", " + fmt(chase.kc) + " ");
+			l.name(chase.unit);
+			String s = fitLine(l, tailFirst(l, 0), NAME_FLOOR, fm, avail);
+			if (s == null)
+			{
+				s = fitLine(l, tailFirst(l, 0), 1, fm, avail);
+			}
+			return s != null ? s : l.whole();
+		}
+		List<GrindBook.PetSource> src = chase.sources;
+		if (src.isEmpty())
+		{
+			return "";
+		}
+		for (int kept = src.size(); kept >= 1; kept--)
+		{
+			for (String mark : kept < src.size() ? DROP_MARKS : new String[]{""})
+			{
+				Line l = sourceLine(src, kept, mark);
+				// The trailing names give way first, and the leading one is not cut
+				// into at all while there is still a whole source to give up.
+				String s = fitLine(l, tailFirst(l, 1), NAME_FLOOR, fm, avail);
+				if (s != null)
+				{
+					return s;
+				}
+			}
+		}
+		// One source left and its name is still too long for the row. Now it has to
+		// give: a boss half-named is still that boss, and "kc" over nothing is not
+		// a kill count.
+		Line l = sourceLine(src, 1, DROP_MARKS[DROP_MARKS.length - 1]);
+		String s = fitLine(l, l.names, 1, fm, avail);
+		return s != null ? s : l.whole();
+	}
+
+	// The whole sentence, kept for the hover: the row itself has about 135px (see
+	// chaseRoom()), and two sources with long names run well past it.
 	private static String chaseTip(GrindBook.PetChase chase)
 	{
 		double pct = chase.percentileDry;
@@ -1831,7 +2068,8 @@ class ChroniclePanel extends PluginPanel
 	// The share of players who hold the pet by this point. Clipped at both ends
 	// rather than rounded to them: "0% have" under a kill count that exists reads
 	// as a fault, and nothing short of certainty should print as certainty. Terse
-	// because the column is 200px and the source list has first call on it.
+	// because the row is barely 190px and this is measured out of the source list's
+	// share of it, not added beside it.
 	private static String holdShare(GrindBook.PetChase chase)
 	{
 		double pct = chase.percentileDry;
@@ -3813,7 +4051,7 @@ class ChroniclePanel extends PluginPanel
 		};
 		c.setLayout(new BoxLayout(c, BoxLayout.Y_AXIS));
 		c.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		c.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
+		c.setBorder(BorderFactory.createEmptyBorder(6, CARD_INSET, 6, CARD_INSET));
 		c.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return c;
 	}
@@ -3831,10 +4069,10 @@ class ChroniclePanel extends PluginPanel
 
 	private static JPanel row(String left, String right, Color rightColor)
 	{
-		JPanel r = new JPanel(new BorderLayout(8, 0));
+		JPanel r = new JPanel(new BorderLayout(ROW_GAP, 0));
 		r.setOpaque(false);
 		r.setAlignmentX(Component.LEFT_ALIGNMENT);
-		r.setBorder(BorderFactory.createEmptyBorder(1, 2, 1, 2));
+		r.setBorder(BorderFactory.createEmptyBorder(1, ROW_INSET, 1, ROW_INSET));
 		JLabel l = new JLabel(left);
 		l.setFont(FontManager.getRunescapeFont());
 		r.add(l, BorderLayout.CENTER);
