@@ -33,6 +33,7 @@ public class KillSourcePetChaseTest
 	private final Map<String, long[]> skills = new HashMap<>();
 	private final JsonObject clog = new JsonObject();
 	private final List<LocalStore.SourceRow> ledger = new ArrayList<>();
+	private final JsonObject achievements = new JsonObject();
 
 	// a collection log page and its count
 	private void kc(String page, long n)
@@ -48,10 +49,22 @@ public class KillSourcePetChaseTest
 		ledger.add(new LocalStore.SourceRow(source, n, n, 0L, null, 0L, 0L));
 	}
 
+	// a diary tier the character sheet says is done, spelled as AchievementSync spells it
+	private void diary(String region, String tier, boolean done)
+	{
+		JsonObject diaries = achievements.has("diaries")
+			? achievements.getAsJsonObject("diaries") : new JsonObject();
+		JsonObject r = diaries.has(region)
+			? diaries.getAsJsonObject(region) : new JsonObject();
+		r.addProperty(tier, done);
+		diaries.add(region, r);
+		achievements.add("diaries", diaries);
+	}
+
 	private GrindBook.PetChase chase(String pet)
 	{
 		Map<String, GrindBook.PetChase> out = new GrindBook(new Gson())
-			.petChases(clog, ledger, counters, skills, PETS);
+			.petChases(clog, ledger, counters, skills, achievements, PETS);
 		return out.get(pet.toLowerCase(java.util.Locale.ROOT));
 	}
 
@@ -81,6 +94,8 @@ public class KillSourcePetChaseTest
 	@Test
 	public void theChompyIsPricedOnTheKillItCountsNotThePluckItCannot()
 	{
+		// the chase only exists past the elite diary; PetUnlockGateTest holds that
+		diary("western", "elite", true);
 		ledger("Chompy bird", 295);
 		GrindBook.PetChase c = chase("Chompy chick");
 		assertEquals(44.6, c.percentileDry, 0.05);

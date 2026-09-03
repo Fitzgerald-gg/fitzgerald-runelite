@@ -1061,7 +1061,8 @@ public class ChroniclePlugin extends Plugin
 	// Cheap enough for the panel to ask on the spot: both rate books are parsed once
 	// and held, and the reads are ones the log page already makes. Skilling pets need
 	// two more: the lifetime counters their attempts are in, and the skill sheet the
-	// grid reads its levels off.
+	// grid reads its levels off. And the achievements the sheet has always carried,
+	// which say whether a pet behind an unlock is a chase at all yet.
 	java.util.Map<String, GrindBook.PetChase> petChases(java.util.Collection<String> pets)
 	{
 		final String rsn = localName;
@@ -1070,7 +1071,8 @@ public class ChroniclePlugin extends Plugin
 			return java.util.Collections.emptyMap();
 		}
 		return grindBook.petChases(localStore.clogSnapshot(), localStore.dropSources(),
-			localStore.trackersSnapshot(), localStore.skillSheet(), pets);
+			localStore.trackersSnapshot(), localStore.skillSheet(),
+			localStore.achievements(), pets);
 	}
 
 	// True once this session produced an on-task slayer kill.

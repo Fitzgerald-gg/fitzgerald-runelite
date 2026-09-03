@@ -2435,6 +2435,28 @@ class LocalStore implements chronicle.counters.GatheredLedger
 		return out;
 	}
 
+	/**
+	 * The account's achievement state as last gathered: {@code quests} by name against
+	 * their state, {@code diaries} by region against each tier's completion, and
+	 * {@code combat} points plus per-tier status. Deep-copied for the panel.
+	 *
+	 * <p>Empty where the sheet has never been gathered, which is not the same as an
+	 * unmet requirement but is read as one: a chase printed off an unknown unlock is a
+	 * claim the journal cannot make.
+	 */
+	JsonObject achievements()
+	{
+		synchronized (lock)
+		{
+			if (root == null || !root.has("achievements")
+				|| !root.get("achievements").isJsonObject())
+			{
+				return new JsonObject();
+			}
+			return root.getAsJsonObject("achievements").deepCopy();
+		}
+	}
+
 	/** The journal's stored collection log, deep-copied for the panel. */
 	JsonObject clogSnapshot()
 	{

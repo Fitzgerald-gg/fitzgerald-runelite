@@ -2017,10 +2017,11 @@ class ChroniclePanel extends PluginPanel
 		String share = pct < 1 ? "Under 1%" : pct > 99 ? "Over 99%" : Math.round(pct) + "%";
 		StringBuilder sb = new StringBuilder(share + " of players have " + chase.pet
 			+ " by this point. " + chaseSources(chase));
-		if (chase.activity != null && !chase.sources.isEmpty())
+		if (chase.activity != null && chase.sources.size() > 1)
 		{
 			// the line spent itself on the activity, so the hover names the one
-			// source that carried it
+			// source that carried it. Only where there were others to carry it
+			// instead: "Mad Angel, 124 kills, mostly mad angel" says nothing twice.
 			sb.append(", mostly ").append(chase.sources.get(0).boss.toLowerCase(Locale.ROOT));
 		}
 		if (chase.level > 0)

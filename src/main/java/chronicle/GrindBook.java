@@ -285,9 +285,14 @@ class GrindBook
 	 * is in both books the skilling book wins outright: Tangleroot is the one that is,
 	 * and the boss table's Hespori denominator is this same formula frozen at Farming
 	 * 65, so admitting both would print two numbers for one event.
+	 *
+	 * <p>A pet the book gives a {@code requires} is weighed only once {@code achievements}
+	 * says the account holds the unlock. Until then the attempts rolled nothing at all,
+	 * and the pet is left out of the map entirely: a chase not yet begun is not a dry one.
 	 */
 	Map<String, PetChase> petChases(JsonObject clog, List<LocalStore.SourceRow> dropSources,
-		Map<String, Long> counters, Map<String, long[]> skills, Collection<String> pets)
+		Map<String, Long> counters, Map<String, long[]> skills, JsonObject achievements,
+		Collection<String> pets)
 	{
 		Map<String, PetChase> out = new LinkedHashMap<>();
 		if (pets == null || pets.isEmpty())
@@ -339,6 +344,13 @@ class GrindBook
 			SkillPet spec = skilling.get(key);
 			if (spec != null)
 			{
+				// An unlock the account has not taken means every attempt the journal
+				// counted rolled nothing. There is no percentage to print over that,
+				// and printing one calls a player unlucky in a draw he never entered.
+				if (spec.requires != null && !spec.requires.met(achievements))
+				{
+					continue;
+				}
 				PetChase chase = skillingChase(pet, spec, counters, skills, kcByNorm);
 				if (chase != null)
 				{
@@ -429,6 +441,89 @@ class GrindBook
 		}
 	}
 
+	/**
+	 * What an account must already hold before a pet can drop at all. The unit an
+	 * attempt is counted in goes on climbing without it: chompy birds fall to anyone,
+	 * and none of them rolls the chick until the elite Western Provinces diary is done
+	 * and its rewards taken.
+	 *
+	 * <p>Read off the journal's own achievements object, which the character sheet has
+	 * carried all along: {@code quests} by name against their state, {@code diaries} by
+	 * region against each tier's completion, and {@code combat} tiers against their
+	 * status. A clause the book does not name is not asked about; every clause it does
+	 * name has to hold.
+	 */
+	private static final class Requirement
+	{
+		final String diaryRegion;    // "western", as AchievementSync spells it
+		final String diaryTier;      // "easy" / "medium" / "hard" / "elite"
+		final String quest;          // Quest.getName(), finished when the state is FINISHED
+		final String combatTier;     // "easy" ... "grandmaster", held once its status is past 0
+
+		Requirement(String diaryRegion, String diaryTier, String quest, String combatTier)
+		{
+			this.diaryRegion = diaryRegion;
+			this.diaryTier = diaryTier;
+			this.quest = quest;
+			this.combatTier = combatTier;
+		}
+
+		/**
+		 * True only where the journal says outright that the unlock is held. A sheet
+		 * never gathered answers nothing, and nothing is not yes: the pet stays off the
+		 * page rather than being priced on a guess.
+		 */
+		boolean met(JsonObject achievements)
+		{
+			if (achievements == null)
+			{
+				return false;
+			}
+			if (diaryRegion != null
+				&& !flag(obj(obj(achievements, "diaries"), diaryRegion), diaryTier))
+			{
+				return false;
+			}
+			if (quest != null
+				&& !"FINISHED".equals(text(obj(achievements, "quests"), quest)))
+			{
+				return false;
+			}
+			return combatTier == null
+				|| safeLong(field(obj(obj(achievements, "combat"), "tiers"), combatTier)) > 0;
+		}
+
+		private static JsonObject obj(JsonObject o, String key)
+		{
+			return o != null && key != null && o.has(key) && o.get(key).isJsonObject()
+				? o.getAsJsonObject(key) : null;
+		}
+
+		private static JsonElement field(JsonObject o, String key)
+		{
+			return o != null && key != null && o.has(key) ? o.get(key) : null;
+		}
+
+		private static boolean flag(JsonObject o, String key)
+		{
+			JsonElement el = field(o, key);
+			try
+			{
+				return el != null && el.isJsonPrimitive() && el.getAsBoolean();
+			}
+			catch (RuntimeException ignored)
+			{
+				return false;
+			}
+		}
+
+		private static String text(JsonObject o, String key)
+		{
+			JsonElement el = field(o, key);
+			return el != null && el.isJsonPrimitive() ? el.getAsString() : null;
+		}
+	}
+
 	/** A skilling pet: the craft it answers to, and every way it is rolled for. */
 	private static final class SkillPet
 	{
@@ -438,10 +533,11 @@ class GrindBook
 		final boolean levelScaled;
 		final List<SkillSource> sources;
 		final List<SkillKill> kills;
+		final Requirement requires;  // null where the pet is open to everyone
 		final Set<String> named;     // counters this pet prices by name
 
 		SkillPet(String skill, String activity, String unit, boolean levelScaled,
-			List<SkillSource> sources, List<SkillKill> kills)
+			List<SkillSource> sources, List<SkillKill> kills, Requirement requires)
 		{
 			this.skill = skill;
 			this.activity = activity;
@@ -449,6 +545,7 @@ class GrindBook
 			this.levelScaled = levelScaled;
 			this.sources = sources;
 			this.kills = kills;
+			this.requires = requires;
 			this.named = new HashSet<>();
 			for (SkillSource s : sources)
 			{
@@ -566,7 +663,44 @@ class GrindBook
 			return null;
 		}
 		return new SkillPet(str(o, "skill"), str(o, "activity"), str(o, "unit"),
-			o.has("levelScaled") && o.get("levelScaled").getAsBoolean(), sources, kills);
+			o.has("levelScaled") && o.get("levelScaled").getAsBoolean(), sources, kills,
+			readRequirement(o));
+	}
+
+	// The unlock a pet waits on, or null where it waits on none. Each kind is its own
+	// object, so a pet that one day wants a quest or a combat tier beside its diary
+	// takes another key here and the rest of the book is untouched.
+	private static Requirement readRequirement(JsonObject o)
+	{
+		JsonObject r = o.has("requires") && o.get("requires").isJsonObject()
+			? o.getAsJsonObject("requires") : null;
+		if (r == null)
+		{
+			return null;
+		}
+		JsonObject diary = r.has("diary") && r.get("diary").isJsonObject()
+			? r.getAsJsonObject("diary") : null;
+		JsonObject quest = r.has("quest") && r.get("quest").isJsonObject()
+			? r.getAsJsonObject("quest") : null;
+		JsonObject combat = r.has("combat") && r.get("combat").isJsonObject()
+			? r.getAsJsonObject("combat") : null;
+		// A clause named but not filled in is not a clause that passes: it is kept, as
+		// a name nothing answers to, so a half-written requirement bars the pet rather
+		// than letting it through unasked.
+		String region = diary != null ? nz(str(diary, "region")) : null;
+		String tier = diary != null ? nz(str(diary, "tier")) : null;
+		String name = quest != null ? nz(str(quest, "name")) : null;
+		String caTier = combat != null ? nz(str(combat, "tier")) : null;
+		if (region == null && name == null && caTier == null)
+		{
+			return null;
+		}
+		return new Requirement(region, tier, name, caTier);
+	}
+
+	private static String nz(String s)
+	{
+		return s != null ? s : "";
 	}
 
 	private static String str(JsonObject o, String field)

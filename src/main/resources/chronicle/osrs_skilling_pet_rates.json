@@ -6,6 +6,8 @@
     "approximation": "Chronicle knows the level held now, not the level each attempt was made at. Applying today's level to yesterday's work prices early attempts better than they were, so every level-scaled figure reads a little dry. Said on the page, not only here. Where a rate band could not be pinned to the attempt the journal counted, the pet's own _approximation says which way its figure errs.",
     "unlisted": "A source the wiki prints as Unknown, or that no counter can name in the unit the roll is asked in, is absent. Absence is deliberate everywhere; each pet's _excluded says what and why.",
     "notImplemented": "The 200,000,000 xp fifteen-fold bonus. No account here is near it and the wiki gives no worked denominators for it.",
+    "requires": "A pet whose drop waits on an unlock the journal can see carries a requires. Attempts go on being counted without it and none of them rolls, so the pet is not a dry chase, it is a chase not yet begun, and the panel draws no row for it at all. Each clause is its own object under requires, and every one named must hold: diary takes a region and a tier as the character sheet's achievements spell them, quest takes a Quest name and wants it FINISHED, combat takes a combat achievement tier and wants its status past 0. A pet with no requires is open to anyone who can reach its attempts. Cite the wiki line in _cite. Only Chompy chick carries one today; the audit behind that is in _meta.unlocked.",
+    "unlocked": "Every pet in this book and in osrs_clog_rates.json was read for the same fault, page by page as raw wikitext. Chompy chick is the only one whose attempt unit can be racked up while the pet is impossible AND whose unlock the journal can read. Dom names one too (delve level 6 or higher) but has no rate here and draws no row. Two more are unlocks nothing in the journal can answer: Beef, whose fight is free to play where the drop is members only, and every members-only skilling pet under a counter a free account can also mint. Membership is not an achievement, is not permanent, and is nowhere in the journal, so it is said here and in Beef's own _excluded rather than gated. Zalcano hands out a kill count at 5 damage and rolls Smolcano only past 31, which is a contribution no record keeps.",
     "kills": "Some pets are rolled on a thing the collection log or the drop ledger already counts for them: a Hespori grown, a search of the Rewards Guardian, a master casket opened, a high gamble, a boss killed. Those sit in kills rather than sources and are read off that count. orKc names the same event under the other book's spelling, and the larger of the two is taken, never the sum."
   },
   "pets": {
@@ -1162,7 +1164,14 @@
       "unit": "kills",
       "levelScaled": false,
       "_excluded": "Jubbly birds are not chompies and roll nothing. The pet needs the elite Western Provinces diary before any of these rolls could have landed.",
-      "_approximation": "A chompy is rolled twice, once on the kill and once on the pluck, each at 1/500. The journal counts the kill; nothing counts the pluck. So a bird killed and plucked was rolled twice and is counted once here, and anyone who plucks is drier than this figure says. It is not doubled to cover that: plucking is optional, and doubling would overstate every bird left where it fell.",
+      "_approximation": "A chompy is rolled twice, once on the kill and once on the pluck, each at 1/500. The journal counts the kill; nothing counts the pluck. So a bird killed and plucked was rolled twice and is counted once here, and anyone who plucks is drier than this figure says. It is not doubled to cover that: plucking is optional, and doubling would overstate every bird left where it fell. And the diary below is a date nothing records: birds killed before it was finished rolled nothing at all, and they are counted here with the ones that did, so an account that hunted chompies on the way to the diary reads drier than it is.",
+      "requires": {
+        "diary": {
+          "region": "western",
+          "tier": "elite"
+        },
+        "_cite": "https://oldschool.runescape.wiki/w/Chompy_chick - can only be obtained by players who have completed the elite Western Provinces diary and received its rewards."
+      },
       "kills": [
         {
           "kc": "Chompy bird",

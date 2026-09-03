@@ -369,4 +369,36 @@ public class LocalStorePersistenceTest
 		store.load(dir, "Tester");
 		assertEquals(2, store.feedNewest(10).size());
 	}
+
+	// The character sheet has written an achievements object on every refresh since it
+	// was introduced and nothing ever read it back. The pets page reads it now, to know
+	// whether a pet behind a diary is a chase at all, so the round trip is held here.
+	@Test
+	public void theAchievementSheetSurvivesAReload()
+	{
+		LocalStore store = mounted();
+		JsonObject western = new JsonObject();
+		western.addProperty("hard", true);
+		western.addProperty("elite", false);
+		JsonObject diaries = new JsonObject();
+		diaries.add("western", western);
+		JsonObject achievements = new JsonObject();
+		achievements.add("diaries", diaries);
+		store.setCharacter(RSN, null, 0, null, achievements);
+		store.flush(dir);
+
+		JsonObject back = mounted().achievements();
+		assertTrue(back.getAsJsonObject("diaries").getAsJsonObject("western")
+			.get("hard").getAsBoolean());
+		assertFalse(back.getAsJsonObject("diaries").getAsJsonObject("western")
+			.get("elite").getAsBoolean());
+	}
+
+	// A journal that has never gathered a sheet answers with an empty object, not null:
+	// the pets page reads it on every rebuild.
+	@Test
+	public void anUngatheredSheetIsAnEmptyObjectNotNull()
+	{
+		assertEquals(0, mounted().achievements().size());
+	}
 }

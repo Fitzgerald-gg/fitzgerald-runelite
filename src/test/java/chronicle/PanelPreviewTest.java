@@ -423,6 +423,17 @@ public class PanelPreviewTest
 		kcs.addProperty("the mad angel", 124);
 		kcs.addProperty("fishing trawler", 410);
 		clog.add("kcs", kcs);
+		// The chompy chick waits on the elite Western Provinces diary and rolls
+		// nothing before it. The fixture holds it, so the row is drawn; the
+		// real-journal set does not, and draws none.
+		JsonObject diaries = new JsonObject();
+		JsonObject western = new JsonObject();
+		western.addProperty("easy", true);
+		western.addProperty("medium", true);
+		western.addProperty("hard", true);
+		western.addProperty("elite", true);
+		diaries.add("western", western);
+		s.achievements.add("diaries", diaries);
 		JsonObject skcs = new JsonObject();
 		skcs.addProperty("Abyssal demon", 4112);
 		skcs.addProperty("Nechryael", 2204);
@@ -637,6 +648,7 @@ public class PanelPreviewTest
 		List<LocalStore.RecentDrop> recent = new ArrayList<>();
 		List<JsonObject> feed = new ArrayList<>();
 		JsonObject clog = new JsonObject();
+		JsonObject achievements = new JsonObject();
 		int clogFinished;
 		int clogAvailable;
 		TreeMap<LocalDate, HistoryLog.Baseline> history = new TreeMap<>();
@@ -806,7 +818,7 @@ public class PanelPreviewTest
 		java.util.Map<String, GrindBook.PetChase> petChases(java.util.Collection<String> pets)
 		{
 			return new GrindBook(new Gson()).petChases(clog, sources, lifetime,
-				skillSheet(), pets);
+				skillSheet(), store != null ? store.achievements() : achievements, pets);
 		}
 
 		@Override

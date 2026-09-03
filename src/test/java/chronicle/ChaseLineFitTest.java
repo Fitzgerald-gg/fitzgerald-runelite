@@ -87,6 +87,29 @@ public class ChaseLineFitTest
 		return (String) m.invoke(null, chase);
 	}
 
+	// The whole sentence the row hands its hover, exactly as the panel words it.
+	private static String tip(GrindBook.PetChase chase) throws Exception
+	{
+		java.lang.reflect.Method m =
+			ChroniclePanel.class.getDeclaredMethod("chaseTip", GrindBook.PetChase.class);
+		m.setAccessible(true);
+		return (String) m.invoke(null, chase);
+	}
+
+	// A skilling chase, built with the sources the fitted line gave up naming.
+	private static GrindBook.PetChase spread(double pct, String activity, String unit,
+		Object... nameKc)
+	{
+		java.util.List<GrindBook.PetSource> src = new java.util.ArrayList<>();
+		long total = 0;
+		for (int i = 0; i < nameKc.length; i += 2)
+		{
+			src.add(new GrindBook.PetSource((String) nameKc[i], (Long) nameKc[i + 1], 3000));
+			total += (Long) nameKc[i + 1];
+		}
+		return new GrindBook.PetChase("A pet", total, pct, src, activity, unit, 0);
+	}
+
 	// The one thing every case must satisfy: it fits the room the row actually has.
 	private static void assertFits(String line, String share)
 	{
@@ -256,5 +279,41 @@ public class ChaseLineFitTest
 			}
 		}
 		return n;
+	}
+
+	// The hover names the source that carried a grind because the fitted line spent
+	// itself on the activity instead. Where the activity IS the source there is
+	// nothing to disclose, and the clause repeats the line back at itself: "Mad
+	// Angel, 124 kills, mostly mad angel".
+	@Test
+	public void aSingleSourceChaseDoesNotNameItselfTwice() throws Exception
+	{
+		GrindBook.PetChase c = spread(6.0, "Mad Angel", "kills", "Mad Angel", 124L);
+		String tip = tip(c);
+		assertEquals("6% of players have A pet by this point. Mad Angel, 124 kills.", tip);
+		assertFalse("[" + tip + "] said the source twice", tip.contains("mostly"));
+	}
+
+	// Two sources and the clause earns its place: the line said Woodcutting and the
+	// count, and the hover says which tree most of it was.
+	@Test
+	public void aSpreadChaseStillNamesTheSourceThatCarriedIt() throws Exception
+	{
+		GrindBook.PetChase c = spread(41.0, "Woodcutting", "logs",
+			"Yew trees", 14_204L, "Willow trees", 5_185L);
+		String tip = tip(c);
+		assertTrue("[" + tip + "] dropped the clause that earns its place",
+			tip.endsWith("Woodcutting, 19,389 logs, mostly yew trees."));
+	}
+
+	// A boss chase names its sources outright in the line, so the clause was never
+	// its business either way.
+	@Test
+	public void aBossChaseNeverTakesTheClause() throws Exception
+	{
+		GrindBook.PetChase c = boss(37.0, "Callisto", 1_500L, "Artio", 900L);
+		String tip = tip(c);
+		assertFalse("[" + tip + "] took a clause meant for a skilling grind",
+			tip.contains("mostly"));
 	}
 }

@@ -63,7 +63,7 @@ public class SkillingPetChaseTest
 	private GrindBook.PetChase chase(String pet)
 	{
 		Map<String, GrindBook.PetChase> out = new GrindBook(new Gson())
-			.petChases(clog, ledger, counters, skills, PETS);
+			.petChases(clog, ledger, counters, skills, new JsonObject(), PETS);
 		return out.get(pet.toLowerCase(java.util.Locale.ROOT));
 	}
 
@@ -351,7 +351,7 @@ public class SkillingPetChaseTest
 		level("woodcutting", 92);
 		count("yewLogsChopped", 0);
 		assertFalse(new GrindBook(new Gson())
-			.petChases(clog, new ArrayList<>(), counters, skills, PETS)
+			.petChases(clog, new ArrayList<>(), counters, skills, new JsonObject(), PETS)
 			.containsKey("beaver"));
 	}
 
