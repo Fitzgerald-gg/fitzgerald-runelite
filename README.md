@@ -51,8 +51,8 @@ first-sighting, best personal best — so importing twice changes nothing and an
 never lower what you already hold. A `<name>.history.jsonl` sitting beside the journal comes
 across too.
 
-There is nothing to export: the record is already a JSON file you own, so the tab copies the
-folder's path to your clipboard instead.
+There is nothing to export: the record is already a JSON file you own, sitting in
+`.runelite/chronicle/` where you can copy, back up or move it like any other file.
 
 **Upgrading from Fitzgerald.gg.** This plugin was called Fitzgerald.gg and kept its journal in
 `.runelite/fitzgerald`. Chronicle reads `.runelite/chronicle` and stores its settings under a new

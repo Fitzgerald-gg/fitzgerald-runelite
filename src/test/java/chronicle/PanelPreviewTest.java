@@ -976,10 +976,6 @@ public class PanelPreviewTest
 			return itemManager;
 		}
 
-		@Override
-		void actionOpenJournalFolder()
-		{
-		}
 
 		@Override
 		void actionPushNow()
