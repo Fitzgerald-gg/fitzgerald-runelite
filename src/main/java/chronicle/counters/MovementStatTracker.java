@@ -17,6 +17,7 @@ import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.util.Text;
 
@@ -31,12 +32,17 @@ import static chronicle.counters.StatKeys.*;
  * tick. Credit for that jump is gated on a recent teleport-initiating click, which keeps
  * logins, world hops, instance entries and staircases out of the count and supplies the
  * destination label. Fairy rings have their own animation and credit straight off it.
+ *
+ * <p>Run and walk are split off the step itself: two tiles in a tick can only be a run.
+ * Only a one-tile step is ambiguous, and it falls back on the run toggle and a non-empty
+ * energy bar, so the residual error is a single tile at a time and it leans one way -
+ * a player with run on and a sliver of energy too small to spend walks, and that tile
+ * books as a run. Run is therefore very slightly over-counted, never under-counted.
  */
 public class MovementStatTracker implements StatTracker
 {
-	// Run-energy orb, and the sprite it shows while run is on.
-	private static final int RUN_ORB_WIDGET_ID = 10485793;
-	private static final int RUN_ENABLED_SPRITE_ID = 1070;
+	// A player covers two tiles in a tick only by running; walking is always one.
+	private static final int RUN_STEP_TILES = 2;
 
 	private static final int FAIRY_RING_ANIM = 3265;
 
@@ -499,8 +505,7 @@ public class MovementStatTracker implements StatTracker
 
 			if (step > 0 && step < 3)
 			{
-				boolean running = isRunOrbEnabled();
-				statStore.incrementStatBy(running ? DISTANCE_RAN : DISTANCE_WALKED, step);
+				statStore.incrementStatBy(isRunStep(step) ? DISTANCE_RAN : DISTANCE_WALKED, step);
 			}
 			else if (jumped && teleportPending())
 			{
@@ -591,10 +596,28 @@ public class MovementStatTracker implements StatTracker
 		}
 	}
 
-	private boolean isRunOrbEnabled()
+	/**
+	 * Whether a one-tick step of {@code step} tiles was run rather than walked.
+	 *
+	 * <p>Two tiles in a tick is running, unconditionally: nothing else in the game moves
+	 * a player that far on foot, so no toggle or energy reading is allowed to overrule
+	 * it. This used to be decided by reading the run orb's sprite, and every way that
+	 * read could come back empty - orb not built yet, hidden by a layout, a sprite not
+	 * set on the tick sampled - silently booked a run as a walk.
+	 *
+	 * <p>One tile is the genuinely ambiguous case: a walk, the last tile of a run path,
+	 * or running on an empty bar. It is settled from the game's own state - the run
+	 * toggle, and energy above zero, since run switched on with nothing left in the bar
+	 * still walks.
+	 */
+	private boolean isRunStep(int step)
 	{
-		Widget orb = client.getWidget(RUN_ORB_WIDGET_ID);
-		return orb != null && !orb.isHidden() && orb.getSpriteId() == RUN_ENABLED_SPRITE_ID;
+		if (step >= RUN_STEP_TILES)
+		{
+			return true;
+		}
+		// getEnergy() is hundredths of a percent, 0-10000
+		return client.getVarpValue(VarPlayerID.OPTION_RUN) == 1 && client.getEnergy() > 0;
 	}
 
 	/**
