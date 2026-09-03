@@ -27,7 +27,7 @@ public class KillSourcePetChaseTest
 	private static final List<String> PETS = Arrays.asList(
 		"Abyssal protector", "Chompy chick", "Bloodhound", "Pet penance queen",
 		"Lil' creator", "Quetzin", "Yami", "Gull", "Beef", "Aggy",
-		"Dom", "Maggot marquess", "Mr McGroot", "Smolcano");
+		"Dom", "Maggot marquess", "Mr McGroot", "Smolcano", "Tiny tempor");
 
 	private final Map<String, Long> counters = new HashMap<>();
 	private final Map<String, long[]> skills = new HashMap<>();
@@ -211,6 +211,48 @@ public class KillSourcePetChaseTest
 		assertEquals(124, aggy.kc);
 		assertEquals(1, aggy.sources.size());
 		assertEquals(6.0, aggy.percentileDry, 0.05);
+	}
+
+	// 1/8,000 a search of the reward pool, never a subdue. A subdue pays permits by
+	// the points scored and each permit buys one search, so subdues count fewer
+	// attempts than were made and would print the chase less dry than it is.
+	@Test
+	public void tinyTemporIsReadOffTheRewardPoolAndNotTheSubdue()
+	{
+		kc("Tempoross", 46);
+		ledger("Reward pool (Tempoross)", 114);
+		GrindBook.PetChase c = chase("Tiny tempor");
+		assertEquals(114, c.kc);
+		assertEquals(1, c.sources.size());
+		assertEquals("Reward pool", c.sources.get(0).boss);
+		assertEquals(8_000, c.sources.get(0).rate);
+		assertEquals("Tempoross", c.activity);
+		assertEquals("searches", c.unit);
+		assertEquals(1.4, c.percentileDry, 0.05);
+		// what the subdue count would have printed, and deliberately does not
+		double subdued = (1.0 - Math.pow(1.0 - 1.0 / 8_000, 46)) * 100.0;
+		assertEquals(0.6, subdued, 0.05);
+	}
+
+	// The casket is one of the things a pool search hands over, and its own table
+	// carries no pet. Counting caskets would count a share of those searches twice.
+	@Test
+	public void theTemporossCasketIsNotASecondRollUnit()
+	{
+		ledger("Reward pool (Tempoross)", 114);
+		ledger("Casket (Tempoross)", 25);
+		GrindBook.PetChase c = chase("Tiny tempor");
+		assertEquals(114, c.kc);
+		assertEquals(1, c.sources.size());
+	}
+
+	// And with no pool searches recorded there is no chase at all: the subdue count
+	// on its own is not a denominator this pet can be priced from.
+	@Test
+	public void aTemporossSubdueCountAloneBuysNoChase()
+	{
+		kc("Tempoross", 46);
+		assertNull(chase("Tiny tempor"));
 	}
 
 	// Three pets have a rate the wiki prints and no counter that can ask for it in the

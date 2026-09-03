@@ -120,9 +120,9 @@ public class PanelPreviewTest
 		shoot(panel, out, prefix + "-home", "HOME");
 		// the xp fold open: the rows only exist in this state, so the closed shot
 		// above cannot tell anyone whether they still render
-		set(panel, "xpBySkill", Boolean.TRUE);
+		expandSection(panel, "home:xp");
 		shoot(panel, out, prefix + "-home-xp", "HOME");
-		set(panel, "xpBySkill", Boolean.FALSE);
+		collapseAll(panel);
 		shoot(panel, out, prefix + "-drops", "DROPS");
 		// the journey lands via invokeLater after the first paint, so shoot twice
 		// and let the settled view overwrite the file
@@ -180,6 +180,19 @@ public class PanelPreviewTest
 		set(panel, "clogTab", "Other");
 		set(panel, "clogPageSel", "All Pets");
 		shoot(panel, out, prefix + "-log-pets", "LOG");
+		// two pets open on the same page: the detail only exists in this state, so
+		// the folded shot above cannot say whether it still renders, and two at once
+		// is the keyed register doing what one boolean could not
+		expandSection(panel, "pets:All Pets:" + firstFoldablePet(stub, "All Pets"));
+		expandSection(panel, "pets:All Pets:tiny tempor");
+		shoot(panel, out, prefix + "-log-pets-open", "LOG");
+		collapseAll(panel);
+		set(panel, "clogPageSel", "Skilling Pets");
+		shoot(panel, out, prefix + "-log-pets-skilling", "LOG");
+		expandSection(panel, "pets:Skilling Pets:"
+			+ firstFoldablePet(stub, "Skilling Pets"));
+		shoot(panel, out, prefix + "-log-pets-skilling-open", "LOG");
+		collapseAll(panel);
 		set(panel, "clogPageSel", null);
 		set(panel, "clogTab", "Bosses");
 
@@ -362,6 +375,11 @@ public class PanelPreviewTest
 		s.sources.add(new LocalStore.SourceRow("Crazy archaeologist", 88, 88, 1_204_113L, 31.8, 0, 0));
 		s.sources.add(new LocalStore.SourceRow("Thermonuclear smoke devil", 1_402, 1_390, 19_113_205L, 22.2, 0, 0));
 		s.sources.add(new LocalStore.SourceRow("Brutal black dragon", 950, 921, 15_204_113L, null, 0, 0));
+		// Tempoross three ways: the subdue count, the reward pool searches those
+		// permits bought, and the caskets one of those searches handed over. Tiny
+		// tempor is priced off the middle one alone.
+		s.sources.add(new LocalStore.SourceRow("Reward pool (Tempoross)", 114, 114, 4_112_005L, null, 0, 0));
+		s.sources.add(new LocalStore.SourceRow("Casket (Tempoross)", 25, 25, 812_400L, null, 0, 0));
 
 		List<LocalStore.BagItem> bag = new ArrayList<>();
 		bag.add(new LocalStore.BagItem(4151, "Abyssal whip", 3, 5_406_000L));
@@ -422,6 +440,7 @@ public class PanelPreviewTest
 		kcs.addProperty("brutus", 75);
 		kcs.addProperty("the mad angel", 124);
 		kcs.addProperty("fishing trawler", 410);
+		kcs.addProperty("tempoross", 46);
 		clog.add("kcs", kcs);
 		// The chompy chick waits on the elite Western Provinces diary and rolls
 		// nothing before it. The fixture holds it, so the row is drawn; the
@@ -455,6 +474,10 @@ public class PanelPreviewTest
 			8_204_113L, tasks);
 		s.consumVals.put("sharksEaten", 1_985_000L);
 		s.consumVals.put("potionDoses", 3_204_000L);
+		// One pet the journal holds, so a pets page has a provenance line to fold
+		// away beside the chases: the log already lights this one.
+		s.petRows.add(new LocalStore.PetRow("Pet kraken", "Kraken", 2_147,
+			java.time.Instant.parse("2024-11-08T20:14:00Z").toEpochMilli()));
 		s.grinds.add(new ChronicleApiClient.GrindRow("Abyssal demons", "Abyssal head",
 			4_112, 6_000, 51.0));
 		s.clogFinished = 412;
@@ -657,6 +680,7 @@ public class PanelPreviewTest
 		ChronicleApiClient.SlayerJourney journey;
 		Map<String, Long> consumVals = new LinkedHashMap<>();
 		List<ChronicleApiClient.GrindRow> grinds = new ArrayList<>();
+		List<LocalStore.PetRow> petRows = new ArrayList<>();
 		private final ItemManager itemManager;
 
 		StubPlugin(ItemManager im)
@@ -836,7 +860,7 @@ public class PanelPreviewTest
 		@Override
 		java.util.List<LocalStore.PetRow> pets()
 		{
-			return store != null ? store.pets() : new ArrayList<>();
+			return store != null ? store.pets() : new ArrayList<>(petRows);
 		}
 
 		@Override
@@ -967,6 +991,51 @@ public class PanelPreviewTest
 	// ------------------------------------------------------------------
 	// Driving + rendering
 	// ------------------------------------------------------------------
+
+	// The first slot on a pets page the panel would draw a fold on: one the journal
+	// owns with a provenance line, or one it prices a chase for. Falls back to the
+	// first slot, which renders an inert row and says so in the picture.
+	private String firstFoldablePet(StubPlugin stub, String page) throws Exception
+	{
+		Method m = ChroniclePanel.class.getDeclaredMethod("taxonomy", com.google.gson.Gson.class);
+		m.setAccessible(true);
+		@SuppressWarnings("unchecked")
+		Map<String, Map<String, List<String>>> tax =
+			(Map<String, Map<String, List<String>>>) m.invoke(null, new Gson());
+		List<String> slots = tax.get("Other").get(page);
+		for (String slot : slots)
+		{
+			if (foldablePet(stub, slot))
+			{
+				return slot.toLowerCase(Locale.ROOT);
+			}
+		}
+		return slots.get(0).toLowerCase(Locale.ROOT);
+	}
+
+	// Whether one slot has anything under it, asked of the panel's own petDetail so
+	// the harness cannot disagree with what the page draws.
+	private boolean foldablePet(StubPlugin stub, String slot) throws Exception
+	{
+		LocalStore.PetRow own = null;
+		for (LocalStore.PetRow r : stub.pets())
+		{
+			if (r.name.equalsIgnoreCase(slot))
+			{
+				own = r;
+				break;
+			}
+		}
+		Map<String, GrindBook.PetChase> chases =
+			stub.petChases(java.util.Collections.singletonList(slot));
+		Method det = ChroniclePanel.class.getDeclaredMethod("petDetail", boolean.class,
+			LocalStore.PetRow.class, GrindBook.PetChase.class);
+		det.setAccessible(true);
+		@SuppressWarnings("unchecked")
+		List<javax.swing.JPanel> d = (List<javax.swing.JPanel>) det.invoke(null, false, own,
+			chases.get(slot.toLowerCase(Locale.ROOT)));
+		return !d.isEmpty();
+	}
 
 	private String firstClogPage(ChroniclePanel panel) throws Exception
 	{

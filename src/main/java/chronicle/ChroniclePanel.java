@@ -553,28 +553,22 @@ class ChroniclePanel extends PluginPanel
 		};
 	}
 
-	// Whether Home's xp total is showing its per-skill breakdown. A panel field, not
-	// a local: the home ticker rebuilds every three seconds and would otherwise shut
-	// the fold on the reader between one glance and the next.
-	private boolean xpBySkill;
-
 	// The pinned xp total doubles as a fold head. Closed it is the row it has always
-	// been; open, the name takes the accent this panel's other fold heads use.
+	// been; open, the name takes the accent this panel's other fold heads use. The
+	// state is a key in the panel's one fold register, same as every other fold: the
+	// home ticker rebuilds every three seconds and would otherwise shut the fold on
+	// the reader between one glance and the next.
 	private void xpFoldHead(JPanel head)
 	{
 		JLabel name = (JLabel) ((BorderLayout) head.getLayout())
 			.getLayoutComponent(BorderLayout.CENTER);
-		if (xpBySkill)
+		if (foldOpen(FOLD_HOME_XP))
 		{
 			name.setForeground(accent());
 		}
 		head.setToolTipText("Each skill's xp and xp per hour this session");
 		head.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
-		head.addMouseListener(clicker(() ->
-		{
-			xpBySkill = !xpBySkill;
-			rebuild();
-		}));
+		head.addMouseListener(clicker(() -> toggleFold(FOLD_HOME_XP)));
 	}
 
 	// One row per skill that moved this session, biggest first: the xp it gained and
@@ -647,7 +641,7 @@ class ChroniclePanel extends PluginPanel
 					xpFoldHead(r);
 				}
 				strip.add(r);
-				if (isXp && xpBySkill)
+				if (isXp && foldOpen(FOLD_HOME_XP))
 				{
 					addXpBySkill(strip);
 				}
@@ -902,7 +896,6 @@ class ChroniclePanel extends PluginPanel
 		detailStack.clear();
 		drillShown.clear();
 		statsExpanded.clear();
-		xpBySkill = false;
 		gatherHistory();
 		rebuild();
 	}
@@ -1684,9 +1677,9 @@ class ChroniclePanel extends PluginPanel
 			if (open)
 			{
 				JPanel drill = cardPlain();
-				// Pets pages get a dated line under each slot. Source and count
-				// only appear on rows an older record supplied; the plugin's own
-				// pet emit carries the name alone.
+				// Pets pages have a dated line to put under a slot. Source and
+				// count only appear on rows an older record supplied; the plugin's
+				// own pet emit carries the name alone.
 				boolean petPage = page.toLowerCase(Locale.ROOT).contains("pet");
 				Map<String, LocalStore.PetRow> known = petPage
 					? petsByName() : java.util.Collections.emptyMap();
@@ -1696,59 +1689,54 @@ class ChroniclePanel extends PluginPanel
 				// journal has a kill count; the rest of the page is untouched.
 				Map<String, GrindBook.PetChase> chases = petPage
 					? plugin.petChases(slots) : java.util.Collections.emptyMap();
-				// A skilling pet's odds move with the level, and the journal knows
-				// the level held now, not the one each log was cut at. That reads a
-				// little dry, and it is said once here, above the rows it applies to,
-				// rather than left for whoever thinks to hover.
-				if (levelRead(chases, known, slots, lit))
+				// What each slot has to say for itself, settled before a row is
+				// mounted: seventy of these lines at once is a wall, so the page is
+				// a list of names and each one gives its line up only when asked.
+				// The note above them has to know whether any of them has one.
+				List<List<JPanel>> detail = new ArrayList<>();
+				boolean anyDetail = false;
+				for (int i = 0; i < slots.size(); i++)
 				{
-					drill.add(note("Skilling odds are read at the levels you hold now, "
-						+ "not the ones the work was done at, so they run a little dry."));
+					String key = slots.get(i).toLowerCase(Locale.ROOT);
+					List<JPanel> d = petDetail(lit[i], known.get(key), chases.get(key));
+					detail.add(d);
+					anyDetail |= !d.isEmpty();
+				}
+				// One note doing two jobs: that the rows open, and the caveat on
+				// what opening one shows. A skilling pet's odds move with the level,
+				// and the journal knows the level held now, not the one each log was
+				// cut at, so those figures run a little dry.
+				if (anyDetail)
+				{
+					drill.add(note("Click pet to see odds. Skilling odds are based "
+						+ "on current level."));
 					drill.add(vgap(3));
 				}
 				for (int i = 0; i < slots.size(); i++)
 				{
-					LocalStore.PetRow pet = known.get(slots.get(i).toLowerCase(Locale.ROOT));
+					String slot = slots.get(i);
 					// A pet the journal recorded lights even if its page was never
 					// opened. Green owned, red missing, as in game.
-					drill.add(row(slots.get(i), "",
-						lit[i] || pet != null ? ACCENT_SESSION : ACCENT_RED, true));
-					if (pet != null)
+					JPanel r = row(slot, "",
+						lit[i] || known.get(slot.toLowerCase(Locale.ROOT)) != null
+							? ACCENT_SESSION : ACCENT_RED, true);
+					drill.add(r);
+					List<JPanel> d = detail.get(i);
+					if (d.isEmpty())
 					{
-						StringBuilder line = new StringBuilder();
-						if (pet.source != null && !pet.source.isEmpty())
-						{
-							line.append(pet.source);
-							if (pet.kc > 0)
-							{
-								// A skilling pet has no kill count; what was
-								// recorded is the xp behind it.
-								line.append(isSkill(pet.source)
-									? ", " + fmt(pet.kc) + " xp"
-									: ", kc " + fmt(pet.kc));
-							}
-						}
-						// No provenance, no line: the plugin's own pet emit carries
-						// the name alone, and an empty label with a date adrift at
-						// the right margin reads as a fault.
-						if (line.length() > 0)
-						{
-							drill.add(ghostRow(line.toString(), pet.ts > 0
-								? TASK_DAY.format(Instant.ofEpochMilli(pet.ts)) : ""));
-						}
+						// Nothing under it to uncover, so it is not a fold: no hand
+						// cursor promising one, and no click that does nothing.
+						continue;
 					}
-					else if (!lit[i])
+					String foldKey = "pets:" + page + ":" + slot.toLowerCase(Locale.ROOT);
+					r.setCursor(java.awt.Cursor.getPredefinedCursor(
+						java.awt.Cursor.HAND_CURSOR));
+					r.addMouseListener(clicker(() -> toggleFold(foldKey)));
+					if (foldOpen(foldKey))
 					{
-						GrindBook.PetChase chase =
-							chases.get(slots.get(i).toLowerCase(Locale.ROOT));
-						if (chase != null)
+						for (JPanel line : d)
 						{
-							// The share is drawn at its own width, so it is what
-							// the name has left to fit inside.
-							String share = holdShare(chase);
-							JPanel r = ghostRow(fitChase(chase, share), share,
-								chase.percentileDry >= 90 ? ACCENT_RED : null);
-							drill.add(tipped(r, chaseTip(chase)));
+							drill.add(line);
 						}
 					}
 				}
@@ -2032,23 +2020,48 @@ class ChroniclePanel extends PluginPanel
 		return sb.append(".").toString();
 	}
 
-	// True when a chase about to be drawn has its odds read off a level. The note
-	// belongs to the page, not to each row: eight repetitions of the same caveat is
-	// not restraint.
-	private static boolean levelRead(Map<String, GrindBook.PetChase> chases,
-		Map<String, LocalStore.PetRow> known, List<String> slots, boolean[] lit)
+	// Everything a pets page has to say under one slot, built whether or not the
+	// slot is open: an owned pet's provenance and date, or how far the chase for an
+	// unearned one has run. Empty where the journal has neither, and an empty list
+	// is what makes a row inert rather than a fold with nothing behind it.
+	private static List<JPanel> petDetail(boolean lit, LocalStore.PetRow pet,
+		GrindBook.PetChase chase)
 	{
-		for (int i = 0; i < slots.size(); i++)
+		List<JPanel> out = new ArrayList<>();
+		if (pet != null)
 		{
-			String key = slots.get(i).toLowerCase(Locale.ROOT);
-			// exactly the rows the loop below draws a chase on
-			GrindBook.PetChase c = lit[i] || known.get(key) != null ? null : chases.get(key);
-			if (c != null && c.level > 0)
+			StringBuilder line = new StringBuilder();
+			if (pet.source != null && !pet.source.isEmpty())
 			{
-				return true;
+				line.append(pet.source);
+				if (pet.kc > 0)
+				{
+					// A skilling pet has no kill count; what was recorded is the
+					// xp behind it.
+					line.append(isSkill(pet.source)
+						? ", " + fmt(pet.kc) + " xp"
+						: ", kc " + fmt(pet.kc));
+				}
+			}
+			// No provenance, no line: the plugin's own pet emit carries the name
+			// alone, and an empty label with a date adrift at the right margin
+			// reads as a fault.
+			if (line.length() > 0)
+			{
+				out.add(ghostRow(line.toString(), pet.ts > 0
+					? TASK_DAY.format(Instant.ofEpochMilli(pet.ts)) : ""));
 			}
 		}
-		return false;
+		else if (!lit && chase != null)
+		{
+			// The share is drawn at its own width, so it is what the name has left
+			// to fit inside.
+			String share = holdShare(chase);
+			JPanel r = ghostRow(fitChase(chase, share), share,
+				chase.percentileDry >= 90 ? ACCENT_RED : null);
+			out.add(tipped(r, chaseTip(chase)));
+		}
+		return out;
 	}
 
 	// One tooltip over a row and everything in it: a panel's own tip never fires,
@@ -2291,9 +2304,32 @@ class ChroniclePanel extends PluginPanel
 		}
 	}
 
-	// Sections clicked open this session, keyed family:section. Everything
-	// foldable starts folded.
+	// Every fold in the panel that stands open this session, one key apiece:
+	// family:section on Stats, family:craft:verb a level under it, pets:page:name
+	// on a collection log pets page, and FOLD_HOME_XP for the one on Home. A field,
+	// not a local, because rebuild() throws the whole panel away several times a
+	// minute and a reader's fold has to outlive that. Everything foldable starts
+	// folded, and the register is dropped whole when the account changes.
 	private final java.util.Set<String> statsExpanded = new java.util.HashSet<>();
+
+	// Home's xp total, broken out per skill.
+	private static final String FOLD_HOME_XP = "home:xp";
+
+	/** True while the fold under this key stands open. */
+	private boolean foldOpen(String key)
+	{
+		return statsExpanded.contains(key);
+	}
+
+	/** Open a shut fold or shut an open one, and redraw. Every fold comes here. */
+	private void toggleFold(String key)
+	{
+		if (!statsExpanded.remove(key))
+		{
+			statsExpanded.add(key);
+		}
+		rebuild();
+	}
 
 	// gp per consumable key, refreshed per rebuild. What the Food and Potions
 	// rows put beside the count.
@@ -2434,7 +2470,7 @@ class ChroniclePanel extends PluginPanel
 			}
 
 			String stateKey = statsFamily + ":" + sec;
-			boolean open = statsExpanded.contains(stateKey);
+			boolean open = foldOpen(stateKey);
 			long secGp = 0;
 			for (Map.Entry<String, Long> e : rows)
 			{
@@ -2453,14 +2489,7 @@ class ChroniclePanel extends PluginPanel
 			headName.setForeground(open ? accent() : ColorScheme.LIGHT_GRAY_COLOR.darker());
 			head.setBorder(BorderFactory.createEmptyBorder(6, 2, 2, 2));
 			head.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
-			head.addMouseListener(clicker(() ->
-			{
-				if (!statsExpanded.remove(stateKey))
-				{
-					statsExpanded.add(stateKey);
-				}
-				rebuild();
-			}));
+			head.addMouseListener(clicker(() -> toggleFold(stateKey)));
 			p.add(head);
 			if (open)
 			{
@@ -2605,7 +2634,7 @@ class ChroniclePanel extends PluginPanel
 		for (String verb : verbs)
 		{
 			String stateKey = "Skilling:" + craft + ":" + verb;
-			boolean open = statsExpanded.contains(stateKey);
+			boolean open = foldOpen(stateKey);
 			p.add(subHead(StatRegistry.suffixLabel(verb),
 				fmt(verbTotal.getOrDefault(verb, 0L)), stateKey, open));
 			if (open)
@@ -2636,7 +2665,7 @@ class ChroniclePanel extends PluginPanel
 			sum += e.getValue();
 		}
 		String stateKey = "Ledger & Roads:Destinations";
-		boolean open = statsExpanded.contains(stateKey);
+		boolean open = foldOpen(stateKey);
 		p.add(subHead("Destinations", fmt(sum), stateKey, open));
 		if (open)
 		{
@@ -2657,14 +2686,7 @@ class ChroniclePanel extends PluginPanel
 		name.setForeground(open ? accent() : ColorScheme.LIGHT_GRAY_COLOR.darker());
 		head.setBorder(BorderFactory.createEmptyBorder(3, 10, 1, 2));
 		head.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
-		head.addMouseListener(clicker(() ->
-		{
-			if (!statsExpanded.remove(stateKey))
-			{
-				statsExpanded.add(stateKey);
-			}
-			rebuild();
-		}));
+		head.addMouseListener(clicker(() -> toggleFold(stateKey)));
 		return head;
 	}
 

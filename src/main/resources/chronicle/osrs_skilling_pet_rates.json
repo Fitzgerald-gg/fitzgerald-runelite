@@ -8,7 +8,8 @@
     "notImplemented": "The 200,000,000 xp fifteen-fold bonus. No account here is near it and the wiki gives no worked denominators for it.",
     "requires": "A pet whose drop waits on an unlock the journal can see carries a requires. Attempts go on being counted without it and none of them rolls, so the pet is not a dry chase, it is a chase not yet begun, and the panel draws no row for it at all. Each clause is its own object under requires, and every one named must hold: diary takes a region and a tier as the character sheet's achievements spell them, quest takes a Quest name and wants it FINISHED, combat takes a combat achievement tier and wants its status past 0. A pet with no requires is open to anyone who can reach its attempts. Cite the wiki line in _cite. Only Chompy chick carries one today; the audit behind that is in _meta.unlocked.",
     "unlocked": "Every pet in this book and in osrs_clog_rates.json was read for the same fault, page by page as raw wikitext. Chompy chick is the only one whose attempt unit can be racked up while the pet is impossible AND whose unlock the journal can read. Dom names one too (delve level 6 or higher) but has no rate here and draws no row. Two more are unlocks nothing in the journal can answer: Beef, whose fight is free to play where the drop is members only, and every members-only skilling pet under a counter a free account can also mint. Membership is not an achievement, is not permanent, and is nowhere in the journal, so it is said here and in Beef's own _excluded rather than gated. Zalcano hands out a kill count at 5 damage and rolls Smolcano only past 31, which is a contribution no record keeps.",
-    "kills": "Some pets are rolled on a thing the collection log or the drop ledger already counts for them: a Hespori grown, a search of the Rewards Guardian, a master casket opened, a high gamble, a boss killed. Those sit in kills rather than sources and are read off that count. orKc names the same event under the other book's spelling, and the larger of the two is taken, never the sum."
+    "rollUnit": "Every pet in this book and in osrs_clog_rates.json was read again on 2026-09-03 for one fault: a rate the wiki attaches to a reward pool, a permit, a casket or a crate being priced off the kill count of the thing that paid for it. Tiny tempor was the one, and it moved here off the Tempoross subdue count. Two more were checked and left alone because the count already kept is one to one with the roll: Phoenix is looted from the Reward Cart, which is handed over once per Wintertodt subdue of 500 points or more, and Tumeken's guardian is rolled at the Tombs of Amascut reward chest, which is opened once per raid. The rest of osrs_clog_rates.json's pets roll on the kill itself. Note that the non-pet Tempoross rows in that book are still keyed to the subdue and are per-search on the wiki; that is a wider correction than a pets page needed and was left for whoever takes it on.",
+    "kills": "Some pets are rolled on a thing the collection log or the drop ledger already counts for them: a Hespori grown, a search of the Rewards Guardian, a search of the Tempoross reward pool, a master casket opened, a high gamble, a boss killed. Those sit in kills rather than sources and are read off that count. orKc names the same event under the other book's spelling, and the larger of the two is taken, never the sum."
   },
   "pets": {
     "Beaver": {
@@ -1141,6 +1142,22 @@
           "counter": "portTasksCompleted",
           "name": "Port tasks",
           "base": 6000
+        }
+      ]
+    },
+    "Tiny tempor": {
+      "skill": null,
+      "activity": "Tempoross",
+      "unit": "searches",
+      "levelScaled": false,
+      "_excluded": "The Tempoross subdue count is not the denominator. A subdue pays reward permits by the points scored, one for the first 2,000 and another every 700 beyond, and a permit buys one search of the reward pool; the roll is on the search. Counting subdues counts fewer attempts than were made and prints the chase less dry than it is. Casket (Tempoross) is out as well: the casket is one of the things a search hands over, at 8/160 on that same table, and the casket's own table carries no pet. Counting caskets would count a share of those searches a second time.",
+      "_approximation": "The pool's Big-Search option spends five permits at once for five rewards. Where the journal records that as one event rather than five, five rolls are counted as one and the figure reads less dry than it was.",
+      "_cite": "https://oldschool.runescape.wiki/w/Tempoross - {{DropsLineReward|name=Tiny tempor|quantity=1|rarity=1/8000|raritynotes={{CiteTwitter|author=Mod Zuko|name=rewardPool}}}} in the Unique rewards table, and the page's own gloss under it: obtained from fishing in the reward pool, not from killing the boss itself.",
+      "kills": [
+        {
+          "kc": "Reward pool (Tempoross)",
+          "name": "Reward pool",
+          "base": 8000
         }
       ]
     },
