@@ -2,10 +2,11 @@
   "_meta": {
     "source": "oldschool.runescape.wiki, one page per pet, read as raw wikitext",
     "read": "2026-09-02",
-    "formula": "Eight of the nine skilling pets roll 1 / (base - level * 25), where level is the player's base level in the pet's skill and stops helping at 99. Herbi is flat. levelScaled says which.",
-    "approximation": "Chronicle knows the level held now, not the level each attempt was made at. Applying today's level to yesterday's work prices early attempts better than they were, so every level-scaled figure reads a little dry. Said on the page, not only here.",
+    "formula": "A skilling roll is 1 / (B - level * 25) where the pet says levelScaled, off the player's base level in the pet's skill, which stops helping at 99. The rest are flat. A kill row marked flat keeps its own denominator inside a level-scaled pet: Fishing Trawler is the only one, and the wiki calls it the one exception.",
+    "approximation": "Chronicle knows the level held now, not the level each attempt was made at. Applying today's level to yesterday's work prices early attempts better than they were, so every level-scaled figure reads a little dry. Said on the page, not only here. Where a rate band could not be pinned to the attempt the journal counted, the pet's own _approximation says which way its figure errs.",
     "unlisted": "A source the wiki prints as Unknown, or that no counter can name in the unit the roll is asked in, is absent. Absence is deliberate everywhere; each pet's _excluded says what and why.",
-    "notImplemented": "The 200,000,000 xp fifteen-fold bonus. No account here is near it and the wiki gives no worked denominators for it."
+    "notImplemented": "The 200,000,000 xp fifteen-fold bonus. No account here is near it and the wiki gives no worked denominators for it.",
+    "kills": "Some pets are rolled on a thing the collection log or the drop ledger already counts for them: a Hespori grown, a search of the Rewards Guardian, a master casket opened, a high gamble, a boss killed. Those sit in kills rather than sources and are read off that count. orKc names the same event under the other book's spelling, and the larger of the two is taken, never the sum."
   },
   "pets": {
     "Beaver": {
@@ -885,6 +886,411 @@
           "kc": "Hespori",
           "name": "Hespori",
           "base": 7000
+        }
+      ]
+    },
+    "Heron": {
+      "skill": "fishing",
+      "activity": "Fishing",
+      "unit": "catches",
+      "levelScaled": true,
+      "_excluded": "Harpoonfish cannot give the heron and the wiki says so outright, so harpoonFishCaught is held out. Aerial fishing, the three leaping fish, infernal eels and leechfin are on the table but hand over an item the counter cannot type and land on no xp of their own, so none of them mints a key to count. seaTurtleCaught and mantaRayCaught are Trawler reward fish, not catches on this table. fishCaught is the untyped floor over every row below and would double all of them.",
+      "_approximation": "Fishing Trawler is the one row the level does not touch, and it is priced at the 1/5,000 a minimum contribution earns. A full contribution meter doubles that to 1/2,500, so a diligent trawler is drier than this figure says.",
+      "sources": [
+        {
+          "counter": "shrimpCaught",
+          "name": "Shrimps",
+          "base": 870330
+        },
+        {
+          "counter": "anchoviesCaught",
+          "name": "Anchovies",
+          "base": 870330
+        },
+        {
+          "counter": "karambwanjiCaught",
+          "name": "Karambwanji",
+          "base": 443697
+        },
+        {
+          "counter": "sardineCaught",
+          "name": "Sardines",
+          "base": 1056000
+        },
+        {
+          "counter": "herringCaught",
+          "name": "Herring",
+          "base": 1056000
+        },
+        {
+          "counter": "mackerelCaught",
+          "name": "Big net fishing",
+          "base": 1147827
+        },
+        {
+          "counter": "codCaught",
+          "name": "Big net fishing",
+          "base": 1147827
+        },
+        {
+          "counter": "bassCaught",
+          "name": "Big net fishing",
+          "base": 1147827
+        },
+        {
+          "counter": "troutCaught",
+          "name": "Trout",
+          "base": 923616
+        },
+        {
+          "counter": "salmonCaught",
+          "name": "Salmon",
+          "base": 923616
+        },
+        {
+          "counter": "pikeCaught",
+          "name": "Pike",
+          "base": 305792
+        },
+        {
+          "counter": "rainbowFishCaught",
+          "name": "Rainbow fish",
+          "base": 137739
+        },
+        {
+          "counter": "tunaCaught",
+          "name": "Tuna",
+          "base": 257770
+        },
+        {
+          "counter": "swordfishCaught",
+          "name": "Swordfish",
+          "base": 257770
+        },
+        {
+          "counter": "lobsterCaught",
+          "name": "Lobster",
+          "base": 116129
+        },
+        {
+          "counter": "caveEelCaught",
+          "name": "Cave eels",
+          "base": 257770
+        },
+        {
+          "counter": "monkfishCaught",
+          "name": "Monkfish",
+          "base": 138583
+        },
+        {
+          "counter": "karambwanCaught",
+          "name": "Karambwan",
+          "base": 170874
+        },
+        {
+          "counter": "sharkCaught",
+          "name": "Sharks",
+          "base": 82243
+        },
+        {
+          "counter": "anglerfishCaught",
+          "name": "Anglerfish",
+          "base": 78649
+        },
+        {
+          "counter": "minnowCaught",
+          "name": "Minnows",
+          "base": 977778
+        },
+        {
+          "counter": "darkCrabCaught",
+          "name": "Dark crabs",
+          "base": 149434
+        },
+        {
+          "counter": "sacredEelCaught",
+          "name": "Sacred eels",
+          "base": 99000
+        },
+        {
+          "counter": "guppyCaught",
+          "name": "Guppies",
+          "base": 820330
+        },
+        {
+          "counter": "cavefishCaught",
+          "name": "Cavefish",
+          "base": 300792
+        },
+        {
+          "counter": "tetraCaught",
+          "name": "Tetra",
+          "base": 257770
+        },
+        {
+          "counter": "catfishCaught",
+          "name": "Catfish",
+          "base": 152120
+        },
+        {
+          "counter": "swordtipSquidCaught",
+          "name": "Swordtip squid",
+          "base": 257770
+        },
+        {
+          "counter": "jumboSquidCaught",
+          "name": "Jumbo squid",
+          "base": 257770
+        },
+        {
+          "counter": "giantKrillCaught",
+          "name": "Giant krill",
+          "base": 257770
+        },
+        {
+          "counter": "haddockCaught",
+          "name": "Haddock",
+          "base": 247770
+        },
+        {
+          "counter": "yellowfinCaught",
+          "name": "Yellowfin",
+          "base": 237770
+        },
+        {
+          "counter": "halibutCaught",
+          "name": "Halibut",
+          "base": 227770
+        },
+        {
+          "counter": "bluefinCaught",
+          "name": "Bluefin",
+          "base": 217770
+        },
+        {
+          "counter": "marlinCaught",
+          "name": "Marlin",
+          "base": 207770
+        }
+      ],
+      "kills": [
+        {
+          "kc": "Fishing Trawler",
+          "name": "Fishing Trawler",
+          "base": 5000,
+          "flat": true
+        }
+      ]
+    },
+    "Soup": {
+      "skill": "sailing",
+      "activity": "Sailing",
+      "unit": "actions",
+      "levelScaled": false,
+      "_excluded": "salvagePulled is the untyped floor over the eight wrecks below and would double them, and the per-wreck <tier>SalvageSorted keys would double salvageSorted, which is one flat rate however the salvage was pulled. Crewmates' salvage is deliberately absent: the wiki gives no roll for work a crewmate did. barracudaTrialsCompleted names neither the trial nor the fish, and the rate across those runs from 1/16,000 to 1/3,000, so a single denominator for it would be a guess. Sea charting, deep sea trawling and trimming sails are priced by the wiki but nothing counts them yet.",
+      "_approximation": "A port task is rolled at 1/6,000 down to 1/3,150 by the level of the TASK, which the journal does not carry. Every task here is priced at the 1/6,000 the lowest task pays, so a career spent on hard tasks reads less dry than it was.",
+      "sources": [
+        {
+          "counter": "smallSalvagePulled",
+          "name": "Small shipwreck",
+          "base": 800000
+        },
+        {
+          "counter": "fishySalvagePulled",
+          "name": "Fisherman's shipwreck",
+          "base": 500000
+        },
+        {
+          "counter": "barracudaSalvagePulled",
+          "name": "Barracuda shipwreck",
+          "base": 300000
+        },
+        {
+          "counter": "largeSalvagePulled",
+          "name": "Large shipwreck",
+          "base": 280000
+        },
+        {
+          "counter": "plunderedSalvagePulled",
+          "name": "Pirate shipwreck",
+          "base": 275000
+        },
+        {
+          "counter": "martialSalvagePulled",
+          "name": "Mercenary shipwreck",
+          "base": 260000
+        },
+        {
+          "counter": "fremennikSalvagePulled",
+          "name": "Fremennik shipwreck",
+          "base": 230000
+        },
+        {
+          "counter": "opulentSalvagePulled",
+          "name": "Merchant shipwreck",
+          "base": 160000
+        },
+        {
+          "counter": "salvageSorted",
+          "name": "Salvage sorting",
+          "base": 800000
+        },
+        {
+          "counter": "portTasksCompleted",
+          "name": "Port tasks",
+          "base": 6000
+        }
+      ]
+    },
+    "Abyssal protector": {
+      "skill": null,
+      "activity": "Guardians of the Rift",
+      "unit": "searches",
+      "levelScaled": false,
+      "_excluded": "The roll is on searching the Rewards Guardian, not on playing a game, and searches bank. The journal's Guardians of the Rift count is the searches the ledger recorded and the log's own page count, whichever has seen more; where that page counts games instead the figure reads short of the searches actually made.",
+      "kills": [
+        {
+          "kc": "Guardians of the Rift",
+          "name": "Guardians of the Rift",
+          "base": 4000
+        }
+      ]
+    },
+    "Chompy chick": {
+      "skill": null,
+      "activity": "Chompy birds",
+      "unit": "kills",
+      "levelScaled": false,
+      "_excluded": "Jubbly birds are not chompies and roll nothing. The pet needs the elite Western Provinces diary before any of these rolls could have landed.",
+      "_approximation": "A chompy is rolled twice, once on the kill and once on the pluck, each at 1/500. The journal counts the kill; nothing counts the pluck. So a bird killed and plucked was rolled twice and is counted once here, and anyone who plucks is drier than this figure says. It is not doubled to cover that: plucking is optional, and doubling would overstate every bird left where it fell.",
+      "kills": [
+        {
+          "kc": "Chompy bird",
+          "name": "Chompy birds",
+          "base": 500
+        }
+      ]
+    },
+    "Bloodhound": {
+      "skill": null,
+      "activity": "Master clues",
+      "unit": "caskets",
+      "levelScaled": false,
+      "_excluded": "Master caskets alone. Every other trail tier rolls nothing for this pet, and the caskets the journal counts at those tiers are held out by name.",
+      "kills": [
+        {
+          "kc": "Clue Scroll (Master)",
+          "name": "Master caskets",
+          "base": 1000
+        }
+      ]
+    },
+    "Pet penance queen": {
+      "skill": null,
+      "activity": "Barbarian Assault",
+      "unit": "high gambles",
+      "levelScaled": false,
+      "_excluded": "High gambles alone: low and medium gambles cannot give it, so no counter of them belongs in this denominator.",
+      "kills": [
+        {
+          "kc": "Barbarian Assault high gamble",
+          "name": "High gambles",
+          "base": 1000
+        }
+      ]
+    },
+    "Lil' creator": {
+      "skill": null,
+      "activity": "Soul Wars",
+      "unit": "crates",
+      "levelScaled": false,
+      "_excluded": "The roll is on the Spoils of War crate, not on the game that paid for it, and the log's Soul Wars page counts exactly those crates. The ledger spells the same event Spoils of war; the larger of the two stands for it, never the sum.",
+      "kills": [
+        {
+          "kc": "Soul Wars",
+          "orKc": [
+            "Spoils of war"
+          ],
+          "name": "Spoils of War",
+          "base": 400
+        }
+      ]
+    },
+    "Quetzin": {
+      "skill": null,
+      "activity": "Hunter rumours",
+      "unit": "sacks",
+      "levelScaled": false,
+      "_excluded": "Basic and adept sacks carry no Quetzin line at all, so the Hunter Guild page count is not the denominator: it counts rumours of all four tiers and only two of them roll.",
+      "kills": [
+        {
+          "kc": "Hunters' loot sack (expert)",
+          "name": "Expert sacks",
+          "base": 1000
+        },
+        {
+          "kc": "Hunters' loot sack (master)",
+          "name": "Master sacks",
+          "base": 1000
+        }
+      ]
+    },
+    "Yami": {
+      "skill": null,
+      "activity": "Yama",
+      "unit": "kills",
+      "levelScaled": false,
+      "_excluded": "A kill under a Contract of Familiar Acquisition rolls 1/100 instead, and nothing the journal carries tells those kills from the rest, so every kill is priced at the ordinary 1/2,500 and a contract run reads drier than it was. The roll also wants more than 15% of the damage, which is likewise not recorded.",
+      "kills": [
+        {
+          "kc": "Yama",
+          "name": "Yama",
+          "base": 2500
+        }
+      ]
+    },
+    "Gull": {
+      "skill": null,
+      "activity": "Shellbane gryphon",
+      "unit": "kills",
+      "levelScaled": false,
+      "_excluded": "Nothing: the gryphon is the whole table, on task or off it.",
+      "kills": [
+        {
+          "kc": "Shellbane Gryphon",
+          "name": "Shellbane gryphon",
+          "base": 3000
+        }
+      ]
+    },
+    "Beef": {
+      "skill": null,
+      "activity": "Brutus",
+      "unit": "kills",
+      "levelScaled": false,
+      "_excluded": "Nothing: Brutus is the whole table. The drop is members-only where the fight is not, so kills made free to play rolled nothing and are counted here all the same.",
+      "kills": [
+        {
+          "kc": "Brutus",
+          "name": "Brutus",
+          "base": 1000
+        }
+      ]
+    },
+    "Aggy": {
+      "skill": null,
+      "activity": "Mad Angel",
+      "unit": "kills",
+      "levelScaled": false,
+      "_excluded": "The log spells the page The Mad Angel and the ledger spells the source Mad Angel. They are one record, so the fuller of the two stands for it and the two are never added.",
+      "kills": [
+        {
+          "kc": "Mad Angel",
+          "orKc": [
+            "The Mad Angel"
+          ],
+          "name": "Mad Angel",
+          "base": 2000
         }
       ]
     }

@@ -401,18 +401,31 @@ class GrindBook
 		}
 	}
 
-	/** A source counted in kills rather than actions: only Hespori, for Tangleroot. */
+	/**
+	 * A source counted in kills rather than actions. Hespori is one; so is every pet
+	 * whose attempts a collection log page or the drop ledger already counted for it,
+	 * a search of the Rewards Guardian or a master casket opened as readily as a boss
+	 * killed. {@code orKc} names the same event again where the log and the ledger
+	 * spell it differently ("Mad Angel" against "The Mad Angel"): the larger of the
+	 * two is the count, never the sum, because they are one record read twice.
+	 * {@code flat} holds the level term off a source that does not take one, which is
+	 * Fishing Trawler alone among the fishing rows.
+	 */
 	private static final class SkillKill
 	{
 		final String kc;
+		final List<String> orKc;
 		final String name;
 		final long base;
+		final boolean flat;
 
-		SkillKill(String kc, String name, long base)
+		SkillKill(String kc, List<String> orKc, String name, long base, boolean flat)
 		{
 			this.kc = kc;
+			this.orKc = orKc;
 			this.name = name;
 			this.base = base;
+			this.flat = flat;
 		}
 	}
 
@@ -519,10 +532,6 @@ class GrindBook
 					str(s, "notSuffix"), minus, str(s, "name"), base));
 			}
 		}
-		if (sources.isEmpty())
-		{
-			return null;
-		}
 		List<SkillKill> kills = new ArrayList<>();
 		if (o.has("kills") && o.get("kills").isJsonArray())
 		{
@@ -534,11 +543,27 @@ class GrindBook
 				}
 				JsonObject k = el.getAsJsonObject();
 				long base = safeLong(k.get("base"));
-				if (base > 0 && str(k, "kc") != null)
+				if (base <= 0 || str(k, "kc") == null)
 				{
-					kills.add(new SkillKill(str(k, "kc"), str(k, "name"), base));
+					continue;   // an unpriced row is left unpriced, never guessed
 				}
+				List<String> orKc = new ArrayList<>();
+				if (k.has("orKc") && k.get("orKc").isJsonArray())
+				{
+					for (JsonElement a : k.getAsJsonArray("orKc"))
+					{
+						orKc.add(a.getAsString());
+					}
+				}
+				kills.add(new SkillKill(str(k, "kc"), orKc, str(k, "name"), base,
+					k.has("flat") && k.get("flat").getAsBoolean()));
 			}
+		}
+		// A pet rolled only off kill counts is priced the same way; what it may not
+		// be is priced off nothing at all.
+		if (sources.isEmpty() && kills.isEmpty())
+		{
+			return null;
 		}
 		return new SkillPet(str(o, "skill"), str(o, "activity"), str(o, "unit"),
 			o.has("levelScaled") && o.get("levelScaled").getAsBoolean(), sources, kills);
@@ -590,9 +615,8 @@ class GrindBook
 		}
 		for (SkillKill k : spec.kills)
 		{
-			Long kc = kcByNorm.get(norm(k.kc));
-			long n = kc != null ? Math.min(kc, MAX_KC) : 0;
-			long rate = spec.levelScaled ? k.base - 25L * level : k.base;
+			long n = Math.min(killCount(k, kcByNorm), MAX_KC);
+			long rate = spec.levelScaled && !k.flat ? k.base - 25L * level : k.base;
 			if (n <= 0 || rate < MIN_RATE)
 			{
 				continue;
@@ -609,6 +633,24 @@ class GrindBook
 		double pct = Math.max(0.0, Math.min(100.0, (1.0 - miss) * 100.0));
 		return new PetChase(pet, total, Math.round(pct * 10.0) / 10.0, sources,
 			spec.activity, spec.unit, level);
+	}
+
+	// The kills behind one source. Where the log and the ledger spell the same event
+	// two ways, the fuller record stands for it: the log is only as fresh as the last
+	// time it was opened, and the two added together would count every kill twice.
+	private static long killCount(SkillKill k, Map<String, Long> kcByNorm)
+	{
+		Long kc = kcByNorm.get(norm(k.kc));
+		long n = kc != null ? kc : 0;
+		for (String alt : k.orKc)
+		{
+			Long other = kcByNorm.get(norm(alt));
+			if (other != null)
+			{
+				n = Math.max(n, other);
+			}
+		}
+		return n;
 	}
 
 	// What the journal has counted for one source. A family sweep takes every key in

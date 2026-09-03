@@ -312,6 +312,19 @@ public class PanelPreviewTest
 		s.lifetime.put("torstolPlanted", 120L);
 		s.lifetime.put("oakPlanted", 88L);
 		s.lifetime.put("yewPlanted", 44L);
+		// Heron off three fish the counter can name, beside a Trawler count the
+		// level never touches; Soup off the salvage the ledger can tier.
+		s.skills.put("fishing", new long[]{96, 10_692_629L});
+		s.lifetime.put("sharkCaught", 21_204L);
+		s.lifetime.put("anglerfishCaught", 8_112L);
+		s.lifetime.put("minnowCaught", 4_002L);
+		s.lifetime.put("harpoonFishCaught", 9_000L);
+		s.lifetime.put("opulentSalvagePulled", 1_204L);
+		s.lifetime.put("smallSalvagePulled", 4_002L);
+		s.lifetime.put("salvagePulled", 5_206L);
+		s.lifetime.put("salvageSorted", 3_112L);
+		s.lifetime.put("portTasksCompleted", 802L);
+		s.lifetime.put("barracudaTrialsCompleted", 220L);
 
 		s.session.put("damageDealt", 24_113);
 		s.session.put("tilesRan", 8_442);
@@ -392,6 +405,23 @@ public class PanelPreviewTest
 		// Tangleroot's other half: the Hespori kill count, which the skilling book
 		// prices off the same formula as the patches
 		kcs.addProperty("hespori", 61);
+		// And the pets counted the same way a boss is, in the unit their roll is
+		// asked in: a search, a crate, a casket, a high gamble, a loot sack, a trip,
+		// a kill. Two of them are spelled the way the log spells them and two the
+		// way the ledger does, which is the join the book has to make.
+		kcs.addProperty("guardians of the rift", 5_218);
+		kcs.addProperty("soul wars", 346);
+		kcs.addProperty("clue scroll (master)", 300);
+		kcs.addProperty("barbarian assault high gamble", 611);
+		kcs.addProperty("hunters' loot sack (expert)", 502);
+		kcs.addProperty("hunters' loot sack (master)", 110);
+		kcs.addProperty("hunter guild", 4_000);
+		kcs.addProperty("chompy bird", 295);
+		kcs.addProperty("yama", 1_204);
+		kcs.addProperty("shellbane gryphon", 214);
+		kcs.addProperty("brutus", 75);
+		kcs.addProperty("the mad angel", 124);
+		kcs.addProperty("fishing trawler", 410);
 		clog.add("kcs", kcs);
 		JsonObject skcs = new JsonObject();
 		skcs.addProperty("Abyssal demon", 4112);

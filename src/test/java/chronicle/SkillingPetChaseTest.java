@@ -30,11 +30,12 @@ public class SkillingPetChaseTest
 {
 	private static final List<String> PETS = Arrays.asList(
 		"Beaver", "Rock golem", "Rocky", "Giant Squirrel", "Baby chinchompa",
-		"Herbi", "Rift guardian", "Tangleroot", "Smolcano");
+		"Herbi", "Rift guardian", "Tangleroot", "Heron", "Soup", "Smolcano");
 
 	private final Map<String, Long> counters = new HashMap<>();
 	private final Map<String, long[]> skills = new HashMap<>();
 	private final JsonObject clog = new JsonObject();
+	private final List<LocalStore.SourceRow> ledger = new ArrayList<>();
 
 	private void count(String key, long n)
 	{
@@ -53,10 +54,16 @@ public class SkillingPetChaseTest
 		clog.add("kcs", kcs);
 	}
 
+	// a drop ledger source and its count, which is a kill count like any other
+	private void ledger(String source, int n)
+	{
+		ledger.add(new LocalStore.SourceRow(source, n, n, 0L, null, 0L, 0L));
+	}
+
 	private GrindBook.PetChase chase(String pet)
 	{
 		Map<String, GrindBook.PetChase> out = new GrindBook(new Gson())
-			.petChases(clog, new ArrayList<>(), counters, skills, PETS);
+			.petChases(clog, ledger, counters, skills, PETS);
 		return out.get(pet.toLowerCase(java.util.Locale.ROOT));
 	}
 
@@ -346,6 +353,99 @@ public class SkillingPetChaseTest
 		assertFalse(new GrindBook(new Gson())
 			.petChases(clog, new ArrayList<>(), counters, skills, PETS)
 			.containsKey("beaver"));
+	}
+
+	// The heron is rolled per catch, and only on a catch the counter can name. Aerial
+	// fishing, the leaping fish, infernal eels and leechfin mint no typed key at all;
+	// harpoonfish mints one and cannot give the pet; fishCaught is the untyped floor
+	// over the rows that can, and would double every one of them.
+	@Test
+	public void theHeronCountsTheCatchesItCanNameAndNoneItCannot()
+	{
+		level("fishing", 92);
+		count("sharkCaught", 40_000);
+		count("anglerfishCaught", 12_000);
+		count("minnowCaught", 30_000);
+		GrindBook.PetChase bare = chase("Heron");
+		count("harpoonFishCaught", 9_000);      // cannot give the heron, and says so
+		count("fishCaught", 82_000);            // the untyped floor over the three
+		count("leapingTroutCaught", 4_100);     // no rate this journal can ask for
+		count("seaTurtleCaught", 500);          // a Trawler reward, not a catch here
+		count("mantaRayCaught", 400);
+		GrindBook.PetChase with = chase("Heron");
+		assertEquals(49.8, bare.percentileDry, 0.05);
+		assertEquals(bare.percentileDry, with.percentileDry, 0.0001);
+		assertEquals(82_000, with.kc);
+		assertEquals(3, with.sources.size());
+		assertEquals("Fishing", with.activity);
+		assertEquals("catches", with.unit);
+		// the level term has come off each base, heaviest source first
+		assertEquals("Sharks", with.sources.get(0).boss);
+		assertEquals(82_243 - 25 * 92, with.sources.get(0).rate);
+		assertEquals("Minnows", with.sources.get(1).boss);
+		assertEquals(977_778 - 25 * 92, with.sources.get(1).rate);
+	}
+
+	// The Trawler is the one fishing row the level does not touch, and the wiki calls
+	// it the one exception. It joins the same chase as the fish that do scale.
+	@Test
+	public void theTrawlerIsTheOneFishingRowTheLevelDoesNotTouch()
+	{
+		ledger("Fishing Trawler", 410);
+		level("fishing", 1);
+		GrindBook.PetChase low = chase("Heron");
+		level("fishing", 99);
+		GrindBook.PetChase high = chase("Heron");
+		assertEquals(7.9, low.percentileDry, 0.05);
+		assertEquals(low.percentileDry, high.percentileDry, 0.0001);
+		assertEquals(5_000, low.sources.get(0).rate);
+		assertEquals(5_000, high.sources.get(0).rate);
+		assertEquals(410, high.kc);
+
+		// and the fish beside it do move with the level, in the same chase
+		level("fishing", 92);
+		count("sharkCaught", 40_000);
+		count("anglerfishCaught", 12_000);
+		count("minnowCaught", 30_000);
+		GrindBook.PetChase both = chase("Heron");
+		assertEquals(53.7, both.percentileDry, 0.05);
+		assertEquals(4, both.sources.size());
+		assertEquals(82_410, both.kc);
+	}
+
+	// Soup is flat: no Sailing level enters any of it. Salvage is counted per wreck,
+	// because the rate differs by wreck; sorting is one rate however the salvage was
+	// pulled, so the total sorted is the row and the per-wreck sorted keys would
+	// double it. salvagePulled is the untyped floor, and a Barracuda trial is priced
+	// anywhere from 1/16,000 to 1/3,000 by a trial and a fish the counter never names.
+	@Test
+	public void soupCountsTheSalvageItCanTierAndNothingItCannot()
+	{
+		count("smallSalvagePulled", 4_000);
+		count("opulentSalvagePulled", 1_200);
+		count("salvageSorted", 3_000);
+		count("portTasksCompleted", 800);
+		GrindBook.PetChase bare = chase("Soup");
+		count("salvagePulled", 10_000);         // the untyped floor over the wrecks
+		count("opulentSalvageSorted", 900);     // already inside salvageSorted
+		count("barracudaTrialsCompleted", 220); // no rate without the trial and fish
+		level("sailing", 99);
+		GrindBook.PetChase with = chase("Soup");
+		assertEquals(13.9, bare.percentileDry, 0.05);
+		assertEquals(bare.percentileDry, with.percentileDry, 0.0001);
+		assertEquals(9_000, with.kc);
+		assertEquals(4, with.sources.size());
+		// flat: the bases are printed as the wiki prints them, no level term taken off
+		Map<String, long[]> by = new HashMap<>();
+		for (GrindBook.PetSource s : with.sources)
+		{
+			by.put(s.boss, new long[]{s.kc, s.rate});
+		}
+		assertEquals(800_000, by.get("Small shipwreck")[1]);
+		assertEquals(160_000, by.get("Merchant shipwreck")[1]);
+		assertEquals(800_000, by.get("Salvage sorting")[1]);
+		assertEquals(6_000, by.get("Port tasks")[1]);
+		assertEquals(0, with.level);
 	}
 
 	// Hespori -> Tangleroot as the bundled boss rate book prints it.
