@@ -895,7 +895,7 @@ class ChroniclePanel extends PluginPanel
 		detailSource = null;
 		detailStack.clear();
 		drillShown.clear();
-		statsExpanded.clear();
+		openFolds.clear();
 		gatherHistory();
 		rebuild();
 	}
@@ -2309,8 +2309,9 @@ class ChroniclePanel extends PluginPanel
 	// on a collection log pets page, and FOLD_HOME_XP for the one on Home. A field,
 	// not a local, because rebuild() throws the whole panel away several times a
 	// minute and a reader's fold has to outlive that. Everything foldable starts
-	// folded, and the register is dropped whole when the account changes.
-	private final java.util.Set<String> statsExpanded = new java.util.HashSet<>();
+	// folded, and the register is dropped whole when the account changes. The preview
+	// harness reaches this by name, so a rename here has to be made there too.
+	private final java.util.Set<String> openFolds = new java.util.HashSet<>();
 
 	// Home's xp total, broken out per skill.
 	private static final String FOLD_HOME_XP = "home:xp";
@@ -2318,15 +2319,15 @@ class ChroniclePanel extends PluginPanel
 	/** True while the fold under this key stands open. */
 	private boolean foldOpen(String key)
 	{
-		return statsExpanded.contains(key);
+		return openFolds.contains(key);
 	}
 
 	/** Open a shut fold or shut an open one, and redraw. Every fold comes here. */
 	private void toggleFold(String key)
 	{
-		if (!statsExpanded.remove(key))
+		if (!openFolds.remove(key))
 		{
-			statsExpanded.add(key);
+			openFolds.add(key);
 		}
 		rebuild();
 	}

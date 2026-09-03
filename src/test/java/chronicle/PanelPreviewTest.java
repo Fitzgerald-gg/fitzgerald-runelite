@@ -1093,21 +1093,21 @@ public class PanelPreviewTest
 	}
 
 	@SuppressWarnings("unchecked")
-	private static java.util.Set<String> expandedSet(ChroniclePanel panel) throws Exception
+	private static java.util.Set<String> openFolds(ChroniclePanel panel) throws Exception
 	{
-		Field f = ChroniclePanel.class.getDeclaredField("statsExpanded");
+		Field f = ChroniclePanel.class.getDeclaredField("openFolds");
 		f.setAccessible(true);
 		return (java.util.Set<String>) f.get(panel);
 	}
 
 	private static void expandSection(ChroniclePanel panel, String key) throws Exception
 	{
-		expandedSet(panel).add(key);
+		openFolds(panel).add(key);
 	}
 
 	private static void collapseAll(ChroniclePanel panel) throws Exception
 	{
-		expandedSet(panel).clear();
+		openFolds(panel).clear();
 	}
 
 	@SuppressWarnings({"unchecked", "rawtypes"})

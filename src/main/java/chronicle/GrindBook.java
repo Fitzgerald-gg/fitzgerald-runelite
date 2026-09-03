@@ -105,6 +105,26 @@ class GrindBook
 		return sb.toString();
 	}
 
+	// The clog page a rate block reads its obtained set from. A block keyed to the
+	// container a roll is paid for, "Reward pool (Tempoross)", has no page under that
+	// name: the log files those items under the boss in the brackets. Only consulted
+	// when the key itself names no page, so no ordinary key changes hands.
+	private static Set<String> pageFor(String key, Map<String, Set<String>> pageItems)
+	{
+		Set<String> page = pageItems.get(norm(key));
+		if (page != null)
+		{
+			return page;
+		}
+		int open = key.indexOf('(');
+		int close = key.lastIndexOf(')');
+		if (open >= 0 && close > open + 1)
+		{
+			return pageItems.get(norm(key.substring(open + 1, close)));
+		}
+		return null;
+	}
+
 	// Reads the stored clog (kcs, clog_items, by_cat) plus the drop sources for a second
 	// kc signal. Called off the client thread; nothing in here may touch the client.
 	List<ChronicleApiClient.GrindRow> grinds(JsonObject clog,
@@ -151,7 +171,7 @@ class GrindBook
 			{
 				continue;
 			}
-			Set<String> page = pageItems.get(norm(boss.getKey()));
+			Set<String> page = pageFor(boss.getKey(), pageItems);
 			for (Map.Entry<String, Integer> item : boss.getValue().entrySet())
 			{
 				int rate = item.getValue() != null ? item.getValue() : 0;

@@ -433,7 +433,7 @@ public class PetPageFoldTest
 	@SuppressWarnings("unchecked")
 	private static java.util.Set<String> register(ChroniclePanel p) throws Exception
 	{
-		Field f = ChroniclePanel.class.getDeclaredField("statsExpanded");
+		Field f = ChroniclePanel.class.getDeclaredField("openFolds");
 		f.setAccessible(true);
 		return (java.util.Set<String>) f.get(p);
 	}

@@ -3,7 +3,8 @@
     "generated": "2026-06-18",
     "source": "oldschool.runescape.wiki",
     "schema": 1,
-    "note": "Per-kill/completion drop-rate denominators (1/N) for collection-log uniques, keyed by canonical _OSRS_BOSSES names. Point-based content (raids) uses standard per-completion rates and is approximate. Regenerate via the clean-clog-rates workflow — see tools/README.md."
+    "note": "Per-kill/completion drop-rate denominators (1/N) for collection-log uniques, keyed by canonical _OSRS_BOSSES names. Point-based content (raids) uses standard per-completion rates and is approximate. Regenerate via the clean-clog-rates workflow — see tools/README.md.",
+    "rollUnit": "A key is the thing one roll is paid for, which is not always a kill. Tempoross is the one block where those differ: every item under it is handed over by a search of the reward pool, and a subdue buys several searches, so the block is keyed \"Reward pool (Tempoross)\" and reads the ledger's own count of searches rather than the log's count of subdues. Casket (Tempoross) is a separate ledger source and is not a second roll unit for these items: the casket is one of the things a search hands over, and what it holds is its own table. Where a key names a container in brackets like this, the obtained set is read off the clog page named inside them. Regenerating this book must not put the block back under the boss."
   },
   "drops": {
     "Abyssal Sire": {
@@ -409,7 +410,7 @@
       "Voidwaker gem": 912,
       "Venenatis spiderling": 2800
     },
-    "Tempoross": {
+    "Reward pool (Tempoross)": {
       "Spirit flakes": 4,
       "Casket": 20,
       "Soaked page": 54,
