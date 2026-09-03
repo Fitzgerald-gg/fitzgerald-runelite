@@ -1485,19 +1485,42 @@ public class ChroniclePlugin extends Plugin
 		});
 	}
 
-	// There's nothing to export: the record is already a plain JSON file on the
-	// player's disk, so open the folder rather than write a second copy.
+	/**
+	 * Put the journal folder's path on the clipboard.
+	 *
+	 * <p>There is nothing to export: the record is already a plain JSON file on the
+	 * player's disk, so the path is all anyone needs. Hub review does not allow a
+	 * plugin to open it, so the player pastes it wherever they were going anyway.
+	 */
 	void actionOpenJournalFolder()
 	{
 		executor.submit(() ->
 		{
 			if (localName != null && localStore.isReadyFor(localName))
 			{
-				localStore.flush(localDir());   // flush so the folder shows it current
+				localStore.flush(localDir());   // flush so the folder is current when they look
 			}
 			File dir = localDir();
 			dir.mkdirs();
-			net.runelite.client.util.LinkBrowser.open(dir.getAbsolutePath());
+			copyToClipboard(dir.getAbsolutePath());
+			chat("Chronicle: journal folder path copied. " + dir.getAbsolutePath());
+		});
+	}
+
+	// EDT: the system clipboard is a Swing-side resource.
+	private static void copyToClipboard(String text)
+	{
+		javax.swing.SwingUtilities.invokeLater(() ->
+		{
+			try
+			{
+				java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
+					.setContents(new java.awt.datatransfer.StringSelection(text), null);
+			}
+			catch (RuntimeException e)   // headless, or a clipboard another app is holding
+			{
+				log.debug("clipboard copy failed", e);
+			}
 		});
 	}
 

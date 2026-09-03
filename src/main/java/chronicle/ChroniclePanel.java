@@ -3640,7 +3640,7 @@ class ChroniclePanel extends PluginPanel
 	private JPanel buildManage()
 	{
 		JPanel p = column();
-		JButton open = new JButton("Open journal folder");
+		JButton open = new JButton("Copy journal folder path");
 		open.addActionListener(ev -> plugin.actionOpenJournalFolder());
 		open.setAlignmentX(Component.LEFT_ALIGNMENT);
 		open.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
